@@ -2,15 +2,16 @@
   "name": "biomatcad-nexus",
   "private": true,
   "version": "0.0.0",
-  "description": "Monorepo raiz do BioMatCAD Nexus — nenhum pacote publicável ainda.",
-  "packageManager": "pnpm@9.0.0",
+  "description": "Monorepo raiz do BioMatCAD Nexus. Usa npm workspaces (não pnpm — ver nota abaixo).",
   "workspaces": [
     "apps/web",
     "packages/*"
   ],
   "scripts": {
-    "dev:web": "pnpm --filter ./apps/web dev",
-    "lint": "pnpm -r lint",
-    "test": "pnpm -r test"
+    "dev:web": "npm run dev --workspace apps/web",
+    "build:web": "npm run build --workspace apps/web",
+    "build:web:pages": "npm run build:pages --workspace apps/web",
+    "lint:web": "npm run lint --workspace apps/web",
+    "test:web": "npm run test --workspace apps/web"
   }
 }

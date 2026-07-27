@@ -1,0 +1,99 @@
+/* Design system inicial do BioMatCAD Nexus (Prompt Mestre §8).
+   Identidade original: azul-petróleo, verde biomédico, branco quente, grafite;
+   âmbar para alerta, vermelho acessível para erro. Modo claro e escuro via [data-theme]. */
+
+:root {
+  --color-petrol-900: #0b2b30;
+  --color-petrol-700: #124a52;
+  --color-petrol-500: #1b6b76;
+  --color-petrol-300: #5fa3ac;
+
+  --color-biomed-green-600: #2f7d5c;
+  --color-biomed-green-400: #55a37d;
+
+  --color-warm-white: #faf8f5;
+  --color-graphite-900: #1f2426;
+  --color-graphite-700: #3a4244;
+  --color-graphite-500: #5b6567;
+
+  --color-amber-500: #b8860b;
+  --color-error-600: #b3261e;
+
+  --font-family-base: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 16px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+}
+
+[data-theme="light"] {
+  --color-bg: var(--color-warm-white);
+  --color-surface: #ffffff;
+  --color-text-primary: var(--color-graphite-900);
+  --color-text-secondary: var(--color-graphite-500);
+  --color-border: #e2ded7;
+  --color-accent: var(--color-petrol-700);
+  --color-accent-strong: var(--color-petrol-900);
+  --color-success: var(--color-biomed-green-600);
+  --color-warning: var(--color-amber-500);
+  --color-error: var(--color-error-600);
+}
+
+[data-theme="dark"] {
+  --color-bg: #10181a;
+  --color-surface: #172426;
+  --color-text-primary: #eef2f2;
+  --color-text-secondary: #a9b6b8;
+  --color-border: #263335;
+  --color-accent: var(--color-petrol-300);
+  --color-accent-strong: #7fc0c9;
+  --color-success: var(--color-biomed-green-400);
+  --color-warning: #d6a545;
+  --color-error: #e2837c;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-family-base);
+  background-color: var(--color-bg);
+  color: var(--color-text-primary);
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+a {
+  color: var(--color-accent);
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
