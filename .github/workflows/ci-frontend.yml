@@ -1,8 +1,7 @@
 name: CI - Web
 
-# STATUS: escrito nesta sessão, não executado em CI real ainda (apps/web ainda não tem código
-# nem package.json próprio). `|| true` evita quebrar o pipeline enquanto não há nada para
-# testar — REMOVER assim que apps/web tiver lint/test reais, para o CI voltar a ser um gate real.
+# STATUS: executado e validado nesta sessão (localmente, com npm — não pnpm; ver
+# IMPLEMENTATION_STATUS.md). Sem `|| true`: o CI é um gate real a partir deste incremento.
 
 on:
   push:
@@ -23,20 +22,24 @@ permissions:
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: "pnpm"
+          cache: "npm"
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile || true
+        run: npm ci
       - name: Lint
-        run: pnpm lint || true
+        run: npm run lint
       - name: Type check
-        run: pnpm -r exec tsc --noEmit || true
+        run: npm run typecheck
       - name: Tests
-        run: pnpm test || true
+        run: npx vitest run
+      - name: Build (produção)
+        run: npm run build
+      - name: Build (GitHub Pages demo)
+        run: npm run build:pages
