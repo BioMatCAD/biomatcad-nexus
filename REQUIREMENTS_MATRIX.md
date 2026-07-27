@@ -52,36 +52,51 @@ respaldo científico/acadêmico nos dois documentos auditados.
 
 | ID | Requisito (resumo) | Fonte | Status |
 |---|---|---|---|
-| PM-ONLY-01 | Prontuário eletrônico, FHIR, agenda clínica, portal do paciente | Prompt Mestre §10 | Backlog — Fase 6 |
-| PM-ONLY-02 | Telemedicina/WebRTC, videoconferência segura | Prompt Mestre §11 | Backlog — Fase 6 |
-| PM-ONLY-03 | LIMS, ELN, biobanco, terapia celular, chain of custody/identity | Prompt Mestre §12 | Backlog — Fase 5 |
-| PM-ONLY-04 | Identidade (Keycloak/OIDC), RBAC/ABAC com 17 perfis institucionais | Prompt Mestre §9 | Backlog — Fase 1 (fundação de auth) |
-| PM-ONLY-05 | Matriz regulatória (Anvisa SaMD, ISO 13485/14971, IEC 62304/62366-1) | Prompt Mestre §24 | Backlog — Fase 7 |
+| PM-ONLY-01 | Prontuário eletrônico, FHIR, agenda clínica, portal do paciente | Prompt Mestre §10 (não consta na tese/apresentação) | `CONFIRMED-PRODUCT-SCOPE` — Backlog de implementação, Fase 6 |
+| PM-ONLY-02 | Telemedicina/WebRTC, videoconferência segura | Prompt Mestre §11 (não consta na tese/apresentação) | `CONFIRMED-PRODUCT-SCOPE` — Backlog de implementação, Fase 6 |
+| PM-ONLY-03 | LIMS, ELN, biobanco, terapia celular, chain of custody/identity | Prompt Mestre §12 (não consta na tese/apresentação) | `CONFIRMED-PRODUCT-SCOPE` — Backlog de implementação, Fase 5 |
+| PM-ONLY-04 | Identidade (Keycloak/OIDC), RBAC/ABAC com 17 perfis institucionais | Prompt Mestre §9 (não consta na tese/apresentação) | `CONFIRMED-PRODUCT-SCOPE` — fundação iniciada no Incremento 1 (contrato de estado operacional; RBAC completo ainda backlog) |
+| PM-ONLY-05 | Matriz regulatória (Anvisa SaMD, ISO 13485/14971, IEC 62304/62366-1) | Prompt Mestre §24 (não consta na tese/apresentação) | `CONFIRMED-PRODUCT-SCOPE` — Backlog de implementação, Fase 7 |
 
-## Decisão de escopo (registrada em 2026-07-27)
+**Nota de rastreabilidade (ADR-0003):** `CONFIRMED-PRODUCT-SCOPE` significa que o requisito é
+válido para o produto BioMatCAD Nexus por decisão explícita do usuário em 2026-07-27. Não
+significa que a tese ou a apresentação descrevem, validam ou aprovam esse requisito — a coluna
+Fonte continua apontando exclusivamente para o Prompt Mestre, por honestidade de proveniência
+(Prompt Mestre §3.1: não atribuir aos documentos científicos afirmações que eles não
+apresentam).
 
-`SCOPE-CONFLICT-01` foi resolvido explicitamente pelo usuário: **seguir o escopo completo do
-Prompt Mestre**, incluindo os módulos `PM-ONLY-*` sem base na tese/apresentação. Consequências
-registradas para rastreabilidade:
+## Decisão de escopo (registrada em 2026-07-27, refinada por ADR-0003)
 
-- O sistema resultante será significativamente mais amplo do que o projeto de doutorado
-  descrito nos documentos-fonte (que se autodescreve como "sem dependência de laboratórios").
-- Toda menção pública/institucional ao sistema deve distinguir claramente o núcleo validado
-  pela tese (`AP-*`, `TP-*`) do envelope adicional (`PM-ONLY-*`), para não sugerir que o
-  comitê de orientação da tese aprovou ou está ciente do escopo clínico/laboratorial.
+O Prompt Mestre é a especificação autoritativa do produto BioMatCAD Nexus. A tese e a
+apresentação são fontes científicas e históricas do núcleo computacional, mas não definem nem
+limitam o escopo total da plataforma. Os módulos `PM-ONLY-*` estão `CONFIRMED-PRODUCT-SCOPE`.
+Consequências registradas para rastreabilidade:
+
+- A frase da Tese §8.1 ("abordagem computacional, sem dependência de laboratórios") descreve a
+  viabilidade do trabalho acadêmico de doutorado especificamente, não uma proibição de expansão
+  futura da plataforma — ver ADR-0003. Não é mais tratada como conflito de escopo, e sim como
+  fontes complementares com finalidades diferentes (validação científica vs. especificação de
+  produto).
+- Toda menção pública/institucional ao sistema deve continuar distinguindo o núcleo com base
+  científica (`AP-*`, `TP-*`) do envelope confirmado apenas pelo Prompt Mestre (`PM-ONLY-*`),
+  para não sugerir que o comitê de orientação da tese avaliou cientificamente o escopo
+  clínico/laboratorial — essa distinção é sobre proveniência da evidência, não sobre validade
+  do requisito de produto.
 - Módulos `PM-ONLY-*` herdam os princípios inegociáveis do Prompt Mestre (Seção 3): quatro
   estados operacionais (Pesquisa/Laboratório/Piloto clínico/Produção clínica), uso clínico
   bloqueado por padrão, nenhuma alegação de conformidade regulatória sem validação externa.
-- Ver ADR-0001 em `docs/adr/0001-escopo-completo-prompt-mestre.md`.
+- Ver ADR-0001 (`docs/adr/0001-escopo-completo-prompt-mestre.md`) e ADR-0003
+  (`docs/adr/0003-interpretacao-escopo-vs-tese.md`).
 
 ## Resumo de bloqueios remanescentes antes da Fase 1
 
-1. **`ARCH-DIVERGE-01`:** decidir, por ADR, entre preservar o app PyQt5 existente como cliente
-   científico ou migrar para o stack React/FastAPI descrito na Tese §2. Resolvido preliminarmente
-   em ADR-0002 (preservar PyQt5 + adicionar API/web por cima, conforme Prompt Mestre §6.1) —
-   pendente de validação do usuário ao revisar o código PyQt5 real (não disponível nesta sessão).
+1. **`ARCH-DIVERGE-01`:** resolvido definitivamente pelo ADR-0002 (atualizado 2026-07-27):
+   React + TypeScript + Vite (frontend) e FastAPI + PostgreSQL + Redis + MinIO (backend) são a
+   arquitetura oficial, sem caráter provisório. O app PyQt5 existente é tratado como legado/
+   referência histórica — poderá ser auditado e aproveitado se o código for disponibilizado, mas
+   não bloqueia mais o desenvolvimento da arquitetura web.
 2. Nenhum repositório de código foi localizado nesta sessão (nem nos uploads, nem no projeto de
-   conhecimento "documentação doutorado") — a Fase 1 (fundação) começa do zero, conforme Seção 4
-   do Prompt Mestre. Se você já tem um repositório BioMatCAD local não sincronizado com esta
-   sessão, ele precisa ser conectado/enviado para ser auditado e preservado antes que qualquer
-   scaffold novo seja mesclado a ele.
+   conhecimento "documentação doutorado"); o usuário confirmou explicitamente prosseguir do zero.
+   A Fase 1 (fundação) foi iniciada sobre o scaffold v1, com o Incremento 1 (landing, login,
+   dashboard, API de health/status, modelos iniciais) implementado nesta sessão — ver
+   `IMPLEMENTATION_STATUS.md` para o que está realmente funcional, demonstrativo ou planejado.

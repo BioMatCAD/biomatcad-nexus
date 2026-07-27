@@ -1,44 +1,63 @@
-# ADR-0002: Stack tecnológica da fundação (Fase 1)
+# ADR-0002: Stack tecnológica principal do BioMatCAD Nexus
 
-- Status: Aceita (provisória — sujeita a revisão quando o app PyQt5 existente for auditado)
-- Data: 2026-07-27
-- Decisor: Adler Lima Botelho de Azevedo (usuário), com recomendação técnica desta sessão
+- Status: **Aceita — oficial** (atualizado em 2026-07-27; substitui o caráter provisório da
+  versão anterior deste ADR)
+- Data original: 2026-07-27
+- Decisor: Adler Lima Botelho de Azevedo (usuário)
 
 ## Contexto
 
-O usuário confirmou que nenhum repositório de código existente será conectado a esta sessão
-("comece do zero"). Isso significa que a recomendação do Prompt Mestre §6.1 de auditar um app
-PyQt5 pré-existente antes de decidir entre mantê-lo, migrá-lo ou empacotá-lo **não pôde ser
-executada nesta sessão** — não porque a decisão foi tomada, mas porque não havia código
-disponível para auditar. O `memory.md` do usuário registra a existência de um app PyQt5 real de
-8 módulos, mas seu código-fonte não foi fornecido.
+A versão original deste ADR (mesma data) era provisória: o app PyQt5 mencionado no `memory.md`
+do usuário não havia sido fornecido para auditoria, então a escolha de stack ficou condicionada
+a uma revisão futura. O usuário confirmou explicitamente, em mensagem posterior, que:
 
-A Tese (§2) propõe explicitamente "arquitetura modular cliente-servidor, com backend em Python
-e frontend web-based em React.js" — essa é a única arquitetura-alvo com respaldo documental.
+1. React + FastAPI + PostgreSQL + Redis + MinIO deve ser adotado **oficialmente** como
+   arquitetura principal, sem caráter provisório.
+2. O app PyQt5/SQLite é uma implementação anterior ou referência histórica, não um bloqueador
+   da arquitetura web.
+3. O PyQt5 poderá ser auditado e aproveitado posteriormente, se e quando o código for
+   disponibilizado, mas seu desenvolvimento não deve esperar por isso.
 
 ## Decisão
 
-1. A fundação da Fase 1 usa a arquitetura descrita na Tese §2 e detalhada no Prompt Mestre §6:
-   monorepo com `apps/web` (React + TypeScript + Vite), `apps/api` (FastAPI + Pydantic +
-   SQLAlchemy/Alembic), `apps/geometry-worker` (C#/.NET + PicoGK/ShapeKernel),
-   `apps/compute-worker` (Python científico), PostgreSQL como banco principal.
-2. **Este ADR não decide** se o app PyQt5 existente será descontinuado. Ele permanece fora do
-   monorepo por enquanto. Quando o usuário fornecer o código real, uma nova ADR (0003) deve
-   registrar a decisão informada por auditoria real, conforme Prompt Mestre §6.1: mantê-lo como
-   cliente desktop especializado, migrar funções gradualmente, reutilizar o núcleo Python no
-   backend, ou empacotar o frontend web via Tauri/Electron.
-3. SQLite é permitido apenas em modo demonstração/desenvolvimento unitário, nunca como banco
-   principal (Prompt Mestre §6.2), mesmo que o app PyQt5 atual use SQLite hoje segundo a
-   apresentação (slide 3, `AP-06`).
+1. **Arquitetura oficial adotada** para o BioMatCAD Nexus:
+   - Frontend: React + TypeScript + Vite, roteamento client-side, cliente de API tipado a
+     partir dos contratos OpenAPI.
+   - Backend: FastAPI (Python), configuração tipada por ambiente, OpenAPI versionado.
+   - Banco principal: PostgreSQL. SQLite continua permitido **somente** em modo demonstração
+     ou teste unitário local (Prompt Mestre §6.2), nunca como banco de produção.
+   - Cache/locks/fila: Redis.
+   - Object storage S3-compatível: MinIO (local) / equivalente gerenciado (nuvem/híbrido).
+   - Comunicação inicial via REST com contratos OpenAPI versionados (`packages/contracts`).
+   - Workers científicos (`apps/compute-worker`, Python) e worker geométrico C#/.NET com
+     PicoGK/ShapeKernel (`apps/geometry-worker`) mantidos como serviços separados do backend
+     principal, conforme Prompt Mestre §6.3–6.4.
+   - Implantação em três modos, conforme Prompt Mestre §7: local monousuário, rede local
+     multiusuário (Docker Compose), e frontend estático demonstrativo no GitHub Pages
+     (dados exclusivamente sintéticos, sem backend real — Prompt Mestre §3.3/§7.1).
+
+2. **PyQt5 (app existente, não auditado nesta sessão):** classificado como **legado/referência
+   histórica e módulo desktop auxiliar em potencial** — não como arquitetura principal e não
+   como bloqueador de progresso. Quando o código for disponibilizado, uma ADR futura registrará,
+   com base em auditoria real (não em suposição), qual das opções do Prompt Mestre §6.1 se
+   aplica: mantê-lo como cliente desktop especializado, migrar funções gradualmente para o
+   frontend web, reutilizar seu núcleo Python no backend FastAPI, ou empacotá-lo via
+   Tauri/Electron. Até lá, `apps/desktop/README.md` continua registrando essa pendência.
 
 ## Consequências
 
-- Risco de retrabalho: se o app PyQt5 contiver lógica científica validada (ex.: geração TPMS,
-  cálculo de porosidade, banco de 32+ materiais com 43+ DOIs), ela será reimplementada do zero
-  na Fase 2 até que o código real seja auditado e migrado/reutilizado.
-- O scaffold desta sessão cria apenas estrutura e configuração, sem lógica de negócio, para
-  minimizar esse retrabalho.
+- O Incremento 1 da Fase 1 (fundação executável: landing, login, dashboard, API de
+  health/status, modelos de Organização/Usuário/EstadoOperacional/AuditEvent) é implementado
+  integralmente sobre esta stack, sem esperar por decisão sobre o PyQt5.
+- Risco de retrabalho científico permanece registrado (mesma ressalva da versão anterior deste
+  ADR): se o PyQt5 contiver lógica já validada (TPMS, porosidade, banco de 32+ materiais), ela
+  ainda pode ser reimplementada nas Fases 2+ até auditoria real do código.
+- Este ADR não immplica qualquer alegação de que a stack foi validada em produção — apenas que é
+  a arquitetura-alvo oficial para todo desenvolvimento a partir de agora.
 
-## Próxima revisão
+## Registro de mudança
 
-Assim que o repositório/pasta com o app PyQt5 for conectado, reabrir esta decisão como ADR-0003.
+| Data | Mudança |
+|---|---|
+| 2026-07-27 | Criação como decisão provisória, condicionada a auditoria futura do PyQt5. |
+| 2026-07-27 | Atualizado para status oficial/definitivo, por decisão explícita do usuário, sem alterar a arquitetura escolhida — apenas remove a condicionalidade. |
