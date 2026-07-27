@@ -1,0 +1,87 @@
+# Matriz de Requisitos — BioMatCAD Nexus (Fase 0)
+
+Requisitos extraídos integralmente dos dois documentos-fonte auditados (ver
+`docs/SOURCE_DOCUMENTS.md` para hashes, páginas e proveniência completa). Colunas conforme
+Seção 4.2 do Prompt Mestre: requisito, fonte/página, interpretação, prioridade, risco,
+critério de aceite, status.
+
+Convenção de prioridade: **P0** crítico ao MVP vertical (Seção 28 do Prompt Mestre), **P1**
+necessário à visão da tese, **P2** desejável/evolução. Status inicial de todos os itens:
+**Backlog** — nada foi implementado ou verificado nesta sessão.
+
+## A. Requisitos com base direta na Apresentação (`AP-`)
+
+| ID | Requisito | Fonte/página | Interpretação | Prioridade | Risco | Critério de aceite | Status |
+|---|---|---|---|---|---|---|---|
+| AP-01 | Plataforma deve reduzir ciclo de design de biomaterial de meses para horas | Slide 1 | Meta de desempenho de processo, não requisito de UI | P1 | Alegação de "~95%" carece de medição própria; não reproduzir como fato sem benchmark interno | Medir tempo real de um ciclo completo na plataforma e comparar com literatura citada, com metodologia documentada | Backlog |
+| AP-02 | Integrar CAD 3D, FEM, banco de materiais e IA local em plataforma única | Slide 2 | Requisito arquitetural central | P0 | Acoplamento excessivo entre módulos se não houver contratos claros | Os 4 módulos citados existem como componentes integráveis com interface definida (API ou biblioteca) | Backlog |
+| AP-03 | ML local via Ollama (porta 11434) e LM Studio (porta 1234), sem API externa | Slide 2, 3 | Requisito de privacidade/soberania de dados | P0 | Portas fixas hardcoded são frágeis; devem ser configuráveis | Inferência funcional local, sem chamadas de rede externas, com portas configuráveis | Backlog |
+| AP-04 | Otimização multiobjetivo com frente de Pareto para β-TCP (resistência × porosidade × bioatividade) | Slide 2, 4 | Caso de uso concreto de otimização | P0 | Modelo de bioatividade prevista pode não ter dado suficiente | NSGA-II executa e produz frente de Pareto navegável para os 3 objetivos citados | Backlog |
+| AP-05 | Validação por comparação com literatura e ensaios mecânicos (DLP, robocasting) | Slide 2 | Requisito de validação científica | P1 | Ensaios experimentais fora do escopo apenas-computacional descrito na Tese §8.1 | Existir protocolo formal de comparação numérica × literatura, com registro de erro/incerteza | Backlog |
+| AP-06 | Stack declarada do estado atual: Python, PyQt5, SQLite, PicoGK C#, Ollama/LM Studio, GGUF, Marching Cubes, PyInstaller | Slide 3 | Descreve o app **já existente**, não uma proposta nova | P0 | Divergente da arquitetura React/API REST da Tese §2 — ver `ARCH-DIVERGE-01` | ADR decide se PyQt5 é preservado como cliente científico (Prompt Mestre §6.1) | Backlog |
+| AP-07 | Banco de materiais: 32+ materiais, 43+ referências DOI (β-TCP, HAp, BCP, vidros 45S5/13-93, Ti-6Al-4V, CoCr, PLA/PCL/PLGA) | Slide 3 | Estado atual do banco, ponto de partida real (não os "200+" da meta da Tese) | P0 | Confundir estado atual (32+) com meta futura (200+, Tese §7.1) | Banco importável/auditável com todas as 43+ referências DOI verificáveis | Backlog |
+| AP-08 | Arquiteturas TPMS: Gyroid, Schwarz-P, IWP; modelo Gibson-Ashby (E*/Es=C·ρ̄ⁿ, n=2); Weibull m≈4,39 (DLP) | Slide 3, 4 | Requisitos de geometria e modelo mecânico | P0 | Constantes (n, m) são específicas de condição de ensaio — não universalizar (Seção 5 do Prompt Mestre) | Geração paramétrica dos 3 TPMS com registro de proveniência de cada constante usada | Backlog |
+| AP-09 | Módulo DICOM "equivalente a InVesalius (32 func.)"; CrystalDB Downloader (COD ~450k + PDB ~200k, catálogo SQLite) | Slide 4 | Componentes já existentes segundo o autor | P1 | "Equivalente a InVesalius" é comparação informal, não certificação de paridade funcional — não repetir como alegação de equivalência formal | Inventariar as 32 funções DICOM reais e testar o CrystalDB Downloader contra as duas bases | Backlog |
+
+## B. Requisitos com base direta na Proposta de Tese (`TP-`)
+
+| ID | Requisito | Fonte/página | Interpretação | Prioridade | Risco | Critério de aceite | Status |
+|---|---|---|---|---|---|---|---|
+| TP-01 | Arquitetura cliente-servidor: backend Python, frontend web React.js, 6 módulos via API REST | §2, p.2 | Arquitetura-alvo proposta (não implementada) | P0 | Contradiz stack desktop da Apresentação — decisão arquitetural pendente | ADR registrada e aprovada antes de qualquer código de frontend | Backlog |
+| TP-02 | 6 módulos: CAD 3D Engine, FEM Simulator, Materials Database, ML Predictor, Multi-Objective Optimizer, Visualization UI | §2, p.2 | Escopo funcional nuclear do doutorado | P0 | Sobreposição com módulos já existentes no app PyQt5 — mapear antes de recriar | Cada módulo tem contrato de API/dados definido e pelo menos um fluxo E2E funcional | Backlog |
+| TP-03 | Fluxo iterativo de 4–8h por ciclo: requisitos → design paramétrico → simulação → validação/exportação | §3.1, p.3 | Pipeline operacional do BioMat Constructor (Seção 15 do Prompt Mestre) | P0 | Tempo de 4–8h é meta, não medido | Pipeline executa fim-a-fim ao menos uma vez com tempo registrado | Backlog |
+| TP-04 | 7 fases de execução ao longo de 48 meses (revisão → CAD/BD → FEM → ML → otimização → integração/validação → documentação) | §3.2, p.3 | Cronograma acadêmico do doutorado, não sprint de engenharia de software | P1 | Confundir prazo acadêmico (anos) com prazo de entrega de software (Prompt Mestre pede incrementos revisáveis) | Roadmap de engenharia mapeado às 7 fases acadêmicas, com marcos de software próprios | Backlog |
+| TP-05 | Otimização multiobjetivo com NSGA-II; objetivos: resistência mecânica, porosidade, biocompatibilidade, custo estimado | §5, p.5–6 | Requisito técnico de otimização | P0 | "Custo estimado de produção" carece de modelo de custo definido | NSGA-II implementado com os 4 objetivos e frente de Pareto exportável | Backlog |
+| TP-06 | ML de predição biológica: dataset >500 amostras da literatura; RF/SVM/redes neurais; k-fold k=5; métricas R²/MAE/RMSE; export pickle/ONNX | §6, p.6–7 | Pipeline científico de ML (Seção 18.1 do Prompt Mestre) | P0 | Dataset ainda não compilado; vazamento de dados entre splits é risco conhecido | Dataset versionado + split sem vazamento + métricas reportadas com IC | Backlog |
+| TP-07 | Banco de dados estruturado com >200 materiais caracterizados (meta) | §7.1, p.7 | Meta de produto ao final do doutorado, não estado atual | P2 | Ver AP-07 — não confundir com os 32+ atuais | Contagem de materiais no banco com proveniência completa por item | Backlog |
+| TP-08 | Modelos de ML "validados (acurácia > 85%)" | §7.1, p.7 | Meta de aceite do projeto de tese | P1 | Prompt Mestre §18.1 explicitamente proíbe fixar acurácia isolada como único critério — usar métricas por tipo de problema | Critério de aceite reescrito para conjunto de métricas (sensibilidade/especificidade/AUROC/calibração ou R²/MAE/RMSE conforme o caso), não só acurácia | Backlog |
+| TP-09 | Repositório GitHub open-source com documentação; manual técnico e tutoriais | §7.1, p.7 | Requisito de entrega/documentação | P1 | — | Repositório público com README, manual e licença definidos | Backlog |
+| TP-10 | Registro de software no INPI | §7.2, p.7 | Requisito de propriedade intelectual, fora do escopo técnico direto | P2 | Depende de decisão institucional/jurídica, não de código | Acompanhar como item administrativo separado do backlog de engenharia | Backlog |
+| TP-11 | ≥3 artigos Qualis A1-B1; apresentações em congressos (CBBTEC, SBF, MRS, TMS) | §7.2, p.7 | Produto acadêmico, não requisito de software | P2 | — | Fora do escopo de engenharia; apenas rastrear como marco acadêmico | N/A (acadêmico) |
+| TP-12 | Viabilidade técnica justificada por "abordagem computacional, sem dependência de laboratórios" | §8.1, p.8 | **Delimitação explícita de escopo pelo próprio candidato/orientação**: o projeto de tese não inclui laboratório físico | P0 (como restrição) | Alto — Prompt Mestre §12 (LIMS/ELN/terapia celular) contradiz esta delimitação; ver `SCOPE-CONFLICT-01` | Decisão explícita do usuário sobre incluir ou não o escopo de laboratório/clínica antes de gerar requisitos dessas seções | **Resolvido em 2026-07-27: usuário optou por seguir o escopo completo do Prompt Mestre (ver Decisão de Escopo abaixo)** |
+| TP-13 | Ineditismo: ausência de plataforma similar integrando CAD+FEM+ML+Otimização para biomateriais ortopédicos, com interface para não-programadores | §8.3, p.8 | Requisito de UX (usuário não-programador) e de posicionamento | P1 | Alegação de ineditismo não foi verificada nesta sessão (não há busca de literatura concorrente registrada) | Revisão de literatura/mercado documentada antes de reafirmar ineditismo publicamente | Backlog |
+| TP-14 | 40 referências bibliográficas com DOI/periódico/ano, cobrindo biomateriais, FEM, materials informatics, otimização evolutiva | §9, p.9–11 | Base de evidências científicas iniciais para `EvidenceSet` (Seção 15.1 do Prompt Mestre) | P0 | — | As 40 referências carregadas no banco de evidências com metadado completo (autor, ano, periódico, DOI quando disponível) | Backlog |
+
+## C. Requisitos do Prompt Mestre sem base nos documentos-fonte (`PM-ONLY-`)
+
+Estes itens vêm exclusivamente do Prompt Mestre (Seções 9–12: identidade/clínica, plataforma
+clínica digital, telemedicina, LIMS/ELN/terapia celular). **Nenhum aparece na tese ou na
+apresentação.** Continuam marcados com `Fonte: Prompt Mestre (sem base documental)` — a
+decisão de escopo abaixo confirma que devem entrar no backlog, não que passaram a ter
+respaldo científico/acadêmico nos dois documentos auditados.
+
+| ID | Requisito (resumo) | Fonte | Status |
+|---|---|---|---|
+| PM-ONLY-01 | Prontuário eletrônico, FHIR, agenda clínica, portal do paciente | Prompt Mestre §10 | Backlog — Fase 6 |
+| PM-ONLY-02 | Telemedicina/WebRTC, videoconferência segura | Prompt Mestre §11 | Backlog — Fase 6 |
+| PM-ONLY-03 | LIMS, ELN, biobanco, terapia celular, chain of custody/identity | Prompt Mestre §12 | Backlog — Fase 5 |
+| PM-ONLY-04 | Identidade (Keycloak/OIDC), RBAC/ABAC com 17 perfis institucionais | Prompt Mestre §9 | Backlog — Fase 1 (fundação de auth) |
+| PM-ONLY-05 | Matriz regulatória (Anvisa SaMD, ISO 13485/14971, IEC 62304/62366-1) | Prompt Mestre §24 | Backlog — Fase 7 |
+
+## Decisão de escopo (registrada em 2026-07-27)
+
+`SCOPE-CONFLICT-01` foi resolvido explicitamente pelo usuário: **seguir o escopo completo do
+Prompt Mestre**, incluindo os módulos `PM-ONLY-*` sem base na tese/apresentação. Consequências
+registradas para rastreabilidade:
+
+- O sistema resultante será significativamente mais amplo do que o projeto de doutorado
+  descrito nos documentos-fonte (que se autodescreve como "sem dependência de laboratórios").
+- Toda menção pública/institucional ao sistema deve distinguir claramente o núcleo validado
+  pela tese (`AP-*`, `TP-*`) do envelope adicional (`PM-ONLY-*`), para não sugerir que o
+  comitê de orientação da tese aprovou ou está ciente do escopo clínico/laboratorial.
+- Módulos `PM-ONLY-*` herdam os princípios inegociáveis do Prompt Mestre (Seção 3): quatro
+  estados operacionais (Pesquisa/Laboratório/Piloto clínico/Produção clínica), uso clínico
+  bloqueado por padrão, nenhuma alegação de conformidade regulatória sem validação externa.
+- Ver ADR-0001 em `docs/adr/0001-escopo-completo-prompt-mestre.md`.
+
+## Resumo de bloqueios remanescentes antes da Fase 1
+
+1. **`ARCH-DIVERGE-01`:** decidir, por ADR, entre preservar o app PyQt5 existente como cliente
+   científico ou migrar para o stack React/FastAPI descrito na Tese §2. Resolvido preliminarmente
+   em ADR-0002 (preservar PyQt5 + adicionar API/web por cima, conforme Prompt Mestre §6.1) —
+   pendente de validação do usuário ao revisar o código PyQt5 real (não disponível nesta sessão).
+2. Nenhum repositório de código foi localizado nesta sessão (nem nos uploads, nem no projeto de
+   conhecimento "documentação doutorado") — a Fase 1 (fundação) começa do zero, conforme Seção 4
+   do Prompt Mestre. Se você já tem um repositório BioMatCAD local não sincronizado com esta
+   sessão, ele precisa ser conectado/enviado para ser auditado e preservado antes que qualquer
+   scaffold novo seja mesclado a ele.

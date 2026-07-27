@@ -1,0 +1,51 @@
+# docker-compose.yml — ambiente de DESENVOLVIMENTO local.
+#
+# STATUS: escrito nesta sessão, NÃO EXECUTADO E NÃO TESTADO ainda (Seção 3.1 do Prompt Mestre:
+# não afirmar completude sem execução real). Sobe apenas a infraestrutura de dados
+# (Postgres/Redis/MinIO); apps/api, apps/web e os workers ainda não têm Dockerfile — rode-os
+# localmente (fora de container) até que isso seja implementado e verificado.
+#
+# Não expor estas portas à internet (Seção 6.5).
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-biomatcad}
+      POSTGRES_USER: ${POSTGRES_USER:-biomatcad}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - biomatcad_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-biomatcad}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  object-storage:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${OBJECT_STORAGE_ACCESS_KEY:-changeme}
+      MINIO_ROOT_PASSWORD: ${OBJECT_STORAGE_SECRET_KEY:-changeme}
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - biomatcad_minio_data:/data
+
+volumes:
+  biomatcad_postgres_data:
+  biomatcad_minio_data:
