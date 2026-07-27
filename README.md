@@ -4,21 +4,28 @@ Plataforma integrada de engenharia computacional de biomateriais, laboratório, 
 e saúde digital — projeto derivado do doutorado de Adler Lima Botelho de Azevedo
 (PPGBiotec/UFBA) e do `Prompt_Mestre_BioMatCAD_Nexus.md`.
 
-## Status real deste repositório (2026-07-27)
+## Status real deste repositório (2026-07-27 — Incremento 1 da Fase 1)
 
-**Nada além de estrutura, documentação e configuração foi implementado nesta sessão.** Não há
-backend funcional, frontend funcional, worker geométrico, banco de dados populado ou testes
-passando. Qualquer afirmação de "completo" para qualquer módulo abaixo é falsa até que exista
-código executado, testado e com evidência registrada — ver Seção 3.1 do Prompt Mestre.
+Backend (`apps/api`) e frontend (`apps/web`) têm uma fundação **real e executável**: login,
+dashboard autenticado, health/status da API, modelos de dados com migração aplicada contra
+PostgreSQL de verdade, 10 testes de backend e 6 de frontend passando. Nenhum módulo científico
+(CAD/FEM/materiais/ML) ou clínico/laboratorial foi implementado ainda. Ver `IMPLEMENTATION_STATUS.md`
+para o inventário completo (real vs. demonstrativo vs. planejado) com os comandos e evidências
+de execução desta sessão — Seção 3.1 do Prompt Mestre: nada é chamado de "completo" sem ter
+sido executado e testado.
 
 O que existe de fato agora:
 
-- Auditoria da Fase 0 concluída: `docs/SOURCE_DOCUMENTS.md`, `REQUIREMENTS_MATRIX.md`.
-- Duas ADRs registrando decisões de escopo e stack: `docs/adr/0001-*.md`, `docs/adr/0002-*.md`.
-- Estrutura de diretórios do monorepo (Seção 6 do Prompt Mestre), cada um com README explicando
-  propósito e status "não implementado".
-- Este README, `.editorconfig`, `.gitignore`, `.env.example`, `docker-compose.yml` (dev) e
-  workflows de CI mínimos — todos ainda não testados em execução real.
+- Auditoria da Fase 0: `docs/SOURCE_DOCUMENTS.md`, `REQUIREMENTS_MATRIX.md`.
+- ADRs de escopo e arquitetura: `docs/adr/0001-*.md` a `0003-*.md`.
+- `apps/api`: FastAPI real, PostgreSQL via SQLAlchemy/Alembic, auth JWT mínima, contrato de
+  chave mestra para estados operacionais, seed sintético — 10 testes pytest passando.
+- `apps/web`: React/TypeScript/Vite real — landing, login, dashboard autenticado, tema
+  claro/escuro, modo demonstração para GitHub Pages — 6 testes Vitest passando, build normal e
+  build de demo executados com sucesso.
+- `ARCHITECTURE.md` e `IMPLEMENTATION_STATUS.md` — detalhamento técnico e evidências.
+- Estrutura de diretórios do monorepo para os módulos ainda não implementados (Seção 6 do
+  Prompt Mestre), cada um com README explicando propósito e status.
 
 ## Por que o escopo é mais amplo que a tese de doutorado
 
@@ -45,8 +52,40 @@ aprovação institucional, ética, jurídica, de segurança e regulatória forma
 
 ## Como executar hoje
 
-Não há nada executável ainda. Este README será atualizado a cada incremento real (Seção 30 do
-Prompt Mestre: nenhum ciclo termina sem lint, type check, testes e execução prática do fluxo).
+### Backend (`apps/api`)
+
+Requer PostgreSQL real acessível via `DATABASE_URL` (o `docker-compose.yml` deveria fornecer
+isso, mas não foi validado em execução nesta sessão — ver `IMPLEMENTATION_STATUS.md`).
+
+```bash
+cd apps/api
+pip install -e ".[dev]"
+cp ../../.env.example .env   # ajuste DATABASE_URL, API_SECRET_KEY etc.
+alembic upgrade head
+python -m biomatcad_api.seed        # cria organização/usuário sintéticos
+uvicorn biomatcad_api.main:app --reload
+# docs interativas: http://localhost:8000/api/v1/docs
+```
+
+Login de desenvolvimento (seed sintético): `demo@biomatcad.example` /
+`demo-synthetic-password-123`.
+
+Rodar os testes (requer `TEST_DATABASE_URL` e `PG_ADMIN_URL` apontando para um Postgres real):
+
+```bash
+pytest -v
+```
+
+### Frontend (`apps/web`)
+
+```bash
+cd apps/web
+npm install
+npm run dev          # http://localhost:5173, espera apps/api em localhost:8000
+npm run test         # Vitest
+npm run build         # build de produção
+npm run build:pages   # build estático para GitHub Pages (dados sintéticos apenas)
+```
 
 ## Documentos de referência
 
@@ -54,3 +93,5 @@ Prompt Mestre: nenhum ciclo termina sem lint, type check, testes e execução pr
 - `docs/SOURCE_DOCUMENTS.md` — inventário e proveniência dos documentos-fonte científicos.
 - `REQUIREMENTS_MATRIX.md` — matriz de requisitos rastreável.
 - `docs/adr/` — decisões de arquitetura registradas.
+- `ARCHITECTURE.md` — arquitetura detalhada e o que dela está implementado.
+- `IMPLEMENTATION_STATUS.md` — inventário real vs. demonstrativo vs. planejado, com evidências.
