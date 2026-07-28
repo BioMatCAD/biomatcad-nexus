@@ -7,6 +7,17 @@ from functools import lru_cache
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Classificação explícita do modo de autenticação atual (Incremento 1.1, Prompt Mestre §9).
+# DEV_AUTH = e-mail/senha + JWT stateless, adequado a desenvolvimento/demonstração sintética.
+# NÃO equivale a OIDC/OAuth 2.1 + PKCE + MFA + WebAuthn + step-up auth, que permanecem
+# requisitos pendentes rastreados em REQUIREMENTS_MATRIX.md (PM-ONLY-04).
+AUTH_MODE = "DEV_AUTH"
+
+# Valor padrão inseguro, aceitável apenas em ENVIRONMENT=test (ver validate_api_secret_key
+# abaixo). Fora de testes, este valor (ou qualquer segredo curto) faz o app recusar iniciar.
+_INSECURE_DEFAULT_SECRET = "dev-only-insecure-key-change-me"
+_MIN_SECRET_LENGTH = 32
+
 
 class Environment(str, Enum):
     DEVELOPMENT = "development"
@@ -14,6 +25,10 @@ class Environment(str, Enum):
     STAGING = "staging"
     PRODUCTION = "production"
     TEST = "test"
+
+
+class InsecureConfigurationError(RuntimeError):
+    """Levantado no startup quando a configuração é insegura para o ambiente declarado."""
 
 
 class Settings(BaseSettings):
@@ -25,7 +40,7 @@ class Settings(BaseSettings):
 
     api_host: str = "0.0.0.0"
     api_port: int = 8000
-    api_secret_key: str = Field(default="dev-only-insecure-key-change-me")
+    api_secret_key: str = Field(default=_INSECURE_DEFAULT_SECRET)
 
     database_url: str = Field(
         default="sqlite:///./biomatcad_dev.db",
@@ -38,8 +53,9 @@ class Settings(BaseSettings):
     # CORS restritivo por padrão — lista explícita, nunca '*' fora de development.
     cors_allowed_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
 
-    # Chave mestra para ativação de estados operacionais sensíveis (Teste/Piloto/Produção).
-    # Nunca tem valor padrão utilizável — deve ser definida explicitamente fora de development.
+    # Chave mestra ÚNICA para ativação/desativação atômica da suíte clínica (CLINICAL_TEST +
+    # CLINICAL_PILOT + CLINICAL_PRODUCTION — Incremento 1.1). Nunca tem valor padrão utilizável;
+    # sem ela configurada, a suíte clínica nunca pode ser ativada (ver operational_state_service.py).
     operational_state_master_key: str | None = Field(default=None)
 
     jwt_algorithm: str = "HS256"
@@ -59,6 +75,29 @@ class Settings(BaseSettings):
     @property
     def is_sqlite(self) -> bool:
         return self.database_url.startswith("sqlite")
+
+    @property
+    def auth_mode(self) -> str:
+        return AUTH_MODE
+
+    def assert_secure_for_environment(self) -> None:
+        """Falha alto e cedo (startup) se o segredo JWT estiver ausente/inseguro fora de
+        ENVIRONMENT=test. Chamado explicitamente por create_app() — Incremento 1.1."""
+        if self.environment == Environment.TEST:
+            return
+        insecure = (
+            not self.api_secret_key
+            or self.api_secret_key == _INSECURE_DEFAULT_SECRET
+            or len(self.api_secret_key) < _MIN_SECRET_LENGTH
+        )
+        if insecure:
+            raise InsecureConfigurationError(
+                f"API_SECRET_KEY ausente ou insegura para ENVIRONMENT={self.environment.value}. "
+                f"Defina um segredo real (>= {_MIN_SECRET_LENGTH} caracteres, gerado com "
+                "ferramenta criptográfica) via variável de ambiente antes de iniciar fora de "
+                "development/test. Este app não inicia com o valor padrão de desenvolvimento "
+                "fora de ENVIRONMENT=test (Prompt Mestre §25/§26: nenhum segredo hardcoded)."
+            )
 
 
 @lru_cache

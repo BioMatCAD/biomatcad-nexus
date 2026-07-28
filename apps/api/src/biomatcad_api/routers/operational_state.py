@@ -1,51 +1,47 @@
-"""POST /api/v1/system/operational-state/activate — contrato de chave mestra.
+"""Ativação de estados operacionais (Incremento 1.1 — correção da semântica da chave mestra).
 
-Prompt Mestre: "não implementar a ativação apenas no frontend". Este endpoint é o único
-mecanismo real de ativação de Laboratório/Piloto clínico/Produção clínica. Exige
-OPERATIONAL_STATE_MASTER_KEY configurada no ambiente (nunca no cliente). Sem essa variável
-configurada, a ativação é sempre recusada — inclusive em desenvolvimento — para que ninguém
-dependa de um valor padrão inseguro.
+Dois mecanismos distintos, deliberadamente não intercambiáveis:
+
+1. `POST /operational-state/activate` — contextos INDEPENDENTES (hoje: apenas Laboratório).
+   Pesquisa é rejeitada (já habilitada por padrão). Os três flags clínicos são rejeitados aqui
+   e devem usar os endpoints de suíte clínica abaixo — impede que alguém ative
+   CLINICAL_PRODUCTION isoladamente por engano, contornando a exigência de atomicidade.
+
+2. `POST /clinical-suite/activate` e `POST /clinical-suite/deactivate` — suíte clínica
+   (CLINICAL_TEST + CLINICAL_PILOT + CLINICAL_PRODUCTION), sempre em conjunto, mesma
+   transação, mesma chave mestra (nunca uma segunda chave), com rollback integral em falha.
+
+Ambos exigem administrador autorizado (`require_admin`) e a chave mestra configurada em
+`OPERATIONAL_STATE_MASTER_KEY`. Sem essa variável configurada, toda ativação é recusada (403).
 """
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from biomatcad_api.config import Settings, get_settings
 from biomatcad_api.db import get_db
 from biomatcad_api.models.audit_event import AuditEvent
-from biomatcad_api.models.operational_state import OperationalState, OperationalStateKind
+from biomatcad_api.models.operational_state import OperationalStateKind
 from biomatcad_api.models.user import User
-from biomatcad_api.routers.auth import get_current_user
+from biomatcad_api.routers.auth import require_admin
+from biomatcad_api.schemas.operational_state import (
+    ActivateClinicalSuiteRequest,
+    ActivateIndependentStateRequest,
+    ActivateIndependentStateResponse,
+    ClinicalSuiteChangeResponse,
+    DeactivateClinicalSuiteRequest,
+)
+from biomatcad_api.services.operational_state_service import (
+    ClinicalSuiteTransactionError,
+    get_or_create_state,
+    set_clinical_suite,
+)
 
-router = APIRouter(prefix="/api/v1/system/operational-state", tags=["system"])
+router = APIRouter(prefix="/api/v1/system", tags=["system"])
 
 
-class ActivateOperationalStateRequest(BaseModel):
-    kind: OperationalStateKind
-    master_key: str
-    justification: str = Field(min_length=10, max_length=1000)
-
-
-class ActivateOperationalStateResponse(BaseModel):
-    kind: str
-    enabled: bool
-
-
-@router.post("/activate", response_model=ActivateOperationalStateResponse)
-def activate_operational_state(
-    payload: ActivateOperationalStateRequest,
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-    current_user: User = Depends(get_current_user),
-) -> ActivateOperationalStateResponse:
-    if payload.kind == OperationalStateKind.RESEARCH:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="O estado de Pesquisa já é habilitado por padrão e não requer ativação.",
-        )
-
+def _require_master_key_configured(settings: Settings) -> None:
     if not settings.operational_state_master_key:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -56,36 +52,126 @@ def activate_operational_state(
             ),
         )
 
-    if payload.master_key != settings.operational_state_master_key:
+
+def _check_master_key(settings: Settings, provided: str, *, db: Session, admin: User, target: str) -> None:
+    if provided != settings.operational_state_master_key:
         db.add(
             AuditEvent(
-                actor_user_id=current_user.id,
-                organization_id=current_user.organization_id,
+                actor_user_id=admin.id,
+                organization_id=admin.organization_id,
                 event_type="operational_state_activation_denied",
-                description=f"Chave mestra inválida ao tentar ativar {payload.kind.value}",
+                description=f"Chave mestra inválida ao tentar alterar {target}",
             )
         )
         db.commit()
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Chave mestra inválida.")
 
-    state = db.query(OperationalState).filter(OperationalState.kind == payload.kind.value).first()
-    if state is None:
-        state = OperationalState(kind=payload.kind.value)
-        db.add(state)
 
+@router.post("/operational-state/activate", response_model=ActivateIndependentStateResponse)
+def activate_independent_state(
+    payload: ActivateIndependentStateRequest,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    admin: User = Depends(require_admin),
+) -> ActivateIndependentStateResponse:
+    if payload.kind == OperationalStateKind.RESEARCH:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="O estado de Pesquisa já é habilitado por padrão e não requer ativação.",
+        )
+    if payload.kind != OperationalStateKind.LABORATORY:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"'{payload.kind.value}' faz parte da suíte clínica e não pode ser ativado "
+                "individualmente. Use POST /api/v1/system/clinical-suite/activate, que ativa "
+                "CLINICAL_TEST, CLINICAL_PILOT e CLINICAL_PRODUCTION atomicamente."
+            ),
+        )
+
+    _require_master_key_configured(settings)
+    _check_master_key(settings, payload.master_key, db=db, admin=admin, target=payload.kind.value)
+
+    state = get_or_create_state(db, payload.kind)
     state.enabled = True
-    state.activated_by = current_user.email
+    state.activated_by = admin.email
     state.justification = payload.justification
-
+    db.add(state)
     db.add(
         AuditEvent(
-            actor_user_id=current_user.id,
-            organization_id=current_user.organization_id,
+            actor_user_id=admin.id,
+            organization_id=admin.organization_id,
             event_type="operational_state_activated",
-            description=f"Estado {payload.kind.value} ativado por {current_user.email}",
+            description=f"Estado {payload.kind.value} ativado por {admin.email}",
             event_metadata={"justification": payload.justification},
         )
     )
     db.commit()
 
-    return ActivateOperationalStateResponse(kind=payload.kind.value, enabled=True)
+    return ActivateIndependentStateResponse(kind=payload.kind.value, enabled=True)
+
+
+@router.post("/clinical-suite/activate", response_model=ClinicalSuiteChangeResponse)
+def activate_clinical_suite(
+    payload: ActivateClinicalSuiteRequest,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    admin: User = Depends(require_admin),
+) -> ClinicalSuiteChangeResponse:
+    _require_master_key_configured(settings)
+    _check_master_key(settings, payload.master_key, db=db, admin=admin, target="clinical_suite")
+
+    try:
+        result = set_clinical_suite(
+            db,
+            enabled=True,
+            admin_user=admin,
+            justification=payload.justification,
+            expires_at=payload.expires_at,
+        )
+    except ClinicalSuiteTransactionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Falha ao ativar a suíte clínica; nenhum dos três estados foi alterado (rollback integral).",
+        ) from exc
+
+    return ClinicalSuiteChangeResponse(
+        clinical_test_enabled=True,
+        clinical_pilot_enabled=True,
+        clinical_production_enabled=True,
+        previous_state=result.previous_state,
+        expires_at=payload.expires_at,
+    )
+
+
+@router.post("/clinical-suite/deactivate", response_model=ClinicalSuiteChangeResponse)
+def deactivate_clinical_suite(
+    payload: DeactivateClinicalSuiteRequest,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    admin: User = Depends(require_admin),
+) -> ClinicalSuiteChangeResponse:
+    _require_master_key_configured(settings)
+    _check_master_key(settings, payload.master_key, db=db, admin=admin, target="clinical_suite")
+
+    try:
+        result = set_clinical_suite(
+            db,
+            enabled=False,
+            admin_user=admin,
+            justification=payload.justification,
+            expires_at=None,
+        )
+    except ClinicalSuiteTransactionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Falha ao desativar a suíte clínica; nenhum dos três estados foi alterado (rollback integral).",
+        ) from exc
+
+    return ClinicalSuiteChangeResponse(
+        clinical_test_enabled=False,
+        clinical_pilot_enabled=False,
+        clinical_production_enabled=False,
+        previous_state=result.previous_state,
+        expires_at=None,
+    )

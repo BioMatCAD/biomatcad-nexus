@@ -20,3 +20,7 @@ class UserResponse(BaseModel):
     full_name: str
     role: str
     organization_id: str
+
+
+class LogoutResponse(BaseModel):
+    status: str

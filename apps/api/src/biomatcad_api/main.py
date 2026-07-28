@@ -15,6 +15,7 @@ from biomatcad_api.routers import auth, health, operational_state, system
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    settings.assert_secure_for_environment()
     configure_logging(settings.environment.value)
     logger = logging.getLogger("biomatcad_api")
 
