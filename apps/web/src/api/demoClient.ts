@@ -18,13 +18,15 @@ export const demoApiClient: ApiClient = {
   systemStatus: () =>
     delay({
       environment: "github-pages-demo",
+      auth_mode: "DEV_AUTH" as const,
       clinical_suite_enabled: false,
       demo_mode: true,
       operational_states: [
-        { kind: "research", enabled: true },
-        { kind: "laboratory", enabled: false },
-        { kind: "clinical_pilot", enabled: false },
-        { kind: "clinical_production", enabled: false },
+        { kind: "research" as const, enabled: true },
+        { kind: "laboratory" as const, enabled: false },
+        { kind: "clinical_test" as const, enabled: false },
+        { kind: "clinical_pilot" as const, enabled: false },
+        { kind: "clinical_production" as const, enabled: false },
       ],
     }),
   login: async ({ email, password }) => {

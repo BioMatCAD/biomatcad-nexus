@@ -15,9 +15,16 @@ describe("DashboardPage (smoke test)", () => {
         status: 200,
         json: async () => ({
           environment: "test",
+          auth_mode: "DEV_AUTH",
           clinical_suite_enabled: false,
           demo_mode: false,
-          operational_states: [],
+          operational_states: [
+            { kind: "research", enabled: true },
+            { kind: "laboratory", enabled: false },
+            { kind: "clinical_test", enabled: false },
+            { kind: "clinical_pilot", enabled: false },
+            { kind: "clinical_production", enabled: false },
+          ],
         }),
       })
     );

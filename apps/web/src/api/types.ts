@@ -16,15 +16,30 @@ export interface VersionResponse {
   environment: string;
 }
 
-export type OperationalStateKind = "research" | "laboratory" | "clinical_pilot" | "clinical_production";
+// Cinco estados (Incremento 1.1): Pesquisa e Laboratório são contextos independentes;
+// clinical_test/clinical_pilot/clinical_production formam a "suíte clínica", sempre
+// controlada em conjunto por uma única chave mestra no backend — nunca individualmente.
+export type OperationalStateKind =
+  | "research"
+  | "laboratory"
+  | "clinical_test"
+  | "clinical_pilot"
+  | "clinical_production";
 
 export interface OperationalStateItem {
   kind: OperationalStateKind;
   enabled: boolean;
 }
 
+// Classificação explícita do modo de autenticação atual (Incremento 1.1). "DEV_AUTH" = e-mail/
+// senha + JWT stateless; NÃO é OIDC/OAuth 2.1 + MFA + WebAuthn + step-up (ainda pendente).
+export type AuthMode = "DEV_AUTH";
+
 export interface SystemStatusResponse {
   environment: string;
+  auth_mode: AuthMode;
+  // True somente quando os TRÊS flags da suíte clínica estão habilitados simultaneamente.
+  // Laboratório NUNCA entra neste cálculo.
   clinical_suite_enabled: boolean;
   operational_states: OperationalStateItem[];
   demo_mode: boolean;

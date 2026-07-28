@@ -51,7 +51,12 @@ export function DashboardPage() {
         {!statusLoading && !statusError && status && (
           <ul>
             <li>Ambiente: {status.environment}</li>
-            <li>Suíte clínica/laboratorial habilitada: {status.clinical_suite_enabled ? "sim" : "não"}</li>
+            <li>Modo de autenticação: {status.auth_mode}</li>
+            <li>Suíte clínica (teste + piloto + produção) habilitada: {status.clinical_suite_enabled ? "sim" : "não"}</li>
+            <li>
+              Laboratório (contexto independente) habilitado:{" "}
+              {status.operational_states.find((s) => s.kind === "laboratory")?.enabled ? "sim" : "não"}
+            </li>
             <li>Modo demonstração: {status.demo_mode ? "sim" : "não"}</li>
           </ul>
         )}
