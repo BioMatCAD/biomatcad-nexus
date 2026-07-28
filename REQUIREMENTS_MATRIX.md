@@ -55,7 +55,7 @@ respaldo científico/acadêmico nos dois documentos auditados.
 | PM-ONLY-01 | Prontuário eletrônico, FHIR, agenda clínica, portal do paciente | Prompt Mestre §10 (não consta na tese/apresentação) | `CONFIRMED-PRODUCT-SCOPE` — Backlog de implementação, Fase 6 |
 | PM-ONLY-02 | Telemedicina/WebRTC, videoconferência segura | Prompt Mestre §11 (não consta na tese/apresentação) | `CONFIRMED-PRODUCT-SCOPE` — Backlog de implementação, Fase 6 |
 | PM-ONLY-03 | LIMS, ELN, biobanco, terapia celular, chain of custody/identity | Prompt Mestre §12 (não consta na tese/apresentação) | `CONFIRMED-PRODUCT-SCOPE` — Backlog de implementação, Fase 5 |
-| PM-ONLY-04 | Identidade (Keycloak/OIDC), RBAC/ABAC com 17 perfis institucionais | Prompt Mestre §9 (não consta na tese/apresentação) | `CONFIRMED-PRODUCT-SCOPE` — fundação iniciada no Incremento 1 (contrato de estado operacional; RBAC completo ainda backlog) |
+| PM-ONLY-04 | Identidade (Keycloak/OIDC), RBAC/ABAC com 17 perfis institucionais | Prompt Mestre §9 (não consta na tese/apresentação) | `CONFIRMED-PRODUCT-SCOPE` — parcialmente iniciado (ver subitens `PM-ONLY-04a` a `PM-ONLY-04h` abaixo) |
 | PM-ONLY-05 | Matriz regulatória (Anvisa SaMD, ISO 13485/14971, IEC 62304/62366-1) | Prompt Mestre §24 (não consta na tese/apresentação) | `CONFIRMED-PRODUCT-SCOPE` — Backlog de implementação, Fase 7 |
 
 **Nota de rastreabilidade (ADR-0003):** `CONFIRMED-PRODUCT-SCOPE` significa que o requisito é
@@ -64,6 +64,29 @@ significa que a tese ou a apresentação descrevem, validam ou aprovam esse requ
 Fonte continua apontando exclusivamente para o Prompt Mestre, por honestidade de proveniência
 (Prompt Mestre §3.1: não atribuir aos documentos científicos afirmações que eles não
 apresentam).
+
+## D. Subitens de PM-ONLY-04 (identidade) — status após Incremento 1.1
+
+| ID | Item | Status | Evidência |
+|---|---|---|---|
+| PM-ONLY-04a | Classificação explícita do modo de autenticação atual | **Implementado** | `AUTH_MODE="DEV_AUTH"` exposto em `GET /api/v1/system/status.auth_mode`; ver ADR-0005 |
+| PM-ONLY-04b | Recusa de startup com segredo JWT ausente/inseguro fora de teste | **Implementado** | `Settings.assert_secure_for_environment()`, testado em `test_dev_auth_startup.py` (5 testes) |
+| PM-ONLY-04c | Autorização mínima para ações administrativas | **Implementado (mínimo, não é RBAC completo)** | `require_admin` (`role in {admin, superadmin}`), sem hierarquia institucional/projeto |
+| PM-ONLY-04d | Auditoria de login, falha, logout, tentativa de alteração de estado | **Implementado** | `AuditEvent` para `login_succeeded/failed`, `logout`, `operational_state_activation_denied`, `admin_action_denied`, `clinical_suite_activated/deactivated` |
+| PM-ONLY-04e | OIDC/OAuth 2.1 com Authorization Code + PKCE | Backlog | Nenhum código; `services/identity/` vazio |
+| PM-ONLY-04f | MFA (TOTP) e WebAuthn/passkeys | Backlog | Nenhum código |
+| PM-ONLY-04g | Step-up authentication para ações sensíveis | Backlog | Hoje a suíte clínica exige apenas papel admin + chave mestra, sem step-up de fato |
+| PM-ONLY-04h | RBAC/ABAC completo com os 17 perfis institucionais, revogação real de sessão, painel de sessões ativas, refresh token | Backlog | `User.role` é uma string simples; `/auth/logout` é simbólico (sem blocklist) — ver ADR-0005 |
+
+## E. Correções do Incremento 1.1 (rastreabilidade de bug)
+
+| ID | Achado | Correção | Evidência |
+|---|---|---|---|
+| FIX-1.1-01 | `clinical_suite_enabled` somava Laboratório aos três flags clínicos e usava lógica OR em vez de AND | Recalculado via `get_effective_states`/`CLINICAL_SUITE_KINDS`, exigindo os três simultaneamente, excluindo Laboratório | `test_clinical_suite_is_independent_from_laboratory`, ADR-0004 |
+| FIX-1.1-02 | Endpoint único permitia ativar `clinical_pilot`/`clinical_production` individualmente, sem atomicidade nem segunda verificação | `POST /operational-state/activate` agora rejeita (400) os 3 kinds clínicos; endpoints dedicados `/clinical-suite/activate|deactivate` garantem atomicidade | `test_clinical_kinds_rejected_on_independent_endpoint`, `test_activation_rolls_back_completely_on_failure` |
+| FIX-1.1-03 | Nenhuma verificação de autorização de administrador na ativação de estados | `require_admin` adicionado a todos os endpoints de ativação, com auditoria de tentativas negadas | `test_laboratory_activation_denied_for_non_admin`, `test_activation_denied_for_non_admin_user` |
+| FIX-1.1-04 | Autenticação não classificada explicitamente; sem checagem de segredo no startup | `AUTH_MODE="DEV_AUTH"` + `assert_secure_for_environment()` | ADR-0005, `test_dev_auth_startup.py` |
+| FIX-1.1-05 | Sem mecanismo de expiração para estados operacionais | `expires_at` + `is_effectively_enabled()` (avaliação em tempo de leitura) | `test_clinical_suite_expiration_is_respected` |
 
 ## Decisão de escopo (registrada em 2026-07-27, refinada por ADR-0003)
 
