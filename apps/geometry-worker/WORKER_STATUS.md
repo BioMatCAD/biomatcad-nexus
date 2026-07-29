@@ -1,7 +1,18 @@
-# WORKER_STATUS — apps/geometry-worker (Incremento 2.1)
+# WORKER_STATUS — apps/geometry-worker (Incremento 2.1, corrigido no 2.1.1)
 
-Evidência bruta do estado real do worker C#/.NET 9 + PicoGK 2.2.0 nesta sessão. Ver ADR-0007
-para a decisão e o raciocínio; este arquivo é o registro de evidência que a sustenta.
+Evidência bruta do estado real do worker C#/.NET 9 + PicoGK 2.2.0. Ver ADR-0007 para a decisão
+e o raciocínio do bloqueio, e ADR-0008 para a semântica espessura/isovalor corrigida no
+Incremento 2.1.1; este arquivo é o registro de evidência que os sustenta.
+
+**Nota (Incremento 2.1.1)**: o bloqueio de execução real descrito abaixo (seções 1 a 5) é
+idêntico ao do Incremento 2.1 — nada mudou neste ponto, e nenhuma tentativa de contorná-lo foi
+feita. O que mudou é o CÓDIGO por trás do bloqueio: `GyroidScaffoldBuilder.cs` e o novo
+`GyroidMath.cs` corrigem o recorte de domínio (SDF real do cilindro, não bounding box), a
+semântica espessura/isovalor/porosidade, o determinismo por seed, a diferença preview/final, e a
+solda de vértices antes de medir/exportar — tudo descrito em detalhe na seção 6 abaixo (agora
+44 testes, não mais 9) e em `apps/geometry-worker/README.md`. Nenhuma dessas correções foi
+provada contra uma execução real do PicoGK nesta sessão — ver
+`docs/examples/WINDOWS_EXECUTION_KIT.md` para o caminho de fechamento dessa lacuna.
 
 ## 1. Ambiente .NET
 
@@ -87,27 +98,52 @@ PicoGK internamente captura a `DllNotFoundException` e relança uma `System.Exce
 `InnerException`, e por conteúdo textual da mensagem/stack trace) e classifica corretamente
 como `PICOGK_RUNTIME_UNAVAILABLE`, nunca como sucesso.
 
-## 6. O que É testável nesta sessão (9/9 xunit passando)
+## 6. O que É testável nesta sessão (44/44 xunit passando, Incremento 2.1.1)
 
 `tests/BioMatCadGeometryWorker.Tests` compila e executa apenas os arquivos independentes de
-PicoGK (`JobEnvelope.cs`, `SimpleMesh.cs`, `GeometryMetricsCalculator.cs`, `StlExporter.cs`):
+PicoGK (`GyroidMath.cs`, `JobEnvelope.cs`, `SimpleMesh.cs`, `GeometryMetricsCalculator.cs`,
+`StlExporter.cs`):
 
 ```text
 $ dotnet test
-Passed!  - Failed: 0, Passed: 9, Skipped: 0, Total: 9
+Passed!  - Failed: 0, Passed: 44, Skipped: 0, Total: 44
 ```
 
-Cobrindo: volume/área/watertight de um cubo unitário conhecido, bounding box, estimativa de
-porosidade (incluindo clamping), volume de domínio block/cilindro, detecção de malha não
-fechada, formato binário STL, (de)serialização JSON do contrato de job.
+Cobrindo (Incremento 2.1, 9 testes originais + Incremento 2.1.1, 35 testes novos/ampliados):
+volume/área/watertight de um cubo unitário conhecido, bounding box, estimativa de porosidade
+(incluindo clamping), volume de domínio block/cilindro, detecção de malha não fechada, formato
+binário STL, (de)serialização JSON do contrato de job (Incremento 2.1); e, novo no Incremento
+2.1.1 — `GyroidMathTests.cs` (27 testes): avaliação do campo gyroid de Schoen, SDF exata de
+bloco/cilindro, interseção booleana implícita via `max()`, conversão determinística
+`wall_thickness_mm` ↔ meia-largura de banda, mapeamento seed→deslocamento de fase, estimativa de
+fração sólida por amostragem em grade, calibração de porosidade por bisseção (casos convergentes
+e de borda), piso de voxel size em modo preview, estimativas prévias de voxel/memória —
+`SimpleMeshWeldTests.cs` (5 testes): solda de vértices duplicados, preservação de topologia,
+idempotência sobre malha já soldada.
 
 ## 7. O que NÃO é testável neste ambiente
 
-- Geração real de um scaffold Gyroid via `Voxels`/`Mesh` do PicoGK.
+- Geração real de um scaffold Gyroid via `Voxels`/`Mesh` do PicoGK -- incluindo se o domínio
+  cilíndrico corrigido (Incremento 2.1.1, SDF real em vez de bounding box) de fato recorta a
+  malha voxelizada como esperado.
+- Se a conversão `wall_thickness_mm` -> meia-largura de banda (`GyroidMath.
+  WallThicknessMmToHalfBandWidth`, Incremento 2.1.1) produz, numa malha voxelizada real, uma
+  espessura de parede visualmente/dimensionalmente condizente com o valor solicitado.
+- Se a calibração de porosidade por bisseção (`CalibratePorosityByBisection`, Incremento 2.1.1)
+  produz, numa malha real, uma porosidade medida (`GeometryMetricsCalculator`) próxima do alvo
+  solicitado -- só a estimativa analítica interna foi testada, não a porosidade medida na malha
+  final.
 - Determinismo geométrico real (mesma seed + mesma receita -> mesmo STL) -- só o contrato
-  (mesmo JSON de entrada) é testável, não a geometria de saída em si.
+  (mesmo JSON de entrada, e o mapeamento determinístico seed->fase testado isoladamente) é
+  testável, não a geometria de saída em si.
 - Geração de thumbnail (depende de execução real).
-- Exportação VDB (depende de execução real E de suporte oficial confirmado do PicoGK a VDB).
+- Exportação VDB (depende de execução real E de suporte oficial confirmado do PicoGK a VDB) --
+  Incremento 2.1.1 adicionou rejeição estruturada `OUTPUT_FORMAT_UNSUPPORTED` para não
+  silenciosamente ignorar `vdb` quando não suportado, mas o caminho de sucesso de exportação VDB
+  em si permanece não verificável neste ambiente.
+- Se a solda de vértices (`SimpleMesh.Weld()`, Incremento 2.1.1) produz, numa malha real do
+  PicoGK, uma contagem de vértices coerente entre o STL exportado e o manifesto -- testado até
+  agora apenas contra malhas sintéticas de teste (`SimpleMeshWeldTests.cs`).
 - Qualquer verificação end-to-end da API chamando o worker real com sucesso -- o teste
   `test_dispatch_job_real_worker_fails_in_blocked_environment` (Python) prova o caminho de
   falha real, não um caminho de sucesso.
@@ -128,5 +164,13 @@ dotnet bin/Debug/net9.0/BioMatCadGeometryWorker.dll <caminho-para-job.json>
 
 cd tests/BioMatCadGeometryWorker.Tests
 dotnet test
-# esperado: 9/9 passando (não depende do runtime nativo)
+# esperado: 44/44 passando (não depende do runtime nativo)
 ```
+
+## 10. Caminho de fechamento (Incremento 2.1.1)
+
+Para provar de verdade as correções listadas na seção 6 contra uma execução real do PicoGK,
+siga `docs/examples/WINDOWS_EXECUTION_KIT.md` num Windows x64 real. Esse guia usa
+`apps/geometry-worker/tools/New-JobFromRecipe.ps1` para montar um `job.json` a partir de uma
+golden recipe, e `scripts/audit_stl_vs_worker_output.py` para recomputar de forma independente
+(Python) as métricas do STL resultante, para conferência cruzada contra o manifesto.

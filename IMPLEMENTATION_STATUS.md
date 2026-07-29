@@ -1,16 +1,105 @@
 # Status de Implementação — BioMatCAD Nexus
 
-Última atualização: 2026-07-29 (Incremento 2.1 da Fase 2 — primeira vertical funcional do
-núcleo BioMatCAD, entregue **parcialmente bloqueada** por ausência de runtime nativo do PicoGK
-em linux-x64; ver seção dedicada abaixo e ADR-0007). Este documento existe para que ninguém —
-incluindo IAs de desenvolvimento futuras — precise adivinhar o que é real. Regra do Prompt
-Mestre §3.1: nada aqui é descrito como "completo" sem ter sido executado e testado nesta sessão.
+Última atualização: 2026-07-29 (Incremento 2.1.1 da Fase 2 — corretivo sobre defeitos
+encontrados em auditoria do Incremento 2.1, entregue **parcialmente bloqueado no mesmo ponto**
+por ausência de runtime nativo do PicoGK em linux-x64; ver seção dedicada abaixo, ADR-0007 e
+ADR-0008). Este documento existe para que ninguém — incluindo IAs de desenvolvimento futuras —
+precise adivinhar o que é real. Regra do Prompt Mestre §3.1: nada aqui é descrito como
+"completo" sem ter sido executado e testado nesta sessão. As seções sobre o Incremento 1.1 e o
+Incremento 2.1 abaixo são mantidas como registro histórico; a seção "Incremento 2.1.1", logo em
+seguida, é a mais atual e deve ser lida primeiro.
 
 ## Legenda
 
 - **Real**: código existe, foi executado nesta sessão, com evidência de teste/execução abaixo.
 - **Demonstrativo**: existe e roda, mas é uma simulação (dados sintéticos, sem lastro real).
 - **Planejado**: aparece em README/roadmap, sem nenhuma linha de código.
+
+## Incremento 2.1.1 (Fase 2, corretivo) — o que é isto e como ler
+
+O Incremento 2.1.1 **não adiciona escopo novo**. É uma correção de defeitos reais encontrados
+numa auditoria do Incremento 2.1 (entregue anteriormente), abrangendo schema, worker C#, API e
+frontend. Instrução explícita do usuário para este incremento: nenhuma correção pode ser
+declarada "provada" além do que foi de fato testado nesta sessão — e a execução real do PicoGK
+**continua bloqueada** neste sandbox Linux, exatamente como no Incremento 2.1 (ver ADR-0007).
+Por isso, para vários itens abaixo, existe uma distinção importante entre:
+
+- **(a) código corrigido e testado nesta sessão** — via testes unitários/integração que NÃO
+  dependem de uma execução real do PicoGK (matemática pura em `GyroidMath.cs`, testes de
+  concorrência/cancelamento contra Postgres real, testes de segurança entre organizações, testes
+  de frontend); e
+- **(b) provado ponta-a-ponta contra uma execução real do PicoGK** — que só poderá acontecer
+  depois que o usuário rodar `apps/geometry-worker` no seu próprio Windows x64 (ver
+  `docs/examples/WINDOWS_EXECUTION_KIT.md`) e devolver os resultados.
+
+Todo o checklist abaixo usa essa distinção explicitamente. Nada foi apresentado como (b) quando
+só (a) foi alcançado nesta sessão.
+
+## Checklist de aceite do Incremento 2.1.1 (17 itens)
+
+| # | Item | Status | Evidência / observação |
+|---|---|---|---|
+| 1 | Worker PicoGK realmente executado em Windows x64 | **NÃO FEITO** (pendente) | Depende da execução do usuário no seu Windows — ver `docs/examples/WINDOWS_EXECUTION_KIT.md`. Nada foi executado contra PicoGK real nesta sessão, em nenhuma plataforma. |
+| 2 | Geração real de bloco Gyroid | Código corrigido e testado (a); NÃO provado (b) | `GyroidMath.cs` (fórmula de Schoen, 44 testes xUnit incluindo `GyroidMathTests.cs`) e `GyroidDomainImplicit` em `GyroidScaffoldBuilder.cs` aplicam a fórmula corretamente em teoria; nenhuma malha real do PicoGK foi gerada nesta sessão. |
+| 3 | Cilindro realmente recortado (não bounding box) | Código corrigido via interseção de SDF (a); NÃO provado (b) | `GyroidMath.CappedCylinderSignedDistanceMm` + `IntersectSignedDistance` (max de duas SDF, CSG padrão) substituem o corte por bounding box do Incremento 2.1 — testado matematicamente (`GyroidMathTests.cs`), não contra voxelização real. |
+| 4 | Diferença real preview vs. final | Código corrigido (piso de voxel 0.3mm) (a); NÃO provado (b) | `GyroidMath.EffectiveVoxelSizeMm`/`PreviewMinVoxelSizeMm`, testado unitariamente; a diferença real de tempo/resolução entre os dois modos só é observável numa execução real. |
+| 5 | Parâmetros efetivamente aplicados (espessura/isovalor/porosidade/seed) | Código corrigido e testado na camada matemática (a); NÃO provado (b) | `WallThicknessMmToHalfBandWidth`, `SeedToPhaseShiftRad`, `CalibratePorosityByBisection` — todos testados isoladamente (matemática pura); a aplicação real numa malha voxelizada depende da execução real. |
+| 6 | Limites computacionais efetivamente controlados | Código corrigido, parcialmente verificado nesta sessão | Estimativa prévia de voxel/memória (`EstimateVoxelCount`/`EstimateMemoryMbUpperBound`) testada unitariamente; o mecanismo de timeout + kill de árvore de processos (`psutil`) é cross-platform e **foi verificado neste sandbox** (funciona independentemente do PicoGK, pois mata o processo do worker seja qual for o motivo da demora). |
+| 7 | Fila concorrente seguro | **PROVADO de verdade** | `SELECT ... FOR UPDATE SKIP LOCKED` contra Postgres real, duas conexões/threads reais e independentes, zero jobs reivindicados em duplicidade em 24 jobs (`test_geometry_job_concurrency.py`). |
+| 8 | Cancelamento real | **PROVADO de verdade** | Teste de corrida contra o fluxo real de `dispatch_job`, kill de árvore de processos via `psutil` (cross-platform), idempotência de recancelamento (`test_geometry_job_cancellation.py`). |
+| 9 | Isolamento organizacional | **PROVADO de verdade** | Testes de ataque dedicados (projeto/receita/material de outra organização, receita não pertencente ao projeto, receita não validada) — todos recusados e auditados (`test_geometry_job_security.py`). |
+| 10 | Métricas coerentes com o STL | Código corrigido (solda antes de medir) (a); NÃO provado (b) contra STL real do PicoGK | `SimpleMesh.Weld()` aplicado antes de `GeometryMetricsCalculator` e `StlExporter`, testado contra malhas sintéticas de teste (cubo unitário conhecido, etc. — `SimpleMeshWeldTests.cs`, `GeometryMetricsCalculatorTests.cs`); nunca contra um STL real gerado pelo PicoGK. |
+| 11 | Manifesto coerente com os artefatos | Código corrigido (a); NÃO provado (b) em execução ponta-a-ponta real | Manifesto reestruturado (commit, versões, plataforma, seed/fase, parâmetros efetivos, SHA-256 por artefato, checksum do próprio manifesto fora do JSON) — verificado por testes de unidade/integração do backend, nunca contra uma execução real completa API→worker→artefato. |
+| 12 | Determinismo geométrico provado | **NÃO FEITO** (pendente) | Requer duas execuções reais no Windows com a mesma receita/seed, comparando SHA-256 do STL resultante — não pôde ser feito neste sandbox. |
+| 13 | Visualização e download | Inalterado do Incremento 2.1, fora do núcleo de correções deste incremento | `StlViewer.tsx` (Three.js, orbit/pan/zoom/wireframe/corte/screenshot) e `JobDetailPage.tsx` continuam como estavam — nenhum defeito relacionado foi relatado na auditoria que motivou o 2.1.1, então nenhuma mudança foi feita aqui. |
+| 14 | E2E real | Escrito, **nunca executado em nenhum ambiente** | `apps/web/e2e/` (Playwright) — bloqueado neste sandbox Linux (`libXdamage.so.1` ausente, `sudo` desabilitado — ver `apps/web/e2e/README.md`); pendente de execução real no Windows do usuário. |
+| 15 | Todos os testes/builds aprovados | **SIM, para o que é testável sem PicoGK real** | Backend: 83 testes pytest (2 skips esperados sem `dotnet`/Windows), ruff e mypy limpos. Worker C#: 44/44 xUnit passando (só código independente de PicoGK), `dotnet build` sem erros. Frontend: 27/27 Vitest, `tsc --noEmit` e `eslint` limpos, `npm run build` e `npm run build:pages` executados com sucesso. Isso **não** equivale a prova E2E/PicoGK real (itens 1, 12, 14). |
+| 16 | Histórico preservado | **SIM, verificado** | Base (tag/commit do v2.2) intacta; apenas novos commits acrescentados nesta sessão (nenhum `git commit --amend`, `rebase` ou `push --force` usado); `git log` mostra a sequência completa desde o Incremento 1. |
+| 17 | Checksums verificados na extração/restauração | **SIM para o bundle base v2.2** (início da sessão); **AINDA NÃO** para o pacote final v2.2.1 | O pacote v2.2.1 (zip/bundle/SHA256SUMS) ainda não foi gerado — é uma tarefa de empacotamento separada, posterior a esta documentação. |
+
+### Resumo honesto
+
+**Totalmente fechados e provados nesta sessão**: itens 7, 8, 9, 16 (segurança/concorrência/
+cancelamento/preservação de histórico — nenhum depende de PicoGK real, todos exercitados contra
+infraestrutura real: Postgres real, processos reais, git real).
+
+**Código corrigido e testado no que é testável sem PicoGK, mas não provado ponta-a-ponta**:
+itens 2, 3, 4, 5, 6, 10, 11, 15 — este é o grosso das correções deste incremento. A correção é
+real e o teste unitário/de integração que a acompanha também é real; o que falta é a prova final
+contra uma execução genuína do PicoGK.
+
+**Simplesmente não feitos ainda, dependem do usuário**: itens 1, 12, 14 (execução real,
+determinismo, E2E) e 17 para o pacote final v2.2.1 especificamente (o v2.2 base já foi
+verificado).
+
+**Sem mudança de escopo neste incremento**: item 13 (visualização/download), que segue como
+estava no Incremento 2.1.
+
+## Evidência de teste do Incremento 2.1.1 (resumo; ver `TEST_EVIDENCE.md` para o log consolidado)
+
+- **Backend** (`apps/api`): 83 testes pytest coletados e passando, 2 skips esperados (dependem de
+  `dotnet`/ambiente Windows indisponível neste sandbox) — incluindo os novos
+  `test_geometry_job_security.py`, `test_geometry_job_concurrency.py`,
+  `test_geometry_job_cancellation.py`. `ruff check .` e `mypy src` limpos.
+- **Worker C#** (`apps/geometry-worker`): `dotnet build` sem erros; 44/44 testes xUnit passando
+  (`GyroidMathTests.cs`, `SimpleMeshWeldTests.cs`, `StlExporterTests.cs`,
+  `GeometryMetricsCalculatorTests.cs`, `JobEnvelopeTests.cs`) — todos sobre código independente
+  do PicoGK, nenhum contra o runtime nativo (que continua bloqueado, ver ADR-0007).
+- **Frontend** (`apps/web`): 27/27 testes Vitest passando (incluindo `schemaSync.test.ts`, que
+  garante que a cópia local do schema usada pelo Ajv é byte-idêntica ao schema real do backend),
+  `tsc --noEmit` e `eslint` limpos, `npm run build` e `npm run build:pages` executados com
+  sucesso.
+- **Migração Alembic**: nova revisão do Incremento 2.1.1 (claim atômico e colunas de manifesto)
+  verificada tanto a partir de um banco vazio (`alembic upgrade head` do zero) quanto de forma
+  incremental (banco já na revisão anterior do Incremento 2.1).
+- **Auditoria de dependências** (`docs/security/DEPENDENCY_AUDIT_2.1.1.md`): Python (`pip-audit`)
+  e NuGet (`dotnet list package --vulnerable`) sem nenhuma vulnerabilidade conhecida; npm
+  (`npm audit`) com 18 vulnerabilidades reportadas — 1 corrigida sem breaking change
+  (react-router 6.26.2→6.30.4), 17 deliberadamente deferidas (todas de tooling de desenvolvimento
+  — ESLint 8.x e sua cadeia, Vite/Vitest/esbuild — com explorabilidade nula/muito baixa no
+  artefato de produção), ver `ROADMAP.md` para o plano de migração.
+- **NÃO incluído nesta evidência**: execução real do PicoGK, E2E Playwright executado (ambos
+  bloqueados neste sandbox, pendentes da execução real do usuário no Windows).
 
 ## O que mudou no Incremento 1.1 (resumo executivo)
 
@@ -51,11 +140,28 @@ simultaneamente". O usuário identificou e corrigiu essa divergência. O Increme
 | `apps/api` — modelos de materiais/projetos/receitas/jobs/artefatos (9 entidades) | Real | migração `97983fbc0288` aplicada contra banco vazio e populado |
 | `apps/api` — orquestração de job (fila = coluna status, sem fila em memória) | Real | `test_geometry_job_orchestration.py` |
 | `apps/api` — endpoints de materiais/projetos/receitas/jobs/artefatos | Real | `test_materials_projects_recipes_api.py`, `test_jobs_artifacts_api.py` |
-| `apps/geometry-worker` — contrato C#/.NET9+PicoGK 2.2.0 | Real (compila); **execução real BLOQUEADA** (linux-x64 sem runtime nativo) | `WORKER_STATUS.md`, ADR-0007, 9 testes xunit sobre código independente de PicoGK |
-| `apps/web` — catálogo de materiais, projetos, editor de receita, jobs, visualizador 3D (Three.js) | Real | 17 testes Vitest; build normal e de demo executados |
-| `scripts/geometry_dispatcher.py` — processo separado da API | Real (contrato); execução de sucesso depende do worker bloqueado | inspeção de código + teste do caminho de falha real
+| `apps/geometry-worker` — contrato C#/.NET9+PicoGK 2.2.0 | Real (compila); **execução real BLOQUEADA** (linux-x64 sem runtime nativo) | `WORKER_STATUS.md`, ADR-0007, 9 testes xunit sobre código independente de PicoGK — **atualizado para 44 testes no Incremento 2.1.1, ver seção dedicada acima** |
+| `apps/web` — catálogo de materiais, projetos, editor de receita, jobs, visualizador 3D (Three.js) | Real | 17 testes Vitest; build normal e de demo executados — **atualizado para 27 testes no Incremento 2.1.1, ver seção dedicada acima** |
+| `scripts/geometry_dispatcher.py` — processo separado da API | Real (contrato); execução de sucesso depende do worker bloqueado | inspeção de código + teste do caminho de falha real |
+| `apps/api` — claim atômico de fila (Incremento 2.1.1) | **Real, provado** | `test_geometry_job_concurrency.py` (24 jobs, duas conexões reais, zero duplicidade) |
+| `apps/api` — cancelamento real de job (Incremento 2.1.1) | **Real, provado** | `test_geometry_job_cancellation.py` (kill de árvore de processos via `psutil`, teste de corrida) |
+| `apps/api` — isolamento entre organizações antes de criar `DesignRun` (Incremento 2.1.1) | **Real, provado** | `test_geometry_job_security.py` (testes de ataque) |
+| `apps/api` — manifesto reestruturado, checksum fora do JSON (Incremento 2.1.1) | Real (código+testes de unidade/integração); não provado contra execução real do PicoGK | `manifest_service.py`, testes de `test_jobs_artifacts_api.py` |
+| `schemas/biomatcem` — semântica espessura/isovalor (Incremento 2.1.1) | Real | `test_recipe_schema.py` (24 testes agora); ADR-0008 |
+| `apps/geometry-worker` — `GyroidMath.cs` (domínio real, booleano, espessura/isovalor/porosidade/seed, preview/final) (Incremento 2.1.1) | Real (matemática testada); não provado contra execução real do PicoGK | `GyroidMathTests.cs` |
+| `apps/geometry-worker` — solda de vértices (Incremento 2.1.1) | Real (testado com malhas sintéticas); não provado contra STL real do PicoGK | `SimpleMeshWeldTests.cs` |
+| `apps/web` — validação de receita com Ajv sobre schema real (Incremento 2.1.1) | Real, provado | `schemaSync.test.ts`, `recipeValidationOffline.test.ts` |
+| `apps/web` — fingerprint de demonstração (canonicalização recursiva) (Incremento 2.1.1) | Real, provado; explicitamente rotulado como NÃO sendo SHA-256 real | `recipeValidationOffline.test.ts` |
+| `apps/web/e2e` — Playwright (Incremento 2.1.1) | Escrito; **nunca executado neste sandbox** | `apps/web/e2e/README.md` |
+| Auditoria de dependências (Incremento 2.1.1) | Real, provado | `docs/security/DEPENDENCY_AUDIT_2.1.1.md` |
 
 ## Incremento 2.1 (Fase 2) — vertical geométrica funcional do núcleo BioMatCAD
+
+> **Nota (Incremento 2.1.1)**: a seção abaixo é o registro histórico da entrega original do
+> Incremento 2.1. Vários defeitos descritos como simplesmente "não verificados" abaixo foram, na
+> verdade, auditados e encontrados como código **incorreto** (não apenas não executado) — ver a
+> seção "Incremento 2.1.1" no topo deste documento para a lista completa de correções e o que
+> continua pendente de execução real do PicoGK.
 
 **Status geral: parcialmente bloqueado**, conforme instrução explícita do usuário ("Se o PicoGK
 não puder ser executado no sandbox, declare o incremento parcialmente bloqueado. Não substitua

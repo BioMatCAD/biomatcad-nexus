@@ -77,3 +77,35 @@ Evidência completa (comandos, saída integral, stack trace) em
 - Qualquer ambiente Windows/macOS com o SDK .NET 9 deve conseguir executar
   `apps/geometry-worker` de fato — o contrato (JSON de entrada/saída, CLI) já está pronto para
   isso, sem mudança de código, apenas trocando o sistema operacional de execução.
+
+---
+
+## Atualização (Incremento 2.1.1)
+
+A decisão original acima permanece integralmente válida — nada foi contornado, nenhum resultado
+foi fabricado. O que mudou neste incremento corretivo:
+
+1. **Todo o código em volta do bloqueio foi corrigido e re-testado matematicamente.** A auditoria
+   do Incremento 2.1 encontrou defeitos reais na lógica que, uma vez desbloqueada, geraria a
+   geometria: domínio cilíndrico recortado pela bounding box (não pelo cilindro real), ausência
+   de solda de vértices (causa raiz de uma divergência real de contagem STL-vs-manifesto),
+   espessura/isovalor com papéis ambíguos, seed sem efeito determinístico real, preview e final
+   indistinguíveis na prática. Essas correções foram implementadas em `GyroidMath.cs` (núcleo
+   matemático, novo, totalmente independente do PicoGK) e em `GyroidScaffoldBuilder.cs`
+   (`GyroidDomainImplicit`, dependente do PicoGK), e testadas com 44 testes xUnit — todos contra
+   o código independente, nenhum contra o PicoGK real, pelo mesmo motivo que originou esta ADR.
+2. **Caminho de desbloqueio escolhido**: em vez de investigar um build nativo do PicoGK para
+   linux-x64 (caminho mais lento, levantado como opção não tentada na decisão original), o
+   responsável pelo projeto (Adler) decidiu executar o worker **no seu próprio Windows x64**, a
+   plataforma com runtime nativo oficial do pacote 2.2.0, e devolver os artefatos reais (STL,
+   logs, manifesto) para conferência. O guia operacional completo está em
+   `docs/examples/WINDOWS_EXECUTION_KIT.md`, incluindo o helper
+   `apps/geometry-worker/tools/New-JobFromRecipe.ps1` (monta um `job.json` a partir de uma golden
+   recipe) e `scripts/audit_stl_vs_worker_output.py` (recomputação independente, em Python, das
+   métricas do STL gerado, para conferência cruzada contra o manifesto).
+3. **Nada aqui altera o status do bloqueio em si**: `apps/geometry-worker` continua sem poder
+   executar de verdade neste sandbox Linux. Os 17 itens de aceite do Incremento 2.1.1 que
+   dependem de execução real do PicoGK (geração real de scaffold, determinismo geométrico,
+   métricas/manifesto coerentes com um STL real, thumbnail, VDB) permanecem **pendentes** até que
+   os resultados do Windows do usuário sejam devolvidos e conferidos — ver
+   `IMPLEMENTATION_STATUS.md` para o checklist item a item.

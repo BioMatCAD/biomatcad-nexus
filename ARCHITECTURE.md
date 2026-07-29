@@ -1,10 +1,14 @@
 # Arquitetura — BioMatCAD Nexus
 
 Este documento descreve a arquitetura oficial (ADR-0002) e o que dela está realmente
-implementado após o Incremento 2.1 da Fase 2 (primeira vertical funcional do núcleo BioMatCAD —
-ver ADR-0006 e ADR-0007, parcialmente bloqueada por ausência de runtime nativo do PicoGK em
-linux-x64). Para decisões e motivações, ver `docs/adr/`. Para o inventário funcional item a
-item, ver `IMPLEMENTATION_STATUS.md`.
+implementado após o Incremento 2.1 da Fase 2 (primeira vertical funcional do núcleo BioMatCAD)
+e as correções do **Incremento 2.1.1** (corretivo, sobre defeitos encontrados em auditoria — ver
+ADR-0006, ADR-0007 e ADR-0008). A vertical geométrica continua **parcialmente bloqueada** por
+ausência de runtime nativo do PicoGK em linux-x64 — isso não mudou neste incremento corretivo,
+que corrigiu o código em volta do bloqueio (segurança, fila, cancelamento, manifesto, schema,
+matemática do gyroid) sem poder provar a execução real do PicoGK neste sandbox. Para decisões e
+motivações, ver `docs/adr/`. Para o inventário funcional item a item, ver
+`IMPLEMENTATION_STATUS.md`.
 
 ## Visão geral
 
@@ -12,15 +16,23 @@ item, ver `IMPLEMENTATION_STATUS.md`.
 apps/web  (React + TS + Vite)  ──HTTP/JSON──►  apps/api  (FastAPI)  ──SQL──►  PostgreSQL
                                                      │                          ▲
                                                      │                          │ fila = coluna
-                                                     │                          │ GeometryJob.status
+                                                     │                          │ GeometryJob.status,
+                                                     │                          │ claim atômico
+                                                     │                          │ (SELECT ... FOR
+                                                     │                          │  UPDATE SKIP LOCKED,
+                                                     │                          │  Incremento 2.1.1)
                                                      ├── scripts/geometry_dispatcher.py (processo
-                                                     │   Python separado da API, consome jobs QUEUED)
+                                                     │   Python separado da API, consome jobs QUEUED,
+                                                     │   emite heartbeat, recupera jobs órfãos)
                                                      │        │
                                                      │        └──subprocess──► apps/geometry-worker
                                                      │                          (C#/.NET9 + PicoGK 2.2.0
-                                                     │                          — compila; execução real
-                                                     │                          BLOQUEADA em linux-x64,
-                                                     │                          ver ADR-0007)
+                                                     │                          — compila; correções de
+                                                     │                          domínio/espessura/
+                                                     │                          porosidade/seed/solda de
+                                                     │                          vértices (2.1.1); execução
+                                                     │                          real BLOQUEADA em
+                                                     │                          linux-x64, ver ADR-0007)
                                                      ├── LocalStorageAdapter (artefatos, disco local;
                                                      │   mesmo contrato de um MinIO/S3 futuro)
                                                      ├── Redis (cache/locks) — não usado ainda
@@ -30,7 +42,9 @@ apps/web  (React + TS + Vite)  ──HTTP/JSON──►  apps/api  (FastAPI)  �
 O worker geométrico (`apps/geometry-worker`) é um processo **verdadeiramente separado** da API
 — um binário .NET distinto, invocado via `subprocess` pelo dispatcher Python, nunca importado
 in-process. Isso satisfaz o requisito explícito do Incremento 2.1 de que "o processo geométrico
-deve ser separado da API", mesmo sem Docker disponível neste ambiente.
+deve ser separado da API", mesmo sem Docker disponível neste ambiente. O cancelamento
+(Incremento 2.1.1) mata a árvore de processos do subprocess real (via `psutil`), não apenas o
+processo pai — cross-platform, verificado neste sandbox.
 
 O build de demonstração de `apps/web` (`npm run build:pages`) gera um site estático que **não**
 se conecta a nenhum backend por padrão — usa `demoClient.ts`, um cliente sintético em memória,
@@ -125,26 +139,103 @@ Essa separação existe para que a garantia de atomicidade viva em um único lug
 isoladamente (`tests/test_clinical_suite.py`), em vez de replicada entre o router de ativação e
 o de desativação.
 
-## BioMatCEM — receita geométrica versionada (Incremento 2.1)
+## BioMatCEM — receita geométrica versionada (Incremento 2.1, semântica corrigida no 2.1.1)
 
 `schemas/biomatcem/geometry-recipe-v1.schema.json` (JSON Schema Draft 2020-12) é o único
 contrato aceito entre frontend, API e worker para descrever uma geometria a gerar (domínio
 block/cylinder, topologia gyroid, resolução, modo preview/final, seed, limites computacionais,
-formatos de saída). Validado em duas camadas independentes — `services/recipe_service.py`
-(Python, fonte de verdade real) e `recipeValidationOffline.ts` (JS, só no modo demo) — nunca
-aceita campos desconhecidos nem qualquer forma de código executável. Ver ADR-0006 e
-`schemas/biomatcem/README.md`.
+formatos de saída). Validado em duas camadas — `services/recipe_service.py` (Python, fonte de
+verdade real) e, desde o Incremento 2.1.1, `recipeValidationOffline.ts` no frontend usando Ajv
+(`ajv/dist/2020`) contra uma cópia local **sincronizada** do mesmo schema (`apps/web/src/
+schemas/geometry-recipe-v1.schema.json`, com teste de sincronia byte-a-byte,
+`schemaSync.test.ts`) — em vez de ~15 regras manuais que divergiam do schema real. Nunca aceita
+campos desconhecidos nem qualquer forma de código executável.
 
-## apps/geometry-worker (C#/.NET 9 + PicoGK 2.2.0) — Incremento 2.1
+**Semântica espessura/isovalor corrigida no Incremento 2.1.1 (ver ADR-0008):** no Incremento
+2.1, `isovalue` e `wall_thickness_mm` tinham papéis ambíguos/sobrepostos. Agora:
+`wall_thickness_mm` é **obrigatório** em `topology` e é o único controlador de espessura de
+parede — o worker converte esse valor em meia-largura de banda isovalor via uma aproximação
+documentada (`GyroidMath.WallThicknessMmToHalfBandWidth`, ver comentário no próprio arquivo:
+não há distância euclidiana exata conhecida para a superfície gyroid). `isovalue` passou a ser
+**opcional** (default `0.0`) e representa apenas o **centro** da banda sólida — não controla
+espessura. Combinações fisicamente contraditórias (ex.: `wall_thickness_mm >= cell_size_mm / 2`,
+ou banda que extrapola a amplitude máxima da função gyroid) são rejeitadas na validação, com erro
+estruturado `TOPOLOGY_PARAMETERS_INCONSISTENT`, antes de qualquer execução. Ver ADR-0006 (schema
+original) e `schemas/biomatcem/README.md`.
+
+## apps/geometry-worker (C#/.NET 9 + PicoGK 2.2.0) — Incremento 2.1, corrigido no 2.1.1
 
 Worker real, compilado com sucesso, responsável por gerar o scaffold Gyroid a partir de uma
 receita BioMatCEM já validada e canonicalizada. Separa deliberadamente o código dependente do
-runtime nativo do PicoGK (`GyroidScaffoldBuilder.cs`, `Program.cs`) do código independente
-(`JobEnvelope.cs`, `SimpleMesh.cs`, `GeometryMetricsCalculator.cs`, `StlExporter.cs`), o que
-permite testar genuinamente a segunda parte (9 testes xunit) mesmo com a primeira bloqueada.
-**Execução real bloqueada neste ambiente** — o pacote NuGet 2.2.0 não traz runtime nativo para
-linux-x64 (ver `apps/geometry-worker/WORKER_STATUS.md` e ADR-0007 para a evidência completa:
-inspeção do pacote + `DllNotFoundException` real reproduzida).
+runtime nativo do PicoGK (`GyroidScaffoldBuilder.cs`, `Program.cs`) do código independente e
+puramente matemático (`GyroidMath.cs`, novo no Incremento 2.1.1; `JobEnvelope.cs`,
+`SimpleMesh.cs`, `GeometryMetricsCalculator.cs`, `StlExporter.cs`), o que permite testar
+genuinamente essa segunda parte (44 testes xUnit) mesmo com a primeira bloqueada.
+
+- `GyroidMath.cs` — TOTALMENTE independente do PicoGK (nenhuma referência a
+  `PicoGK.Library`/`Voxels`/`Mesh`): avaliação do campo gyroid de Schoen (1970), SDF exata de
+  bloco e cilindro, interseção booleana implícita via `max()` (CSG padrão), conversão
+  `wall_thickness_mm` → meia-largura de banda, mapeamento determinístico seed→deslocamento de
+  fase, estimativa de fração sólida por amostragem em grade regular, e calibração de porosidade
+  por bisseção analítica (`CalibratePorosityByBisection`) usando essa estimativa como oráculo.
+  Também define o piso de voxel size do modo preview (0.3 mm) e as estimativas prévias
+  (limite superior, grade densa) de contagem de voxels e memória usadas para rejeitar receitas
+  antes da execução.
+- `GyroidScaffoldBuilder.cs` — a classe `GyroidDomainImplicit` (substitui o antigo arquivo
+  `GyroidImplicit.cs` do Incremento 2.1, que não existe mais como arquivo separado) implementa
+  `IImplicit` combinando a banda gyroid com o SDF do domínio real (bloco ou cilindro) via
+  `GyroidMath.IntersectSignedDistance` — o cilindro deixa de ser recortado pela bounding box e
+  passa a ser recortado pelo volume real do cilindro. `GyroidScaffoldBuilder.BuildAndExport`
+  aplica a calibração de porosidade quando `target_porosity_pct` está presente, o piso de voxel
+  size em modo preview, e solda a malha (`SimpleMesh.Weld()`) antes de exportar/medir — corrige
+  a divergência de contagem de vértices encontrada na auditoria (STL com 224 vértices únicos/336
+  triângulos enquanto o manifesto reportava 168 vértices; causa raiz era ausência de
+  deduplicação, agora corrigida na fonte).
+
+**Execução real continua bloqueada neste ambiente** — o pacote NuGet 2.2.0 não traz runtime
+nativo para linux-x64 (ver `apps/geometry-worker/WORKER_STATUS.md` e ADR-0007 para a evidência
+completa: inspeção do pacote + `DllNotFoundException` real reproduzida). Isso significa que
+todas as correções acima estão provadas matematicamente (44 testes xUnit) mas **não** foram
+provadas contra uma execução real do PicoGK nesta sessão — essa prova depende da execução no
+Windows do usuário (`docs/examples/WINDOWS_EXECUTION_KIT.md`).
+
+## Segurança, fila e ciclo de vida de jobs (Incremento 2.1.1)
+
+Correções concentradas em `apps/api/src/biomatcad_api/services/geometry_job_service.py`,
+`worker_client.py`, `manifest_service.py` e `scripts/geometry_dispatcher.py`:
+
+- **Isolamento entre organizações**: antes de criar um `DesignRun`, o serviço agora verifica
+  explicitamente que projeto, receita e material pertencem à mesma organização do usuário
+  autenticado, que a receita pertence de fato ao projeto informado, e que a receita está no
+  estado `validated`. Qualquer violação retorna 403 com auditoria — coberto por
+  `test_geometry_job_security.py` (testes de ataque dedicados: projeto de outra organização,
+  receita de outra organização, receita não pertencente ao projeto informado, receita não
+  validada). **Provado de verdade, não apenas por código revisado.**
+- **Fila com claim atômico**: o dispatcher reivindica um `GeometryJob` via
+  `SELECT ... FOR UPDATE SKIP LOCKED` (PostgreSQL), eliminando a janela de corrida do padrão
+  anterior (ler status, depois atualizar em uma transação separada), onde dois dispatchers
+  concorrentes podiam reivindicar o mesmo job. `test_geometry_job_concurrency.py` sobe duas
+  conexões/threads reais e independentes contra um Postgres real e confirma zero jobs
+  reivindicados em duplicidade ao longo de 24 jobs. O dispatcher também emite heartbeat
+  periódico e recupera jobs órfãos (processo que morreu no meio da execução, heartbeat expirado).
+- **Cancelamento real**: cancelar um `GeometryJob` em execução mata a árvore de processos real
+  do subprocess do worker (via `psutil`, cross-platform), é idempotente (recancelar não falha
+  nem duplica efeito) e tem proteção de corrida — um job cancelado no meio da execução nunca
+  pode transicionar depois para `succeeded` (`test_geometry_job_cancellation.py`, incluindo um
+  teste de corrida dedicado contra o fluxo real de `dispatch_job`).
+- **Manifesto reestruturado para rastreabilidade completa**: `ArtifactManifest` agora registra
+  commit Git, versão do worker/.NET/PicoGK, plataforma, seed e deslocamento de fase efetivo,
+  parâmetros efetivamente aplicados (espessura/isovalor/porosidade), lista de artefatos com
+  SHA-256 individual, e status de validação do STL. O SHA-256 do **próprio** manifesto é
+  calculado e armazenado numa coluna de banco separada (`Artifact.manifest_checksum` ou
+  equivalente) — nunca embutido dentro do JSON que ele mesmo descreve, o que evitaria
+  circularidade (o hash de um documento não pode depender de um campo dentro do próprio
+  documento sem uma convenção de exclusão, que é exatamente o que se evitou aqui ao mover o
+  checksum para fora).
+- Nenhum destes itens depende de uma execução real do PicoGK — todos foram exercitados com um
+  `FakeWorkerClient`/mocks de subprocess controlados, o que é suficiente para provar a lógica de
+  autorização, concorrência de fila e cancelamento (que são propriedades do processo Python, não
+  da geometria em si). Ver `IMPLEMENTATION_STATUS.md`, itens 7, 8 e 9 do checklist de aceite.
 
 ## O que ainda não existe
 
@@ -156,13 +247,22 @@ inspeção do pacote + `DllNotFoundException` real reproduzida).
 - RBAC/ABAC completo (`PM-ONLY-04` parcialmente iniciado: só há um `role` de string simples no
   modelo `User`, sem permissões por instituição/unidade/projeto).
 - Geração real de scaffold Gyroid, thumbnail, exportação VDB e determinismo geométrico
-  verificado (bloqueados pela ausência de runtime nativo do PicoGK — ver acima e ADR-0007).
+  verificado (bloqueados pela ausência de runtime nativo do PicoGK — ver acima e ADR-0007). As
+  correções de código do Incremento 2.1.1 (domínio real, espessura/isovalor/porosidade/seed,
+  preview vs. final, solda de vértices) estão prontas e unitariamente testadas, mas **ainda não
+  provadas contra uma execução real do PicoGK** — essa prova é o próximo passo, no Windows do
+  usuário.
+- E2E real (Playwright) executado de ponta a ponta em um navegador real — escrito
+  (`apps/web/e2e/`), mas bloqueado neste sandbox Linux (faltam bibliotecas nativas do Chromium e
+  `sudo` está desabilitado) — ver `apps/web/e2e/README.md`.
 
 ## Próximo incremento sugerido
 
 Ver `REQUIREMENTS_MATRIX.md`, `ROADMAP.md` e `docs/adr/` para prioridades. O Prompt Mestre
 condiciona explicitamente o avanço à Fase 3 à vertical geométrica estar "realmente executável" —
-isso ainda não é o caso (ADR-0007). O próximo incremento razoável é o desbloqueio do worker
-(executar em Windows/macOS, ou investigar build nativo do PicoGK para linux-x64), seguido do
-carregamento de dados reais de materiais (AP-07: 32+ materiais com DOI) antes de avançar para
+isso ainda não é o caso (ADR-0007). O próximo incremento razoável é executar de fato
+`apps/geometry-worker` em Windows (ver `docs/examples/WINDOWS_EXECUTION_KIT.md`) — ou
+alternativamente investigar build nativo do PicoGK para linux-x64 —, confirmar determinismo
+geométrico com o mesmo seed em duas execuções reais, rodar o E2E Playwright de ponta a ponta, e
+só então carregar dados reais de materiais (AP-07: 32+ materiais com DOI) antes de avançar para
 FEM/DICOM/LIMS/prontuário.

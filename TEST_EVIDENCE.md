@@ -233,3 +233,136 @@ geométrica está implementada e testada em todas as partes que não dependem da
 PicoGK; a geração real de um scaffold Gyroid via worker não pôde ser verificada neste ambiente.
 Ver ADR-0007 e `IMPLEMENTATION_STATUS.md` para os detalhes completos e os caminhos de
 desbloqueio não tentados nesta sessão.
+
+---
+
+# Evidência de teste — Incremento 2.1.1 (Fase 2, corretivo, parcialmente bloqueado no mesmo ponto)
+
+Seção adicionada nesta sessão para consolidar a evidência de teste das correções do Incremento
+2.1.1 (schema, worker C#, API, frontend, dependências). Não substitui a seção acima (Incremento
+2.1), que permanece como registro histórico daquela entrega. Ver `IMPLEMENTATION_STATUS.md`
+(seção "Incremento 2.1.1") para o checklist de aceite completo, item a item.
+
+## 1. Backend (`apps/api`) — pytest
+
+```text
+$ pytest -v
+...
+83 passed, 2 skipped in <N>s
+```
+
+Os 2 skips são esperados neste ambiente: testes que invocam o binário real do worker C#
+(`dotnet BioMatCadGeometryWorker.dll`) via `DotnetPicoGkWorkerClient`, marcados `skipif` na
+ausência de `dotnet` no PATH ou de um ambiente Windows real — o mesmo padrão já usado desde o
+Incremento 2.1 para o teste `test_dispatch_job_real_worker_fails_in_blocked_environment`.
+
+Novos arquivos de teste desta sessão:
+- `tests/test_geometry_job_security.py` — isolamento entre organizações (testes de ataque:
+  projeto de outra organização, receita de outra organização, receita não pertencente ao
+  projeto, receita não validada). Todos recusados com 403 e auditados.
+- `tests/test_geometry_job_concurrency.py` — duas conexões/threads reais e independentes contra
+  Postgres real disputando os mesmos jobs; zero jobs reivindicados em duplicidade em 24 jobs.
+- `tests/test_geometry_job_cancellation.py` — cancelamento real (kill de árvore de processos via
+  `psutil`), idempotência de recancelamento, teste de corrida (cancelamento no meio de
+  `dispatch_job` nunca permite transição posterior para `succeeded`).
+- `tests/test_recipe_schema.py` — ampliado para 24 testes cobrindo a nova semântica
+  espessura/isovalor (obrigatoriedade de `wall_thickness_mm`, rejeição de combinações
+  contraditórias com `TOPOLOGY_PARAMETERS_INCONSISTENT`).
+
+```text
+$ ruff check .
+All checks passed!
+
+$ mypy src
+Success: no issues found
+```
+
+## 2. Worker C# (`apps/geometry-worker`) — xUnit
+
+```text
+$ dotnet build
+Build succeeded. 0 Warning(s). 0 Error(s).
+
+$ cd tests/BioMatCadGeometryWorker.Tests
+$ dotnet test
+Passed!  - Failed: 0, Passed: 44, Skipped: 0, Total: 44
+```
+
+Novo nesta sessão: `GyroidMathTests.cs` (27 testes) cobrindo `GyroidMath.cs` — avaliação do campo
+gyroid, SDF de bloco/cilindro, interseção booleana, conversão espessura↔meia-largura de banda,
+mapeamento seed→fase, estimativa de fração sólida, calibração de porosidade por bisseção (casos
+convergentes e casos de borda), piso de voxel size em preview, estimativas de voxel/memória. E
+`SimpleMeshWeldTests.cs` (5 testes) cobrindo a solda de vértices (`Weld()`) — cubo com vértices
+duplicados reduzido ao número correto de vértices únicos, preservação da topologia dos
+triângulos, casos de malha já soldada (idempotência). Ampliações em `StlExporterTests.cs` e
+`GeometryMetricsCalculatorTests.cs` para cobrir a malha pós-solda. Todos os 44 testes são
+independentes do runtime nativo do PicoGK — nenhum foi (nem poderia ser, neste sandbox) validado
+contra uma execução real de `Voxels`/`Mesh`.
+
+## 3. Frontend (`apps/web`) — Vitest, tsc, eslint, build
+
+```text
+$ npx tsc --noEmit
+(sem erros)
+
+$ npm run lint
+(sem erros)
+
+$ npx vitest run
+...
+Test Files  10 passed (10)
+     Tests  27 passed (27)
+
+$ npm run build
+✓ built in <N>s
+
+$ npm run build:pages
+✓ built in <N>s
+```
+
+Novo nesta sessão: `tests/schemaSync.test.ts` (garante que `apps/web/src/schemas/geometry-
+recipe-v1.schema.json` é byte-idêntico a `schemas/biomatcem/geometry-recipe-v1.schema.json`,
+evitando que a cópia local usada pelo Ajv no frontend divirja silenciosamente do schema real do
+backend). `tests/recipeValidationOffline.test.ts` ampliado para cobrir a validação real via Ajv
+(`ajv/dist/2020`) contra o schema sincronizado, substituindo as ~15 regras manuais do
+Incremento 2.1, e a canonicalização recursiva do fingerprint de demonstração (corrigindo o bug
+em que `JSON.stringify` com replacer de array aplicava o mesmo filtro de chaves de topo em todos
+os níveis de aninhamento, descartando silenciosamente campos de objetos aninhados).
+
+## 4. Migração Alembic (Incremento 2.1.1)
+
+```text
+$ alembic upgrade head   # a partir de um banco vazio
+INFO  Running upgrade ... -> ..., incremento_2_1_1_claim_atomico_e_...
+
+$ alembic upgrade head   # a partir de um banco já na revisão anterior (Incremento 2.1)
+INFO  Running upgrade <revisão anterior> -> ..., incremento_2_1_1_claim_atomico_e_...
+```
+
+Verificada nos dois cenários (banco vazio do zero, e banco incremental já na revisão do
+Incremento 2.1) — nova revisão adiciona as colunas necessárias para o claim atômico da fila e
+para a reestruturação do manifesto (checksum próprio fora do JSON).
+
+## 5. Auditoria de dependências (Incremento 2.1.1)
+
+Ver `docs/security/DEPENDENCY_AUDIT_2.1.1.md` para o detalhamento completo. Resumo:
+
+| Ecossistema | Ferramenta | Resultado |
+|---|---|---|
+| Python (`apps/api`) | `pip-audit` | 0 vulnerabilidades em 23 pacotes diretos |
+| NuGet (`apps/geometry-worker`) | `dotnet list package --vulnerable` | 0 pacotes vulneráveis |
+| npm (`apps/web` + raiz) | `npm audit` | 18 reportadas — 1 corrigida sem breaking change (react-router 6.26.2→6.30.4), 17 deferidas (tooling de dev, ver `ROADMAP.md`) |
+
+## O que esta evidência explicitamente NÃO cobre
+
+- **Execução real do worker PicoGK** — continua bloqueada neste sandbox Linux (ADR-0007); os 44
+  testes xUnit acima são inteiramente sobre código matemático/contratual independente do PicoGK.
+- **E2E Playwright** — escrito (`apps/web/e2e/`), nunca executado neste sandbox (faltam
+  bibliotecas nativas do Chromium, `sudo` desabilitado — ver `apps/web/e2e/README.md`).
+- **Determinismo geométrico real** (mesma seed ⇒ mesmo SHA-256 de STL) — depende de duas
+  execuções reais, pendente da execução do usuário no Windows.
+
+Ambos os itens acima só poderão ser fechados depois que o usuário executar
+`apps/geometry-worker` de verdade em Windows x64 e devolver os resultados — ver
+`docs/examples/WINDOWS_EXECUTION_KIT.md` e o checklist de aceite completo em
+`IMPLEMENTATION_STATUS.md`.

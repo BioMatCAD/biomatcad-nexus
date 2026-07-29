@@ -4,44 +4,81 @@ Plataforma integrada de engenharia computacional de biomateriais, laboratório, 
 e saúde digital — projeto derivado do doutorado de Adler Lima Botelho de Azevedo
 (PPGBiotec/UFBA) e do `Prompt_Mestre_BioMatCAD_Nexus.md`.
 
-## Status real deste repositório (2026-07-29 — Incremento 2.1 da Fase 2, PARCIALMENTE BLOQUEADO)
+## Status real deste repositório (2026-07-29 — Incremento 2.1.1 da Fase 2, CORRETIVO, PARCIALMENTE BLOQUEADO)
 
-O Incremento 2.1 entrega a primeira vertical funcional do núcleo científico: material
-documentado → projeto → receita BioMatCEM → job geométrico → worker C#/PicoGK → scaffold Gyroid
-→ métricas → artefatos → visualização 3D. Schema versionado, modelos de dados (9 entidades),
-orquestração de job via fila Postgres, API com autorização por organização e frontend completo
-(catálogo, editor de receita, visualizador 3D via Three.js) estão **reais e testados** (65
-testes de backend coletados, 17 de frontend, 9 de C#). O worker C#/.NET9+PicoGK 2.2.0
-**compila** mas sua **execução real está bloqueada** neste ambiente — o pacote oficial não traz
-runtime nativo para linux-x64, confirmado por evidência real (`DllNotFoundException`
-reproduzida, ver ADR-0007 e `apps/geometry-worker/WORKER_STATUS.md`). Por isso este incremento é
-entregue **parcialmente bloqueado**, não concluído — a Fase 3 não deve começar até essa vertical
-estar realmente executável. Ver `IMPLEMENTATION_STATUS.md` para o inventário completo com
-evidências desta sessão.
+O **Incremento 2.1.1** é uma correção de defeitos encontrados numa auditoria do Incremento 2.1
+("Se o PicoGK não puder ser executado no sandbox, declare o incremento parcialmente bloqueado.
+Não substitua silenciosamente o worker por geometria falsa." continua valendo). Ele não adiciona
+funcionalidade nova de escopo — corrige, item a item, defeitos reais encontrados na vertical
+geométrica entregue no Incremento 2.1: semântica ambígua de espessura/isovalor no schema, corte
+por bounding box em vez do domínio real (cilindro), ausência de solda de vértices (bug que
+produzia contagem de vértices divergente entre STL e manifesto), autorização entre organizações
+insuficiente, condição de corrida na fila de jobs e no cancelamento, manifesto com risco de
+circularidade de checksum, e validação de receita duplicada e divergente entre frontend e
+backend. Todas essas correções estão **implementadas e testadas** nesta sessão — backend (83
+testes pytest, 2 skips esperados sem `dotnet`/Windows), worker C# (44 testes xUnit, todos sobre
+código independente do PicoGK), frontend (27 testes Vitest, `tsc`/`eslint`/build limpos).
+
+**O que continua igual em relação ao Incremento 2.1**: a execução real do worker contra o PicoGK
+nativo **continua bloqueada neste sandbox Linux** (o pacote NuGet 2.2.0 só traz runtime nativo
+para `win-x64`/`osx-arm64` — ver ADR-0007). Por isso nenhuma das correções de geometria (domínio
+real, espessura/isovalor, calibração de porosidade, seed→fase, preview vs. final, solda de
+vértices) foi provada contra uma malha PicoGK real nesta sessão — apenas contra os testes
+matemáticos/unitários independentes de PicoGK. Determinismo geométrico real e a execução E2E
+(Playwright) também permanecem pendentes. Para fechar esses itens, o usuário executará o worker
+real no seu próprio Windows x64 e devolverá os resultados — ver o guia completo em
+`docs/examples/WINDOWS_EXECUTION_KIT.md`. Ver `IMPLEMENTATION_STATUS.md` para o inventário
+completo, critério de aceite por critério de aceite, do que está fechado vs. pendente dessa
+execução.
 
 O que existe de fato agora:
 
 - Auditoria da Fase 0: `docs/SOURCE_DOCUMENTS.md`, `REQUIREMENTS_MATRIX.md`.
-- ADRs de escopo e arquitetura: `docs/adr/0001-*.md` a `0007-*.md`.
-- `apps/api`: FastAPI real, PostgreSQL via SQLAlchemy/Alembic (3 migrações), auth `DEV_AUTH`,
-  estado operacional (Pesquisa/Laboratório/suíte clínica), **materiais/projetos/receitas
-  BioMatCEM/jobs geométricos/artefatos (Incremento 2.1)** com autorização por organização e
-  auditoria — 65 testes pytest coletados (64 executados + 1 skip esperado sem `dotnet`).
-- `schemas/biomatcem/`: schema JSON versionado da receita geométrica (`geometry-recipe-v1`),
-  golden recipes, validação estrita (nenhum código executável aceito) — ver ADR-0006.
+- ADRs de escopo e arquitetura: `docs/adr/0001-*.md` a `0008-*.md`.
+- `apps/api`: FastAPI real, PostgreSQL via SQLAlchemy/Alembic (4 migrações), auth `DEV_AUTH`,
+  estado operacional (Pesquisa/Laboratório/suíte clínica), materiais/projetos/receitas
+  BioMatCEM/jobs geométricos/artefatos com autorização por organização e auditoria. **Incremento
+  2.1.1**: verificação real cross-organização antes de criar um `DesignRun`, fila com claim
+  atômico via `SELECT ... FOR UPDATE SKIP LOCKED`, cancelamento real com kill de árvore de
+  processos e proteção de corrida, manifesto reestruturado com SHA-256 fora do próprio JSON —
+  83 testes pytest coletados (2 skips esperados sem `dotnet`/Windows), ruff e mypy limpos.
+- `schemas/biomatcem/`: schema JSON versionado da receita geométrica (`geometry-recipe-v1`) —
+  **Incremento 2.1.1**: `wall_thickness_mm` agora obrigatório e único controlador de espessura,
+  `isovalue` agora opcional (centro da banda, default 0.0), combinações contraditórias
+  rejeitadas — ver ADR-0008. Golden recipes agora diretamente válidas contra o schema (metadados
+  movidos para `METADATA.json` separado).
 - `apps/geometry-worker`: worker C#/.NET9+PicoGK 2.2.0 — **compila com sucesso**; execução real
-  **bloqueada** neste ambiente (sem runtime nativo linux-x64), com evidência completa em
-  `WORKER_STATUS.md` e ADR-0007. 9 testes xunit passando sobre o código independente do PicoGK.
-- `apps/web`: React/TypeScript/Vite real — landing, login, dashboard, **catálogo de materiais,
+  **continua bloqueada** neste ambiente (sem runtime nativo linux-x64), com evidência completa em
+  `WORKER_STATUS.md` e ADR-0007. **Incremento 2.1.1**: domínio real por interseção booleana de
+  SDF (cilindro deixa de ser recortado pela bounding box), espessura/isovalor/porosidade/seed
+  efetivamente aplicados, diferença real preview-vs-final, solda de vértices (`SimpleMesh.Weld()`)
+  corrigindo a divergência de contagem de vértices da auditoria, validação pós-gravação do STL,
+  limites computacionais pré-execução, timeout com kill de árvore de processos — 44 testes xUnit
+  passando sobre o código matemático/contratual independente do PicoGK (`GyroidMath.cs`,
+  `SimpleMesh`, `StlExporter`), nenhum contra PicoGK real.
+- `apps/web`: React/TypeScript/Vite real — landing, login, dashboard, catálogo de materiais,
   projetos, editor de receita com validação ao vivo, acompanhamento de job, visualizador 3D via
-  Three.js (Incremento 2.1)**, modo demonstração para GitHub Pages com STL sintético rotulado —
-  17 testes Vitest passando, build normal e build de demo executados com sucesso.
+  Three.js. **Incremento 2.1.1**: validação de receita unificada com Ajv contra uma cópia local
+  sincronizada do schema real (com teste de sincronia byte-a-byte), fingerprint de demonstração
+  corrigido (canonicalização recursiva real, documentado como NÃO sendo SHA-256 real) — 27 testes
+  Vitest passando, `tsc`/`eslint`/build limpos. E2E Playwright escrito (`apps/web/e2e/`), mas
+  **bloqueado neste sandbox** (faltam bibliotecas nativas do Chromium e `sudo` está desabilitado)
+  — ver `apps/web/e2e/README.md`.
 - `ARCHITECTURE.md`, `IMPLEMENTATION_STATUS.md` e `ROADMAP.md` — detalhamento técnico, evidências
-  e priorização dos próximos passos (desbloqueio do worker antes da Fase 3).
+  e priorização dos próximos passos (execução real do worker no Windows antes da Fase 3).
+- `docs/examples/WINDOWS_EXECUTION_KIT.md` — guia passo a passo para o usuário compilar e
+  executar `apps/geometry-worker` de verdade em Windows x64 (onde o PicoGK 2.2.0 tem runtime
+  nativo oficial) e devolver os resultados para fechar os itens de aceite pendentes.
+- `docs/security/DEPENDENCY_AUDIT_2.1.1.md` — auditoria de dependências Python/npm/NuGet;
+  zero vulnerabilidades em Python/NuGet, 18 no npm (1 corrigida sem breaking change —
+  react-router 6.26.2→6.30.4 —, 17 de tooling de desenvolvimento deferidas com justificativa,
+  ver `ROADMAP.md`).
+- `scripts/audit_stl_vs_worker_output.py` — recomputação independente (Python) de métricas de
+  STL, para conferência cruzada contra a saída real do worker quando ela existir.
 - `NOTICES.md` — atribuições de terceiros (PicoGK/Apache-2.0, three.js/MIT, etc.).
-- `TEST_EVIDENCE.md` — log bruto da revalidação completa desta sessão.
-- Histórico Git completo preservado em `biomatcad-nexus-v2.2.bundle`, verificado com
-  `git bundle verify`.
+- `TEST_EVIDENCE.md` — log da revalidação completa, incluindo a seção do Incremento 2.1.1.
+- Histórico Git completo preservado via `git bundle` (nunca reescrito — apenas novos commits
+  acrescentados a cada incremento), verificado com `git bundle verify`.
 - Estrutura de diretórios do monorepo para os módulos ainda não implementados (Seção 6 do
   Prompt Mestre), cada um com README explicando propósito e status.
 
@@ -146,7 +183,7 @@ Rodar os testes (requer `TEST_DATABASE_URL` e `PG_ADMIN_URL` apontando para um P
 pytest -v
 ```
 
-### Worker geométrico (`apps/geometry-worker`) — Incremento 2.1
+### Worker geométrico (`apps/geometry-worker`) — Incremento 2.1, corrigido no 2.1.1
 
 ```bash
 cd apps/geometry-worker
@@ -154,19 +191,36 @@ dotnet build                                        # compila (0 erros esperados
 mkdir -p ~/Documents                                # PicoGK grava um log aqui
 dotnet bin/Debug/net9.0/BioMatCadGeometryWorker.dll <job.json>
 # Em linux-x64 sem runtime nativo: exit code 1, error_code=PICOGK_RUNTIME_UNAVAILABLE (esperado
-# e documentado — ver apps/geometry-worker/WORKER_STATUS.md e ADR-0007).
+# e documentado — ver apps/geometry-worker/WORKER_STATUS.md e ADR-0007). Sem mudança neste
+# incremento corretivo: o bloqueio de runtime nativo em linux-x64 continua o mesmo.
 
 cd tests/BioMatCadGeometryWorker.Tests
-dotnet test                                          # 9/9 esperado, independe do PicoGK
+dotnet test                                          # 44/44 esperado, independe do PicoGK
 ```
 
-### Dispatcher de jobs (processo separado da API) — Incremento 2.1
+**Execução real (Windows x64)**: para exercitar de verdade o PicoGK nativo — geração real do
+scaffold Gyroid, domínio recortado pelo cilindro real, espessura/isovalor/porosidade/seed
+efetivamente aplicados, determinismo — siga
+`docs/examples/WINDOWS_EXECUTION_KIT.md` num Windows x64 real (única plataforma, junto de
+`osx-arm64`, com runtime nativo oficial no pacote NuGet 2.2.0). Inclui
+`apps/geometry-worker/tools/New-JobFromRecipe.ps1` (monta um `job.json` a partir de uma golden
+recipe) e `scripts/audit_stl_vs_worker_output.py` (recomputa métricas do STL de forma
+independente, para conferência cruzada).
+
+### Dispatcher de jobs (processo separado da API) — corrigido no Incremento 2.1.1
 
 ```bash
 cd apps/api
 python scripts/geometry_dispatcher.py --once         # processa jobs QUEUED uma vez e sai
 python scripts/geometry_dispatcher.py                # loop contínuo (Ctrl+C para parar)
 ```
+
+Desde o Incremento 2.1.1, o claim de um job pela fila usa `SELECT ... FOR UPDATE SKIP LOCKED`
+(atômico no PostgreSQL), substituindo o padrão anterior de ler-depois-atualizar, vulnerável a
+dois dispatchers concorrentes reivindicarem o mesmo job — provado com dois processos/conexões
+reais concorrentes contra Postgres real, zero duplicidade em 24 jobs (`test_geometry_job_
+concurrency.py`). O dispatcher também emite heartbeat e recupera jobs órfãos (processo morto a
+meio da execução).
 
 ### Frontend (`apps/web`)
 
@@ -177,6 +231,9 @@ npm run dev          # http://localhost:5173, espera apps/api em localhost:8000
 npm run test         # Vitest
 npm run build         # build de produção
 npm run build:pages   # build estático para GitHub Pages (dados sintéticos apenas)
+# npm run test:e2e     # Playwright — BLOQUEADO neste sandbox (falta libXdamage.so.1 e sudo
+#                        está desabilitado); ver apps/web/e2e/README.md. Rodar de verdade requer
+#                        um ambiente com `npx playwright install --with-deps chromium` completo.
 ```
 
 ## Documentos de referência
@@ -184,6 +241,13 @@ npm run build:pages   # build estático para GitHub Pages (dados sintéticos ape
 - `Prompt_Mestre_BioMatCAD_Nexus.md` — especificação completa (fornecida pelo usuário).
 - `docs/SOURCE_DOCUMENTS.md` — inventário e proveniência dos documentos-fonte científicos.
 - `REQUIREMENTS_MATRIX.md` — matriz de requisitos rastreável.
-- `docs/adr/` — decisões de arquitetura registradas.
+- `docs/adr/` — decisões de arquitetura registradas, incluindo ADR-0007 (bloqueio do PicoGK em
+  Linux) e ADR-0008, novo neste incremento (semântica espessura/isovalor do gyroid).
 - `ARCHITECTURE.md` — arquitetura detalhada e o que dela está implementado.
-- `IMPLEMENTATION_STATUS.md` — inventário real vs. demonstrativo vs. planejado, com evidências.
+- `IMPLEMENTATION_STATUS.md` — inventário real vs. demonstrativo vs. planejado, com evidências,
+  incluindo o checklist dos 17 itens de aceite do Incremento 2.1.1 (o que está fechado vs.
+  pendente de execução real no Windows).
+- `docs/examples/WINDOWS_EXECUTION_KIT.md` — guia para o usuário executar o worker real em
+  Windows x64 e devolver os resultados.
+- `docs/security/DEPENDENCY_AUDIT_2.1.1.md` — auditoria de dependências e decisões registradas.
+- `TEST_EVIDENCE.md` — log de evidência de teste, incluindo a seção do Incremento 2.1.1.
