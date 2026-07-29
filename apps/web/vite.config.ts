@@ -1,5 +1,5 @@
-/// <reference types="vitest/config" />
 import { defineConfig } from "vite";
+import { configDefaults } from "vitest/config";
 import react from "@vitejs/plugin-react";
 
 // Modo "demo": build estático para GitHub Pages, sob /<nome-do-repositorio>/ (Prompt Mestre §7.1).
@@ -18,5 +18,10 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./tests/setup.ts"],
     css: true,
+    // Incremento 2.1.1 (item 12): e2e/ contém specs do Playwright (test.describe do
+    // @playwright/test, não do vitest) -- exclui explicitamente para o vitest não tentar
+    // coletá-los (vitest e playwright têm runners de teste incompatíveis apesar da sintaxe
+    // parecida).
+    exclude: [...configDefaults.exclude, "e2e/**"],
   },
 });
