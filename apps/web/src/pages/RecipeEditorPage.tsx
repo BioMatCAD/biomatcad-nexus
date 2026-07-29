@@ -13,7 +13,7 @@ const client = isDemoMode ? demoApiClient : apiClient;
 const DEFAULT_RECIPE: GeometryRecipeBody = {
   schema_version: "1.0.0",
   domain: { shape: "block", dimensions_mm: { kind: "block", x_mm: 10, y_mm: 10, z_mm: 10 } },
-  topology: { kind: "gyroid", cell_size_mm: 2, isovalue: 0, target_porosity_pct: 60 },
+  topology: { kind: "gyroid", cell_size_mm: 2, wall_thickness_mm: 0.4, isovalue: 0, target_porosity_pct: 60 },
   resolution: { voxel_size_mm: 0.2 },
   mode: "preview",
   seed: 1,
@@ -191,11 +191,20 @@ export function RecipeEditorPage() {
             />
           </label>
           <label>
-            Isovalor
+            Espessura de parede (mm) -- obrigatório, único controlador de espessura
+            <input
+              type="number"
+              step="0.05"
+              value={recipe.topology.wall_thickness_mm}
+              onChange={(e) => setRecipe((prev) => ({ ...prev, topology: { ...prev.topology, wall_thickness_mm: Number(e.target.value) } }))}
+            />
+          </label>
+          <label>
+            Isovalor (centro da banda -- não controla espessura, default 0)
             <input
               type="number"
               step="0.1"
-              value={recipe.topology.isovalue}
+              value={recipe.topology.isovalue ?? 0}
               onChange={(e) => setRecipe((prev) => ({ ...prev, topology: { ...prev.topology, isovalue: Number(e.target.value) } }))}
             />
           </label>

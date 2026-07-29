@@ -77,7 +77,7 @@ const SAMPLE_PROJECT: ProjectResponse = {
 const SAMPLE_RECIPE_BODY: GeometryRecipeBody = {
   schema_version: "1.0.0",
   domain: { shape: "block", dimensions_mm: { kind: "block", x_mm: 10, y_mm: 10, z_mm: 10 } },
-  topology: { kind: "gyroid", cell_size_mm: 2, isovalue: 0, target_porosity_pct: 60 },
+  topology: { kind: "gyroid", cell_size_mm: 2, wall_thickness_mm: 0.4, isovalue: 0, target_porosity_pct: 60 },
   resolution: { voxel_size_mm: 0.2 },
   mode: "preview",
   seed: 42,

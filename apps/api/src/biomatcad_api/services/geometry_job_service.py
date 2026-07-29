@@ -186,11 +186,17 @@ def request_cancel(db: Session, *, job: GeometryJob, cancelled_by_user_id: str) 
     sinaliza -- o dispatcher que está de fato rodando o worker é quem observa o sinal (via
     cancel_check em worker_client.execute) e mata o processo; a transição final para CANCELLED
     acontece então em _finalize_cancelled. Idempotente: chamar duas vezes não é erro."""
-    if job.status in (JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.CANCELLED):
+    if job.status == JobStatus.CANCELLED:
+        # Já cancelado (seja porque já estava queued e foi cancelado direto, seja porque o
+        # dispatcher já finalizou o cancelamento de um job que estava running) -- idempotente,
+        # nunca um erro: cancelar algo que já está cancelado é sempre um no-op bem-sucedido.
+        return job
+    if job.status in (JobStatus.SUCCEEDED, JobStatus.FAILED):
         raise JobTransitionError(f"Job {job.id} não pode ser cancelado no estado {job.status.value}.")
 
     if job.cancel_requested_at is not None:
-        # Já solicitado anteriormente -- idempotente, não duplica AuditEvent nem re-decide estado.
+        # cancel_requested_at já setado mas o job ainda está running (o dispatcher ainda não
+        # finalizou) -- idempotente, não duplica AuditEvent nem re-decide estado.
         return job
 
     now = _utcnow()

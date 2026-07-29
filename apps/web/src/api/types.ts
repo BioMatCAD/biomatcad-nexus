@@ -185,8 +185,10 @@ export interface GeometryRecipeBody {
   topology: {
     kind: "gyroid";
     cell_size_mm: number;
-    wall_thickness_mm?: number;
-    isovalue: number;
+    // Incremento 2.1.1 (item 2): obrigatório -- único controlador de espessura.
+    wall_thickness_mm: number;
+    // Opcional (default 0.0 no schema) -- apenas desloca o centro da banda, NÃO controla espessura.
+    isovalue?: number;
     target_porosity_pct?: number;
   };
   resolution?: { voxel_size_mm?: number };
