@@ -31,6 +31,8 @@ data/phi/
 .idea/
 .DS_Store
 Thumbs.db
+*.db
+!docs/**/*.db
 
 # Logs
 *.log
