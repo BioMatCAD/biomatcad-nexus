@@ -456,13 +456,78 @@ Contenção cilíndrica: 493.664 triângulos, 1.480.992 vértices examinados, ra
 porosidade, auditoria independente, determinismo e (para o cilindro) contenção radial/Z. Todas
 dentro das tolerâncias medidas (não apenas estimadas analiticamente) definidas nesta sessão.
 
+## 8. Re-verificação real pós-commit documental + tentativa real de E2E Playwright (2026-07-29)
+
+Após o commit somente-documentação `dbfbfe5`, reexecutei de verdade, neste sandbox, as suítes de
+teste isoladas de backend/worker/frontend (nenhum código foi alterado -- esta é uma checagem de
+regressão, não uma nova correção) e tentei novamente a execução real do E2E Playwright, como
+parte da validação de interface integrada pedida.
+
+**Backend (`apps/api`) — pytest, contra PostgreSQL real via `pgserver`:**
+
+```text
+83 passed, 2 skipped, 0 failed (Duration: 28.18s)
+```
+
+Nota honesta sobre um falso alarme descartado: a primeira tentativa desta re-verificação, feita
+sem configurar `TEST_DATABASE_URL`, caiu no fallback SQLite em arquivo
+(`sqlite:///./test_biomatcad.db`) descrito em `tests/conftest.py`. Esse arquivo tinha linhas
+residuais de uma execução anterior (o teste de concorrência do dispatcher faz `commit()` real,
+fora da transação-por-teste padrão, propositalmente, para provar visibilidade entre conexões) e
+isso produziu 2 falhas espúrias (`test_clinical_suite_expiration_is_respected` e
+`test_two_concurrent_dispatchers_never_claim_the_same_job`, este com contagem de jobs reivindicados
+28 em vez dos 24 esperados). Removi o arquivo SQLite obsoleto e reexecutei a suíte inteira contra
+um PostgreSQL efêmero real via `pgserver` (o mesmo backend usado pelo CI, ver
+`.github/workflows/ci-api.yml`) -- resultado limpo, 0 falhas, idêntico ao baseline já documentado
+na Seção 1. Isto foi uma falha de higiene do ambiente de teste local (arquivo de fallback não
+limpo entre execuções), não uma regressão de código; nenhuma correção de código foi necessária.
+
+**Worker C# (`apps/geometry-worker`) — xUnit, neste sandbox (sem PicoGK, como sempre):**
+
+```text
+Passed!  - Failed: 0, Passed: 62, Skipped: 0, Total: 62, Duration: 367 ms
+```
+
+**Frontend (`apps/web`):**
+
+```text
+tsc --noEmit:  limpo, 0 erros
+eslint (--max-warnings=0): limpo, 0 avisos/erros
+vitest run:    Test Files 10 passed (10) | Tests 27 passed (27)
+vite build:    sucesso (dist/index.html, dist/assets/*, aviso benigno de tamanho de chunk >500kB)
+```
+
+**E2E Playwright — tentativa real, reconfirmando o bloqueio:**
+
+Reexecutei a tentativa de lançar um navegador real via Playwright neste sandbox (ver relato
+completo e literal em `apps/web/e2e/README.md`, seção "Re-confirmação real"):
+
+- Chromium (`chrome-headless-shell`, já baixado): falha idêntica à documentada antes --
+  `libXdamage.so.1: cannot open shared object file`.
+- Firefox (tentativa nova, para verificar se outro motor escaparia da mesma classe de
+  dependência ausente): também falhou -- o Playwright detecta a ausência de `libxdamage1` /
+  `libgtk-3-0` no host antes mesmo de tentar lançar o processo.
+- `apt-get download libxdamage1` (tentativa de obter a biblioteca sem precisar de `sudo`,
+  apenas de rede): falhou com `502 Bad Gateway` -- o próprio acesso de rede a
+  `archive.ubuntu.com` está bloqueado neste sandbox, não só a instalação privilegiada.
+
+Conclusão: o bloqueio de E2E real neste ambiente é duplo (falta a biblioteca nativa E falta
+qualquer via, privilegiada ou não, de obtê-la) e continua sem contorno silencioso possível.
+Nenhum resultado de E2E foi fabricado.
+
+**Veredito desta re-verificação**: a interface integrada -- backend e frontend, cada um
+isoladamente com suas próprias suítes de integração/unitárias -- está validada sem regressão após
+o commit de documentação. A execução E2E real (navegador ponta-a-ponta) permanece bloqueada
+neste sandbox e depende do usuário rodar os comandos documentados em `apps/web/e2e/README.md`
+no seu próprio Windows (mesmo ambiente onde o worker PicoGK já foi validado).
+
 ## O que esta evidência explicitamente NÃO cobre
 
-- **Validação da interface integrada (frontend)** contra o worker corrigido — ainda não
-  realizada.
-- **E2E Playwright** — escrito (`apps/web/e2e/`), nunca executado em nenhum ambiente até agora
-  (bloqueado neste sandbox Linux: faltam bibliotecas nativas do Chromium, `sudo` desabilitado —
-  ver `apps/web/e2e/README.md`).
+- **E2E Playwright real (navegador)** — escrito (`apps/web/e2e/`), nunca executado em nenhum
+  ambiente até agora (bloqueado neste sandbox Linux por dupla causa: bibliotecas nativas
+  ausentes E rede bloqueada para instalá-las sem `sudo` — ver Seção 8 e
+  `apps/web/e2e/README.md`). Backend e frontend foram validados isoladamente (Seção 8), mas
+  isso NÃO substitui o percurso E2E real através do navegador.
 - **Consistência STL-vs-manifesto via fluxo completo API→dispatcher→manifesto** — todas as
   execuções reais desta sessão continuam sendo invocações diretas do worker via CLI, não pelo
   fluxo de produção completo.

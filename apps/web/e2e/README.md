@@ -31,6 +31,30 @@ privilégios/dependências nativas necessários, sem contorno silencioso possív
 `apps/geometry-worker/WORKER_STATUS.md`. Não fabriquei um resultado de execução: o teste abaixo
 nunca rodou até o fim neste ambiente.
 
+## Re-confirmação real (2026-07-29, Incremento 2.1.1, pós-correção de calibração)
+
+Reexecutei a tentativa de verdade neste mesmo sandbox, para o item 10 do pedido do usuário
+("avançar para validação de interface integrada e E2E Playwright"). Resultado, também real e
+não fabricado:
+
+- `chromium_headless_shell` (já baixado de uma tentativa anterior): falha idêntica,
+  `libXdamage.so.1: cannot open shared object file: No such file or directory`.
+- Tentei também o motor **Firefox** (`npx playwright install firefox` + `firefox.launch()`),
+  para verificar se um motor diferente escaparia da mesma classe de dependência nativa ausente:
+  falhou pelo mesmo motivo -- o próprio Playwright detecta a falta de dependências do host antes
+  de lançar (`Host system is missing dependencies to run browsers`), listando `libxdamage1` e
+  `libgtk-3-0` como pacotes necessários.
+- Tentei baixar o `.deb` de `libxdamage1` diretamente via `apt-get download` (que não exige
+  root, apenas rede) para extrair a biblioteca localmente sem precisar de `sudo` -- isso também
+  falhou, mas por um motivo diferente e mais fundamental: o próprio acesso de rede a
+  `archive.ubuntu.com` está bloqueado neste sandbox (`502 Bad Gateway`), não apenas a instalação
+  privilegiada.
+
+Conclusão honesta: o bloqueio é duplo e não contornável dentro deste ambiente -- falta tanto a
+biblioteca nativa quanto qualquer caminho de rede ou privilégio para obtê-la. Nenhum resultado
+de E2E foi ou será fabricado neste sandbox. A execução real do E2E, assim como a do worker
+PicoGK, depende do usuário rodar os comandos abaixo no seu próprio Windows.
+
 ## Como executar (Windows, onde o worker também será testado)
 
 ```powershell
