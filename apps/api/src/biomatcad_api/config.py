@@ -61,6 +61,11 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expires_minutes: int = 30
 
+    # Diretório do adaptador de armazenamento local de artefatos (Incremento 2.1, item 7).
+    # Mantém o mesmo contrato (services/storage.py::StorageAdapter) que um adaptador MinIO/S3
+    # implementaria -- trocar de adaptador não deve exigir mudança nos routers/serviços.
+    artifact_storage_dir: str = Field(default="./data/artifacts")
+
     @field_validator("database_url")
     @classmethod
     def validate_database_url(cls, v: str, info) -> str:  # type: ignore[no-untyped-def]

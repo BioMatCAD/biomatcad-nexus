@@ -30,8 +30,15 @@ def test_alembic_upgrade_head_runs_cleanly_on_empty_database():
     cur.execute(f"CREATE DATABASE {MIGRATION_TEST_DB}")
     admin_conn.close()
 
-    base_url = ADMIN_URL.rsplit("/", 1)[0]
+    # ADMIN_URL pode ser uma URI baseada em socket unix (pgserver), ex.:
+    # "postgresql://postgres:@/postgres?host=/tmp/pgdata2" -- um rsplit("/", 1) ingênuo corta
+    # dentro do valor da query string "host=". Particiona primeiro em "?" para preservar a
+    # query string, e só então troca o nome do banco na parte de path.
+    base_no_query, _, query = ADMIN_URL.partition("?")
+    base_url = base_no_query.rsplit("/", 1)[0]
     migration_db_url = f"{base_url}/{MIGRATION_TEST_DB}"
+    if query:
+        migration_db_url = f"{migration_db_url}?{query}"
 
     env = os.environ.copy()
     env["DATABASE_URL"] = migration_db_url
@@ -54,7 +61,11 @@ def test_alembic_upgrade_head_runs_cleanly_on_empty_database():
     tables = {row[0] for row in check_cur.fetchall()}
     check_conn.close()
 
-    assert {"organizations", "users", "operational_states", "audit_events", "alembic_version"} <= tables
+    assert {
+        "organizations", "users", "operational_states", "audit_events", "alembic_version",
+        "material_records", "material_properties", "scientific_references", "biomat_projects",
+        "geometry_recipes", "design_runs", "geometry_jobs", "artifacts", "artifact_manifests",
+    } <= tables
 
     admin_conn = psycopg2.connect(ADMIN_URL)
     admin_conn.autocommit = True

@@ -45,6 +45,20 @@ def db_session(engine):
     connection.close()
 
 
+def load_golden_recipe(name: str) -> dict:
+    """Carrega uma golden recipe de schemas/biomatcem/golden-recipes/, removendo os campos de
+    metadado (_golden_recipe_id, _description) que não fazem parte do schema geometry-recipe-v1
+    -- ver schemas/biomatcem/golden-recipes/README.md."""
+    import json
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[3]
+    path_json = repo_root / "schemas" / "biomatcem" / "golden-recipes" / f"{name}.json"
+    with open(path_json, encoding="utf-8") as f:
+        data = json.load(f)
+    return {k: v for k, v in data.items() if not k.startswith("_")}
+
+
 @pytest.fixture()
 def client(db_session):
     from fastapi.testclient import TestClient

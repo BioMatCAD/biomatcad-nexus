@@ -28,9 +28,19 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         error_id = str(uuid.uuid4())
         logger.warning("http_error id=%s status=%s path=%s", error_id, exc.status_code, request.url.path)
+        # exc.detail pode ser um dict estruturado (ex.: {"message": ..., "errors": [...]}),
+        # produzido por rotas como POST /recipes/validate. Nesse caso preservamos message/details
+        # separadamente, em vez de fazer str(exc.detail) e perder a lista de erros estruturados
+        # (bug corrigido no Incremento 2.1 -- consumidores da API dependem de error.details).
+        if isinstance(exc.detail, dict):
+            message = str(exc.detail.get("message", "Erro na requisição."))
+            details = exc.detail.get("details", exc.detail.get("errors"))
+        else:
+            message = str(exc.detail)
+            details = None
         return JSONResponse(
             status_code=exc.status_code,
-            content=_error_payload(error_id=error_id, code=f"HTTP_{exc.status_code}", message=str(exc.detail)),
+            content=_error_payload(error_id=error_id, code=f"HTTP_{exc.status_code}", message=message, details=details),
         )
 
     @app.exception_handler(RequestValidationError)
