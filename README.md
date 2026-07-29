@@ -4,33 +4,44 @@ Plataforma integrada de engenharia computacional de biomateriais, laboratório, 
 e saúde digital — projeto derivado do doutorado de Adler Lima Botelho de Azevedo
 (PPGBiotec/UFBA) e do `Prompt_Mestre_BioMatCAD_Nexus.md`.
 
-## Status real deste repositório (2026-07-27 — Incremento 1.1 da Fase 1)
+## Status real deste repositório (2026-07-29 — Incremento 2.1 da Fase 2, PARCIALMENTE BLOQUEADO)
 
-Backend (`apps/api`) e frontend (`apps/web`) têm uma fundação **real e executável**: login,
-dashboard autenticado, health/status da API, modelos de dados com migrações aplicadas contra
-PostgreSQL de verdade, 25 testes de backend e 7 de frontend passando. O Incremento 1.1 corrigiu
-um bug de semântica na chave mestra (suíte clínica vs. Laboratório, ver ADR-0004), classificou a
-autenticação como `DEV_AUTH` (ADR-0005) e preservou o histórico Git completo em bundle. Nenhum
-módulo científico (CAD/FEM/materiais/ML) ou clínico/laboratorial foi implementado ainda. Ver
-`IMPLEMENTATION_STATUS.md` para o inventário completo (real vs. demonstrativo vs. planejado) com
-os comandos e evidências de execução desta sessão — Seção 3.1 do Prompt Mestre: nada é chamado
-de "completo" sem ter sido executado e testado.
+O Incremento 2.1 entrega a primeira vertical funcional do núcleo científico: material
+documentado → projeto → receita BioMatCEM → job geométrico → worker C#/PicoGK → scaffold Gyroid
+→ métricas → artefatos → visualização 3D. Schema versionado, modelos de dados (9 entidades),
+orquestração de job via fila Postgres, API com autorização por organização e frontend completo
+(catálogo, editor de receita, visualizador 3D via Three.js) estão **reais e testados** (65
+testes de backend coletados, 17 de frontend, 9 de C#). O worker C#/.NET9+PicoGK 2.2.0
+**compila** mas sua **execução real está bloqueada** neste ambiente — o pacote oficial não traz
+runtime nativo para linux-x64, confirmado por evidência real (`DllNotFoundException`
+reproduzida, ver ADR-0007 e `apps/geometry-worker/WORKER_STATUS.md`). Por isso este incremento é
+entregue **parcialmente bloqueado**, não concluído — a Fase 3 não deve começar até essa vertical
+estar realmente executável. Ver `IMPLEMENTATION_STATUS.md` para o inventário completo com
+evidências desta sessão.
 
 O que existe de fato agora:
 
 - Auditoria da Fase 0: `docs/SOURCE_DOCUMENTS.md`, `REQUIREMENTS_MATRIX.md`.
-- ADRs de escopo e arquitetura: `docs/adr/0001-*.md` a `0005-*.md`.
-- `apps/api`: FastAPI real, PostgreSQL via SQLAlchemy/Alembic (2 migrações), auth `DEV_AUTH`
-  (JWT, com recusa de startup fora de teste se o segredo for inseguro), contrato de chave mestra
-  corrigido — Pesquisa/Laboratório independentes, suíte clínica (teste+piloto+produção) atômica
-  — seed sintético (pesquisador + admin) — 25 testes pytest passando.
-- `apps/web`: React/TypeScript/Vite real — landing, login, dashboard autenticado mostrando
-  Laboratório e suíte clínica separadamente, tema claro/escuro, modo demonstração para GitHub
-  Pages — 7 testes Vitest passando, build normal e build de demo executados com sucesso.
-- `ARCHITECTURE.md` e `IMPLEMENTATION_STATUS.md` — detalhamento técnico e evidências.
-- `TEST_EVIDENCE.md` — log bruto da revalidação completa do Incremento 1.1.
-- Histórico Git completo preservado em `biomatcad-nexus-v2.1.bundle` (13 commits, verificado
-  com `git bundle verify`).
+- ADRs de escopo e arquitetura: `docs/adr/0001-*.md` a `0007-*.md`.
+- `apps/api`: FastAPI real, PostgreSQL via SQLAlchemy/Alembic (3 migrações), auth `DEV_AUTH`,
+  estado operacional (Pesquisa/Laboratório/suíte clínica), **materiais/projetos/receitas
+  BioMatCEM/jobs geométricos/artefatos (Incremento 2.1)** com autorização por organização e
+  auditoria — 65 testes pytest coletados (64 executados + 1 skip esperado sem `dotnet`).
+- `schemas/biomatcem/`: schema JSON versionado da receita geométrica (`geometry-recipe-v1`),
+  golden recipes, validação estrita (nenhum código executável aceito) — ver ADR-0006.
+- `apps/geometry-worker`: worker C#/.NET9+PicoGK 2.2.0 — **compila com sucesso**; execução real
+  **bloqueada** neste ambiente (sem runtime nativo linux-x64), com evidência completa em
+  `WORKER_STATUS.md` e ADR-0007. 9 testes xunit passando sobre o código independente do PicoGK.
+- `apps/web`: React/TypeScript/Vite real — landing, login, dashboard, **catálogo de materiais,
+  projetos, editor de receita com validação ao vivo, acompanhamento de job, visualizador 3D via
+  Three.js (Incremento 2.1)**, modo demonstração para GitHub Pages com STL sintético rotulado —
+  17 testes Vitest passando, build normal e build de demo executados com sucesso.
+- `ARCHITECTURE.md`, `IMPLEMENTATION_STATUS.md` e `ROADMAP.md` — detalhamento técnico, evidências
+  e priorização dos próximos passos (desbloqueio do worker antes da Fase 3).
+- `NOTICES.md` — atribuições de terceiros (PicoGK/Apache-2.0, three.js/MIT, etc.).
+- `TEST_EVIDENCE.md` — log bruto da revalidação completa desta sessão.
+- Histórico Git completo preservado em `biomatcad-nexus-v2.2.bundle`, verificado com
+  `git bundle verify`.
 - Estrutura de diretórios do monorepo para os módulos ainda não implementados (Seção 6 do
   Prompt Mestre), cada um com README explicando propósito e status.
 
@@ -60,10 +71,10 @@ ADR-0005.
 ## Restaurar o histórico Git completo a partir do bundle
 
 O sandbox de desenvolvimento usado nesta sessão é efêmero — o histórico Git (13 commits) foi
-preservado em `biomatcad-nexus-v2.1.bundle`:
+preservado em `biomatcad-nexus-v2.2.bundle`:
 
 ```bash
-git clone biomatcad-nexus-v2.1.bundle biomatcad-nexus
+git clone biomatcad-nexus-v2.2.bundle biomatcad-nexus
 cd biomatcad-nexus
 git log --oneline
 ```
@@ -71,7 +82,7 @@ git log --oneline
 Verifique a integridade do bundle antes de restaurar (opcional, mas recomendado):
 
 ```bash
-git bundle verify biomatcad-nexus-v2.1.bundle
+git bundle verify biomatcad-nexus-v2.2.bundle
 ```
 
 Verifique a integridade dos arquivos de entrega com `SHA256SUMS.txt`:
@@ -133,6 +144,28 @@ Rodar os testes (requer `TEST_DATABASE_URL` e `PG_ADMIN_URL` apontando para um P
 
 ```bash
 pytest -v
+```
+
+### Worker geométrico (`apps/geometry-worker`) — Incremento 2.1
+
+```bash
+cd apps/geometry-worker
+dotnet build                                        # compila (0 erros esperados)
+mkdir -p ~/Documents                                # PicoGK grava um log aqui
+dotnet bin/Debug/net9.0/BioMatCadGeometryWorker.dll <job.json>
+# Em linux-x64 sem runtime nativo: exit code 1, error_code=PICOGK_RUNTIME_UNAVAILABLE (esperado
+# e documentado — ver apps/geometry-worker/WORKER_STATUS.md e ADR-0007).
+
+cd tests/BioMatCadGeometryWorker.Tests
+dotnet test                                          # 9/9 esperado, independe do PicoGK
+```
+
+### Dispatcher de jobs (processo separado da API) — Incremento 2.1
+
+```bash
+cd apps/api
+python scripts/geometry_dispatcher.py --once         # processa jobs QUEUED uma vez e sai
+python scripts/geometry_dispatcher.py                # loop contínuo (Ctrl+C para parar)
 ```
 
 ### Frontend (`apps/web`)
