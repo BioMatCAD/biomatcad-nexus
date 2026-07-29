@@ -34,7 +34,17 @@ def register_exception_handlers(app: FastAPI) -> None:
         # (bug corrigido no Incremento 2.1 -- consumidores da API dependem de error.details).
         if isinstance(exc.detail, dict):
             message = str(exc.detail.get("message", "Erro na requisição."))
-            details = exc.detail.get("details", exc.detail.get("errors"))
+            # Preserva qualquer chave estruturada adicional (details, errors, reason_code, etc.)
+            # -- não descarta silenciosamente campos que não sejam especificamente "details" ou
+            # "errors" (bug encontrado na auditoria do Incremento 2.1.1: reason_code de
+            # DesignRunAuthorizationError estava sendo perdido).
+            if "details" in exc.detail:
+                details = exc.detail["details"]
+            elif "errors" in exc.detail:
+                details = exc.detail["errors"]
+            else:
+                rest = {k: v for k, v in exc.detail.items() if k != "message"}
+                details = rest or None
         else:
             message = str(exc.detail)
             details = None

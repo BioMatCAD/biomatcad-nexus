@@ -207,3 +207,27 @@ def test_wall_thickness_just_below_half_cell_size_is_accepted():
     recipe["topology"]["cell_size_mm"] = 1.0
     recipe["topology"]["wall_thickness_mm"] = 0.4  # 0.4 < 1.0/2 = 0.5
     assert validate_recipe(recipe) == []
+
+
+def test_vdb_output_format_is_rejected_as_unsupported():
+    """Incremento 2.1.1 (item 4): 'vdb' é sintaticamente válido no schema mas não é implementado
+    -- deve ser rejeitado na validação da receita, antes de qualquer job ser criado."""
+    recipe = copy.deepcopy(VALID_RECIPE)
+    recipe["output_formats"] = ["vdb"]
+    errors = validate_recipe(recipe)
+    assert errors
+    assert any(e["validator"] == "semantic:OUTPUT_FORMAT_UNSUPPORTED" for e in errors)
+
+
+def test_stl_and_vdb_together_is_rejected_because_vdb_unsupported():
+    recipe = copy.deepcopy(VALID_RECIPE)
+    recipe["output_formats"] = ["stl", "vdb"]
+    errors = validate_recipe(recipe)
+    assert errors
+    assert any(e["validator"] == "semantic:OUTPUT_FORMAT_UNSUPPORTED" for e in errors)
+
+
+def test_stl_only_output_format_is_accepted():
+    recipe = copy.deepcopy(VALID_RECIPE)
+    recipe["output_formats"] = ["stl"]
+    assert validate_recipe(recipe) == []

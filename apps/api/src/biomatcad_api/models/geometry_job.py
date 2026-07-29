@@ -19,6 +19,7 @@ from sqlalchemy import (
     Enum,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -65,6 +66,11 @@ class DesignRun(Base):
 
 class GeometryJob(Base):
     __tablename__ = "geometry_jobs"
+    __table_args__ = (
+        # Incremento 2.1.1 (item 6): índice composto para a consulta de claim atômico da fila
+        # (SELECT ... WHERE status='queued' ORDER BY created_at FOR UPDATE SKIP LOCKED).
+        Index("ix_geometry_jobs_status_created_at", "status", "created_at"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     design_run_id: Mapped[str] = mapped_column(String(36), ForeignKey("design_runs.id"), nullable=False)
@@ -85,5 +91,22 @@ class GeometryJob(Base):
     metrics: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
     cancelled_by_user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
+
+    # --- Incremento 2.1.1, itens 6 e 7: claim atômico de fila + cancelamento real ---
+    # Identificador do processo dispatcher que reivindicou este job (hostname:pid ou uuid do
+    # processo) -- permite diagnosticar/recuperar jobs órfãos (dispatcher morreu sem terminar).
+    claimed_by_dispatcher_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Atualizado periodicamente pelo dispatcher enquanto o worker roda -- um job "running" cujo
+    # heartbeat parou de avançar por mais que um limite é candidato a recuperação de job órfão.
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Marca a INTENÇÃO de cancelar (setada imediatamente pela API); o cancelamento efetivo do
+    # processo do worker acontece de forma assíncrona pelo dispatcher, que faz polling deste
+    # campo enquanto o worker roda. Nunca é limpo -- job cancelado permanece cancelado.
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # PID do processo do worker (dotnet) enquanto em execução -- auditoria/depuração; o
+    # encerramento real usa a árvore de processos via psutil (ver worker_client.py), não apenas
+    # este PID isolado (que pode ter filhos).
+    worker_pid: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     design_run: Mapped[DesignRun] = relationship(back_populates="jobs")

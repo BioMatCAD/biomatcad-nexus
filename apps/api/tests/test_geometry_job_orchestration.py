@@ -21,6 +21,7 @@ from biomatcad_api.models.project import BioMatProject
 from biomatcad_api.services.geometry_job_service import (
     JobTransitionError,
     cancel_job,
+    claim_next_queued_job,
     create_design_run_and_job,
     dispatch_job,
     retry_job,
@@ -138,12 +139,17 @@ def test_retry_rejected_while_queued_allowed_after_cancel(db_session):
 
 
 class FakeWorkerClient:
-    """Test double explícito -- NÃO executa PicoGK real. Ver docstring do módulo."""
+    """Test double explícito -- NÃO executa PicoGK real. Ver docstring do módulo. Aceita
+    (e ignora, exceto quando testado explicitamente) os parâmetros cancel_check/
+    on_process_started introduzidos no Incremento 2.1.1 para manter compatibilidade com a
+    assinatura real de GeometryWorkerClient.execute."""
 
     def __init__(self, stl_content: bytes = b"solid fake\nendsolid fake\n") -> None:
         self.stl_content = stl_content
 
-    def execute(self, *, recipe_canonical, job_id, output_dir):
+    def execute(self, *, recipe_canonical, job_id, output_dir, cancel_check=None, on_process_started=None):
+        if on_process_started is not None:
+            on_process_started(0)
         output_dir.mkdir(parents=True, exist_ok=True)
         stl_path = output_dir / "fake.stl"
         stl_path.write_bytes(self.stl_content)
@@ -153,23 +159,27 @@ class FakeWorkerClient:
             metrics={
                 "bounding_box_mm": [[0, 0, 0], [10, 10, 10]],
                 "volume_mm3": 400.0,
-                "porosity_pct_estimated": 60.0,
+                "porosity_pct_measured": 60.0,
                 "surface_area_mm2": 950.5,
-                "vertex_count": 300,
+                "vertex_count_unique": 168,
                 "triangle_count": 100,
                 "is_watertight": True,
+                "stl_reload_validation_passed": True,
             },
             worker_version="0.1.0-fake-test-double",
             dotnet_version="9.0.0",
             picogk_version="2.2.0",
             duration_seconds=0.1,
+            effective_parameters={"wall_thickness_requested_mm": 0.6, "wall_thickness_effective_mm": 0.6},
+            stl_sha256="0" * 64,
+            platform="fake-platform-for-tests",
         )
 
 
 class AlwaysFailsWorkerClient:
     """Test double que sempre falha -- valida o caminho de erro sem depender do bloqueio real."""
 
-    def execute(self, *, recipe_canonical, job_id, output_dir):
+    def execute(self, *, recipe_canonical, job_id, output_dir, cancel_check=None, on_process_started=None):
         raise WorkerExecutionError("WORKER_SIMULATED_FAILURE", "Falha simulada para teste.")
 
 
@@ -187,6 +197,8 @@ def test_dispatch_job_success_path_persists_artifacts_checksum_manifest_metrics(
     )
 
     storage = LocalStorageAdapter(tmp_path / "artifacts")
+    claimed = claim_next_queued_job(db_session, dispatcher_id="test-dispatcher")
+    assert claimed is not None and claimed.id == job.id
     result_job = dispatch_job(
         db_session,
         job_id=job.id,
@@ -210,7 +222,7 @@ def test_dispatch_job_success_path_persists_artifacts_checksum_manifest_metrics(
 
     manifest = db_session.query(ArtifactManifest).filter(ArtifactManifest.geometry_job_id == job.id).first()
     assert manifest is not None
-    assert manifest.manifest_json["seed"] == recipe.canonical_json["seed"]
+    assert manifest.manifest_json["recipe_canonical"]["seed"] == recipe.canonical_json["seed"]
     assert len(manifest.manifest_sha256) == 64
 
 
@@ -228,6 +240,8 @@ def test_dispatch_job_failure_path_marks_job_failed_not_fabricated_success(db_se
     )
 
     storage = LocalStorageAdapter(tmp_path / "artifacts")
+    claimed = claim_next_queued_job(db_session, dispatcher_id="test-dispatcher")
+    assert claimed is not None and claimed.id == job.id
     result_job = dispatch_job(
         db_session,
         job_id=job.id,
@@ -261,6 +275,8 @@ def test_dispatch_job_real_worker_fails_in_blocked_environment(db_session, tmp_p
 
     storage = LocalStorageAdapter(tmp_path / "artifacts")
     worker_client = DotnetPicoGkWorkerClient(repo_root=REPO_ROOT)
+    claimed = claim_next_queued_job(db_session, dispatcher_id="test-dispatcher")
+    assert claimed is not None and claimed.id == job.id
     result_job = dispatch_job(
         db_session,
         job_id=job.id,

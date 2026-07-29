@@ -89,6 +89,35 @@ def _semantic_topology_errors(recipe_body: dict) -> list[dict]:
     return []
 
 
+_SUPPORTED_OUTPUT_FORMATS = frozenset({"stl"})
+
+
+def _semantic_output_format_errors(recipe_body: dict) -> list[dict]:
+    """Incremento 2.1.1 (item 4): 'vdb' é sintaticamente aceito pelo JSON Schema (enum
+    ["stl","vdb"], pensado para o futuro) mas NÃO é implementado por nenhuma versão atual do
+    worker -- rejeitar aqui, no momento mais cedo possível (validação/criação da receita, antes
+    de qualquer job ser sequer enfileirado), é uma camada adicional de defesa em profundidade;
+    o worker C# também rejeita antes de executar (ver Program.cs OUTPUT_FORMAT_UNSUPPORTED),
+    caso este caminho seja de alguma forma contornado."""
+    output_formats = recipe_body.get("output_formats")
+    if not isinstance(output_formats, list):
+        return []
+    unsupported = [f for f in output_formats if f not in _SUPPORTED_OUTPUT_FORMATS]
+    if unsupported:
+        return [
+            {
+                "path": "output_formats",
+                "message": (
+                    f"Formato(s) de saída solicitado(s) não suportado(s) por esta versão do "
+                    f"worker: {', '.join(unsupported)}. Suportados atualmente: "
+                    f"{', '.join(sorted(_SUPPORTED_OUTPUT_FORMATS))}."
+                ),
+                "validator": "semantic:OUTPUT_FORMAT_UNSUPPORTED",
+            }
+        ]
+    return []
+
+
 def validate_recipe(recipe_body: dict) -> list[dict]:
     """Retorna a lista de erros estruturados (vazia se válido). Nunca levanta exceção --
     quem chama decide se transforma em erro HTTP.
@@ -108,7 +137,7 @@ def validate_recipe(recipe_body: dict) -> list[dict]:
         }
         for error in errors
     ]
-    return structural + _semantic_topology_errors(recipe_body)
+    return structural + _semantic_topology_errors(recipe_body) + _semantic_output_format_errors(recipe_body)
 
 
 def canonicalize_recipe(recipe_body: dict) -> str:

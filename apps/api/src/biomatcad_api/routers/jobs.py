@@ -13,6 +13,7 @@ from biomatcad_api.routers.auth import get_current_user
 from biomatcad_api.routers.projects import _get_project_or_403
 from biomatcad_api.schemas.jobs import DesignRunCreate, DesignRunResponse, GeometryJobResponse
 from biomatcad_api.services.geometry_job_service import (
+    DesignRunAuthorizationError,
     JobTransitionError,
     cancel_job,
     create_design_run_and_job,
@@ -102,15 +103,25 @@ def create_design_run(
     current_user: User = Depends(get_current_user),
 ) -> DesignRunResponse:
     _get_project_or_403(db, payload.project_id, current_user)
-    design_run, job, created = create_design_run_and_job(
-        db,
-        organization_id=current_user.organization_id,
-        project_id=payload.project_id,
-        recipe_id=payload.recipe_id,
-        material_id=payload.material_id,
-        created_by_user_id=current_user.id,
-        idempotency_key=payload.idempotency_key,
-    )
+    try:
+        design_run, job, created = create_design_run_and_job(
+            db,
+            organization_id=current_user.organization_id,
+            project_id=payload.project_id,
+            recipe_id=payload.recipe_id,
+            material_id=payload.material_id,
+            created_by_user_id=current_user.id,
+            idempotency_key=payload.idempotency_key,
+        )
+    except DesignRunAuthorizationError as exc:
+        # Incremento 2.1.1 (item 5): "não encontrado"/"não pertence à organização" viram 404,
+        # tudo o mais (receita não validada, receita de outro projeto, material de outra org)
+        # vira 403 -- nunca 500, e sempre com o reason_code estruturado para o frontend.
+        http_status = status.HTTP_404_NOT_FOUND if exc.reason_code.endswith("_NOT_FOUND") else status.HTTP_403_FORBIDDEN
+        raise HTTPException(
+            status_code=http_status,
+            detail={"message": str(exc), "reason_code": exc.reason_code},
+        ) from exc
     return DesignRunResponse(
         id=design_run.id,
         organization_id=design_run.organization_id,

@@ -17,6 +17,7 @@ dependencies = [
     "pyjwt>=2.8",
     "python-multipart>=0.0.9",
     "jsonschema>=4.20",
+    "psutil>=5.9",  # Incremento 2.1.1 (itens 3 e 7): encerramento real de arvore de processos
 ]
 
 [project.optional-dependencies]
@@ -29,6 +30,7 @@ dev = [
     "types-passlib>=1.7",
     "pgserver>=0.1.4",
     "types-jsonschema>=4.20",
+    "types-psutil>=5.9",
 ]
 
 [tool.ruff]

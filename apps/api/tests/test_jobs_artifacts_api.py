@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from biomatcad_api.config import get_settings
-from biomatcad_api.services.geometry_job_service import dispatch_job
+from biomatcad_api.services.geometry_job_service import claim_next_queued_job, dispatch_job
 from biomatcad_api.services.storage import LocalStorageAdapter
 from biomatcad_api.services.worker_client import WorkerResult
 
@@ -17,7 +17,7 @@ from .factories import RESEARCHER_PASSWORD, create_researcher, login
 GOOD_RECIPE = {
     "schema_version": "1.0.0",
     "domain": {"shape": "block", "dimensions_mm": {"kind": "block", "x_mm": 10, "y_mm": 10, "z_mm": 10}},
-    "topology": {"kind": "gyroid", "cell_size_mm": 2.0, "isovalue": 0.0, "target_porosity_pct": 60},
+    "topology": {"kind": "gyroid", "cell_size_mm": 2.0, "wall_thickness_mm": 0.4, "isovalue": 0.0, "target_porosity_pct": 60},
     "resolution": {"voxel_size_mm": 0.2},
     "mode": "preview",
     "seed": 42,
@@ -111,7 +111,9 @@ class _FakeWorkerClient:
     def __init__(self, stl_content: bytes):
         self.stl_content = stl_content
 
-    def execute(self, *, recipe_canonical, job_id, output_dir):
+    def execute(self, *, recipe_canonical, job_id, output_dir, cancel_check=None, on_process_started=None):
+        if on_process_started is not None:
+            on_process_started(0)
         output_dir.mkdir(parents=True, exist_ok=True)
         stl_path = output_dir / "fake.stl"
         stl_path.write_bytes(self.stl_content)
@@ -119,11 +121,12 @@ class _FakeWorkerClient:
             stl_path=stl_path, thumbnail_path=None,
             metrics={
                 "bounding_box_mm": [[0, 0, 0], [10, 10, 10]], "volume_mm3": 400.0,
-                "porosity_pct_estimated": 60.0, "surface_area_mm2": 950.5,
-                "vertex_count": 300, "triangle_count": 100, "is_watertight": True,
+                "porosity_pct_measured": 60.0, "surface_area_mm2": 950.5,
+                "vertex_count_unique": 168, "triangle_count": 100, "is_watertight": True,
+                "stl_reload_validation_passed": True,
             },
             worker_version="0.1.0-fake-test-double", dotnet_version="9.0.0", picogk_version="2.2.0",
-            duration_seconds=0.1,
+            duration_seconds=0.1, stl_sha256="0" * 64, platform="fake-platform-for-tests",
         )
 
 
@@ -143,6 +146,8 @@ def test_manifest_metrics_artifacts_and_download_after_success(client, db_sessio
     job_id = r.json()["latest_job"]["id"]
 
     storage = LocalStorageAdapter(tmp_path / "artifacts")
+    claimed = claim_next_queued_job(db_session, dispatcher_id="test-dispatcher")
+    assert claimed is not None and claimed.id == job_id
     dispatch_job(
         db_session, job_id=job_id, worker_client=_FakeWorkerClient(b"solid demo\nendsolid demo\n"),
         storage=storage, output_dir=tmp_path / "workdir", repo_root=Path(__file__).resolve().parents[3],
@@ -154,7 +159,7 @@ def test_manifest_metrics_artifacts_and_download_after_success(client, db_sessio
 
     manifest_resp = client.get(f"/api/v1/jobs/{job_id}/manifest", headers=headers)
     assert manifest_resp.status_code == 200
-    assert manifest_resp.json()["manifest_json"]["seed"] == 42
+    assert manifest_resp.json()["manifest_json"]["recipe_canonical"]["seed"] == 42
 
     artifacts = client.get(f"/api/v1/jobs/{job_id}/artifacts", headers=headers).json()
     kinds = {a["kind"] for a in artifacts}
