@@ -556,6 +556,56 @@ E2E foi declarado aprovado.
 Suítes completas revalidadas após esta correção: `tsc --noEmit` limpo, `eslint --max-warnings=0`
 limpo, `vitest run` 35/35 (27 anteriores + 8 novos), `vite build` com sucesso.
 
+## 10. Duas falhas reais de E2E corrigidas: navegação via reload perdia sessão + status testado em inglês (2026-07-29)
+
+Após o bug do `__dirname` corrigido, o usuário rodou o E2E completo de verdade no Windows (API
+real, frontend real, Chromium funcional, seed `already_seeded`). Os dois testes RODARAM, mas
+FALHARAM: teste 1 (`vertical.spec.ts:22`) esgotou 30s esperando `#project-name`; teste 2
+(`vertical.spec.ts:76`) não achou `getByText("succeeded")` em 5s. Anexou ZIP com log completo,
+`error-context.md` e traces Playwright dos dois testes.
+
+Inspecionei os dois `error-context.md` (incluindo os page snapshots, não só os logs) antes de
+mexer em qualquer código. Achado central: em AMBOS os pontos de falha, o snapshot da página
+mostrava a tela de LOGIN -- mesmo depois de `expect(page).toHaveURL(/\/app/)` já ter passado.
+
+**Causa raiz (no teste, não na interface/rotas/autenticação/API/seed):** o teste usava
+`page.goto()` para navegar a rotas protegidas depois do login. `AuthContext.tsx` guarda o token
+só em memória (decisão de segurança documentada, proposital); `page.goto()` força um reload
+completo, que reinicia o app e derruba a sessão -- `ProtectedRoute.tsx` redireciona para
+`/login`. O seed funcionou (`already_seeded`); a API funcionou; a interface sempre permitiu
+criar projeto -- só era inalcançável pela forma de navegação do teste.
+
+Causa independente no teste 2: mesmo com a navegação corrigida, `getByText("succeeded")` nunca
+acharia nada -- `JobDetailPage.tsx` traduz o status via `STATUS_LABEL` (`succeeded` →
+"Concluído"), nunca expõe o valor bruto da API no DOM.
+
+**Corrigido:**
+- `vertical.spec.ts`: toda navegação pós-login agora via clique em link/botão real da UI
+  (`getByRole`), nunca `page.goto()` em rota protegida. Teste 2 reescrito para percurso 100% UI
+  (elimina as chamadas diretas à API que existiam só para descobrir o job ID).
+- `JobDetailPage.tsx`: 3 `data-testid` documentados adicionados (`job-status`, `job-metrics`,
+  `stl-download-link`, este último só no artefato STL) -- puramente aditivo, nenhuma mudança de
+  comportamento/geometria.
+- Seletores migrados para `getByRole`/`getByLabel` onde havia equivalente acessível real.
+
+**Guardas de regressão** (verificadas quebrando deliberadamente e restaurando):
+`apps/web/tests/verticalSpecGuard.test.ts` (guarda textual contra `page.goto()` em rota
+protegida e contra afirmar `"succeeded"` literal) e `apps/web/tests/JobDetailPage.test.tsx`
+(renderiza o componente real, autenticado de verdade via `AuthContext.login()` com fetch
+mockado, confirma "Concluído"/métricas/download, e que o artefato de thumbnail não rouba o
+`data-testid` do STL).
+
+Suítes completas revalidadas: `tsc --noEmit` limpo, `eslint --max-warnings=0` limpo, `vitest
+run` 40/40 (35 anteriores + 1 novo teste de guarda textual + 1 novo smoke test do
+JobDetailPage, com 8 e 1 casos respectivamente, mais o smoke ampliado), `vite build` com
+sucesso.
+
+Reexecução real neste sandbox pós-correção: `npm run test:e2e` -- `globalSetup` conclui, os
+dois testes tentam lançar o Chromium real e falham pela MESMA causa já documentada (Seção 8/9):
+`libXdamage.so.1` ausente. Nenhum resultado de E2E foi declarado aprovado; falta a próxima
+execução real do usuário no Windows para confirmar que a navegação e as asserções corrigidas
+batem com a interface de produção.
+
 ## O que esta evidência explicitamente NÃO cobre
 
 - **E2E Playwright real (navegador)** — escrito (`apps/web/e2e/`), nunca executado em nenhum

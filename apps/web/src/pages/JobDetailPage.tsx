@@ -22,6 +22,10 @@ const STATUS_LABEL: Record<string, string> = {
 
 const TERMINAL_STATUSES = new Set(["succeeded", "failed", "cancelled"]);
 
+// data-testid documentados (usados pelo E2E Playwright em e2e/vertical.spec.ts, ver
+// e2e/README.md): "job-status" (texto do status localizado, ex.: "Concluído"), "job-metrics"
+// (tabela de métricas geométricas quando succeeded) e "stl-download-link" (link de download do
+// artefato STL especificamente, entre os artefatos listados).
 export function JobDetailPage() {
   const { jobId } = useParams<{ jobId: string }>();
   const { token } = useAuth();
@@ -97,7 +101,7 @@ export function JobDetailPage() {
     <AuthenticatedLayout>
       <h1>Job geométrico</h1>
       <p>
-        Status: <strong>{STATUS_LABEL[job.status] ?? job.status}</strong>
+        Status: <strong data-testid="job-status">{STATUS_LABEL[job.status] ?? job.status}</strong>
         {job.status === "running" && ` (${job.progress_pct}%)`}
       </p>
 
@@ -114,7 +118,7 @@ export function JobDetailPage() {
       {job.status === "succeeded" && job.metrics && (
         <>
           <h2>Métricas geométricas</h2>
-          <table style={{ borderCollapse: "collapse" }}>
+          <table data-testid="job-metrics" style={{ borderCollapse: "collapse" }}>
             <tbody>
               <tr><td style={styles.td}><strong>Volume (mm³)</strong></td><td style={styles.td}>{job.metrics.volume_mm3}</td></tr>
               <tr><td style={styles.td}><strong>Porosidade estimada (%)</strong></td><td style={styles.td}>{job.metrics.porosity_pct_estimated}</td></tr>
@@ -132,7 +136,11 @@ export function JobDetailPage() {
           <ul>
             {artifacts.map((a) => (
               <li key={a.id}>
-                <a href={client.artifactDownloadUrl(a.id)} download>
+                <a
+                  href={client.artifactDownloadUrl(a.id)}
+                  download
+                  data-testid={a.kind === "stl" ? "stl-download-link" : undefined}
+                >
                   {a.kind} ({a.size_bytes} bytes, sha256: {a.sha256.slice(0, 12)}…)
                 </a>
               </li>
