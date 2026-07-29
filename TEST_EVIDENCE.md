@@ -413,22 +413,59 @@ auditoria independente (`scripts/audit_stl_vs_worker_output.py`) foi corrigido p
 UTF-8/UTF-16 automaticamente e extrair o último objeto JSON válido de um stdout com logs
 misturados.
 
-**IMPORTANTE**: todos os SHA-256/STLs reportados acima são anteriores à correção de calibração —
-preservados sem alteração, rotulados como tal.
+**IMPORTANTE**: todos os SHA-256/STLs reportados acima (seção 6) são anteriores à correção de
+calibração — preservados sem alteração, rotulados como tal. A seção 7 abaixo documenta a
+execução real PÓS-correção, contra o commit `da75219`.
+
+## 7. Execução real PÓS-correção -- as 3 golden recipes APROVADAS (commit `da75219`)
+
+Transcrito literalmente, tal como recebido do usuário, sem qualquer alteração. Ver
+`apps/geometry-worker/WORKER_STATUS.md` §10.4 para o relato completo com todas as observações de
+consistência.
+
+```text
+Build Release: aprovado
+xUnit:         62/62 aprovados, 0 falhas
+
+BLOCK:    alvo 60% / medido 58,6698791858207% / erro -1,3301208141793026pp / tolerância 2pp
+          1 iteração de calibração por malha
+          SHA-256 cd97e3c2be2029fe54bb4743217254a7ecb769ba24b81bf737d76e73bbc1565d
+
+CYLINDER: alvo 55% / medido 55,75526607688106% / erro +0,7552660768810568pp / tolerância 2pp
+          5 iterações de calibração por malha
+          SHA-256 2cb8cbdf9acbff579c838d8bf3cc2e2a688bcd33a3c475945174272cb278445e
+
+PREVIEW:  alvo 60% / medido 56,733228138231375% / erro -3,2667718617686248pp / tolerância 5pp
+          4 iterações de calibração por malha
+          SHA-256 7660dae3ee263445835bbf9d26c16fa4ef8f8ee2fd2c320000b0546c1eaaba78
+
+Auditoria independente (scripts/audit_stl_vs_worker_output.py): 3/3 sem divergência,
+  AuditExitCode=0 nas três, watertight=true nas três.
+
+Determinismo pós-correção: segunda execução real das três receitas, hashes Run1=Run2 nas três,
+  DeterminismoGlobal=True.
+
+Contenção cilíndrica: 493.664 triângulos, 1.480.992 vértices examinados, raio máximo
+  4,999950394mm, intervalo Z [-6,+6]mm, 0 violações radiais, 0 violações em Z,
+  ContainmentExitCode=0. (Nota: esta checagem específica de contenção não foi gerada por
+  scripts/audit_stl_vs_worker_output.py deste repositório -- ver ressalva completa em
+  WORKER_STATUS.md §10.4.)
+```
+
+**Veredito**: as três golden recipes estão APROVADAS quanto a geometria, calibração de
+porosidade, auditoria independente, determinismo e (para o cilindro) contenção radial/Z. Todas
+dentro das tolerâncias medidas (não apenas estimadas analiticamente) definidas nesta sessão.
 
 ## O que esta evidência explicitamente NÃO cobre
 
-- **Nova execução das 3 golden recipes com o código de calibração corrigido** — a evidência da
-  seção 6 acima é anterior à correção; uma nova rodada real é necessária para confirmar que
-  cilindro e preview agora convergem dentro da tolerância medida.
-- **Determinismo do cilindro/preview e do código pós-correção** — só o bloco pré-correção teve
-  determinismo confirmado.
-- **Consistência STL-vs-manifesto via fluxo completo API→dispatcher→manifesto** — as execuções
-  reais desta sessão foram invocações diretas do worker via CLI.
-- **E2E Playwright** — escrito (`apps/web/e2e/`), nunca executado neste sandbox (faltam
-  bibliotecas nativas do Chromium, `sudo` desabilitado — ver `apps/web/e2e/README.md`).
+- **Validação da interface integrada (frontend)** contra o worker corrigido — ainda não
+  realizada.
+- **E2E Playwright** — escrito (`apps/web/e2e/`), nunca executado em nenhum ambiente até agora
+  (bloqueado neste sandbox Linux: faltam bibliotecas nativas do Chromium, `sudo` desabilitado —
+  ver `apps/web/e2e/README.md`).
+- **Consistência STL-vs-manifesto via fluxo completo API→dispatcher→manifesto** — todas as
+  execuções reais desta sessão continuam sendo invocações diretas do worker via CLI, não pelo
+  fluxo de produção completo.
+- **Empacotamento final v2.2.1** — deliberadamente ainda não gerado.
 
-Estes itens só poderão ser fechados depois que o usuário executar `apps/geometry-worker` de
-verdade em Windows x64 com o código corrigido e devolver os resultados — ver
-`docs/examples/WINDOWS_EXECUTION_KIT.md` e o checklist de aceite completo em
-`IMPLEMENTATION_STATUS.md`.
+Estes itens são o que falta para declarar o Incremento 2.1.1 concluído.

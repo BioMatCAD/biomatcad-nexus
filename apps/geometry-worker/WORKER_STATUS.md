@@ -382,20 +382,139 @@ receitas agora convergem dentro da tolerância medida -- depende de uma NOVA exe
 usuário no Windows com o código corrigido. Os SHA-256 das seções 10 e 10.2 são anteriores a esta
 correção e não devem ser reutilizados como prova do código novo.
 
+## 10.4 EXECUÇÃO REAL PÓS-CORREÇÃO -- as 3 golden recipes APROVADAS (commit `da75219`)
+
+Depois da correção de calibração de porosidade descrita na seção 10.3, o usuário reexecutou de
+verdade as três golden recipes no Windows x64, contra o worker compilado no commit `da75219`.
+Resultados transcritos literalmente, tal como recebidos, sem qualquer alteração:
+
+### Build e testes
+
+```text
+Build Release: aprovado
+xUnit:         62/62 aprovados, 0 falhas
+```
+
+### Calibração de porosidade fechada contra a malha real -- por receita
+
+```text
+BLOCK (block-gyroid-v1):
+  Alvo:                    60%
+  Medido:                  58,6698791858207%
+  Erro:                    -1,3301208141793026 pp
+  Tolerância (modo final): 2 pp
+  Iterações de calibração por malha: 1
+  SHA-256 do STL:          cd97e3c2be2029fe54bb4743217254a7ecb769ba24b81bf737d76e73bbc1565d
+
+CYLINDER (cylinder-gyroid-v1):
+  Alvo:                    55%
+  Medido:                  55,75526607688106%
+  Erro:                    +0,7552660768810568 pp
+  Tolerância (modo final): 2 pp
+  Iterações de calibração por malha: 5
+  SHA-256 do STL:          2cb8cbdf9acbff579c838d8bf3cc2e2a688bcd33a3c475945174272cb278445e
+
+PREVIEW (preview-gyroid-low-res-v1):
+  Alvo:                    60%
+  Medido:                  56,733228138231375%
+  Erro:                    -3,2667718617686248 pp
+  Tolerância (modo preview): 5 pp
+  Iterações de calibração por malha: 4
+  SHA-256 do STL:          7660dae3ee263445835bbf9d26c16fa4ef8f8ee2fd2c320000b0546c1eaaba78
+```
+
+Todas as três dentro da tolerância MEDIDA (não apenas da estimativa analítica) -- exatamente o
+comportamento que a correção da seção 10.3 pretendia garantir. `porosity_calibration_converged`/
+`measured_porosity_within_tolerance` agora refletem a realidade da malha, não uma estimativa
+contínua otimista.
+
+**Observação de consistência (conferida nesta sessão, não apenas transcrita)**: o SHA-256 do
+bloco é **idêntico** ao SHA-256 obtido na execução PRÉ-correção (seção 10.2). Isso é consistente
+e esperado, não uma coincidência suspeita: o bloco convergiu em **1 iteração** de calibração por
+malha, ou seja, o palpite inicial (a mesma calibração analítica de sempre, usada como Passo 1 em
+ambas as versões do código) já estava dentro da tolerância medida -- então `wall_thickness_effective_mm`
+não mudou, e a malha resultante é bit-a-bit a mesma. Cilindro (5 iterações) e preview (4
+iterações) precisaram de fato refinar o palpite inicial, e por isso têm SHA-256 diferentes das
+execuções pré-correção (`6004d7c1...` e `14a46df7...`, respectivamente) -- exatamente o
+comportamento esperado de uma calibração que agora itera de verdade contra a malha real.
+
+### Auditoria independente (`scripts/audit_stl_vs_worker_output.py`)
+
+```text
+Três STLs recalculados diretamente pela ferramenta independente (Python, sem PicoGK).
+Nenhuma divergência encontrada contra a saída do worker, nas três receitas.
+AuditExitCode = 0 nas três (bloco, cilindro, preview).
+Watertight = verdadeiro nas três.
+```
+
+Fecha definitivamente o item 10 do checklist de aceite (métricas coerentes com o STL) para as
+três receitas -- a mesma ferramenta corrigida nesta sessão para lidar com UTF-8/UTF-16 e logs
+misturados (ver seção 10.3) foi usada de verdade contra os artefatos reais e não encontrou
+divergência.
+
+### Determinismo pós-correção
+
+```text
+Segunda execução real das três receitas (mesma receita+seed+worker+plataforma).
+Hashes Run1 e Run2: idênticos, nas três receitas.
+DeterminismoGlobal = True.
+```
+
+Fecha o item 12 do checklist de aceite (determinismo geométrico) para o código corrigido -- não
+apenas para o bloco pré-correção como antes, mas para as três receitas com a calibração fechada.
+
+### Contenção cilíndrica pós-correção
+
+```text
+Triângulos:        493.664
+Vértices examinados: 1.480.992
+Raio máximo:       4,999950394 mm (domínio: raio 5mm -- consistente com a superfície ficando
+                    ligeiramente dentro do limite por discretização de voxel, não fora dele)
+Intervalo Z:       [-6, +6] mm (domínio: altura 12mm, centrada -- consistente com a convenção
+                    de bbox documentada em GyroidScaffoldBuilder.cs)
+Violações radiais: 0
+Violações em Z:    0
+ContainmentExitCode = 0
+```
+
+**Nota de honestidade sobre a ferramenta usada**: esta verificação específica de contenção
+radial/em-Z NÃO foi gerada por `scripts/audit_stl_vs_worker_output.py` deste repositório -- essa
+ferramenta (descrita nas seções acima) verifica volume/área/vértices/triângulos/watertight/
+SHA-256, mas não inclui uma checagem geométrica dedicada de "todo vértice está dentro do raio e
+da faixa Z do domínio". Os números acima foram relatados pelo usuário a partir de uma verificação
+adicional própria (fora do escopo dos scripts entregues nesta sessão) e são registrados aqui tal
+como recebidos, sem inventar qual ferramenta os produziu. Ainda assim, os valores são
+plausíveis e consistentes com a geometria esperada (raio máximo ligeiramente abaixo de 5mm,
+faixa Z simétrica em torno de zero para altura 12mm) -- não há motivo para desconfiar deles, mas
+também não devem ser atribuídos a uma ferramenta específica deste repositório sem essa ressalva.
+
+### Veredito final por receita (pós-correção)
+
+- **Bloco**: **APROVADO** (geometria, calibração, auditoria, determinismo).
+- **Cilindro**: **APROVADO** (geometria, calibração de porosidade agora dentro da tolerância,
+  contenção radial/Z com zero violações, auditoria, determinismo).
+- **Preview**: **APROVADO** (geometria, calibração de porosidade agora dentro da tolerância de
+  modo preview, auditoria, determinismo).
+
+Todas as pendências de geometria/calibração/auditoria/determinismo/contenção identificadas nas
+seções 10/10.2 estão fechadas para as três golden recipes. As correções de código (calibração
+fechada, `bEndAppWithTask: true`, `OutputCleanup.cs`) estão agora provadas de verdade contra o
+PicoGK real, não apenas testadas matematicamente.
+
 ## 11. Caminho de fechamento (Incremento 2.1.1)
 
-Para provar de verdade as correções restantes contra uma execução real do PicoGK -- calibração
-de porosidade FECHADA (bloco, cilindro e preview, agora com tolerâncias explícitas de 2,0pp/
-5,0pp), determinismo pós-correção, confirmação de que o viewer fecha sozinho, e consistência
-STL-vs-manifesto via fluxo completo API→dispatcher -- siga `docs/examples/WINDOWS_EXECUTION_KIT.md`
-num Windows x64 real. Esse guia usa `apps/geometry-worker/tools/New-JobFromRecipe.ps1` para
-montar um `job.json` a partir de uma golden recipe, e
-`scripts/audit_stl_vs_worker_output.py` (agora com detecção automática de codificação
-UTF-8/UTF-16 e extração do último objeto JSON válido em stdout com logs misturados) para
-recomputar de forma independente (Python) as métricas do STL resultante, para conferência
-cruzada contra o manifesto.
+A seção 10.4 fechou, com prova real contra o PicoGK: calibração de porosidade fechada (bloco,
+cilindro, preview), auditoria independente (3/3), determinismo pós-correção (3/3), e contenção
+cilíndrica (zero violações). O que ainda falta:
 
-**O Incremento 2.1.1 continua NÃO concluído.** Pendências explícitas: nova execução real das
-três golden recipes com o código de calibração corrigido (a evidência das seções 10/10.2 é
-anterior à correção); determinismo pós-correção; consistência STL-vs-manifesto via fluxo
-completo (não apenas invocação direta do worker); E2E Playwright.
+- Validação da interface integrada (frontend) contra o worker corrigido.
+- E2E Playwright real (nunca executado em nenhum ambiente até agora -- ver
+  `apps/web/e2e/README.md` para o bloqueio conhecido neste sandbox Linux).
+- Consistência STL-vs-manifesto via fluxo completo API→dispatcher→manifesto (as execuções reais
+  desta sessão continuam sendo invocações diretas do worker via CLI, não pelo fluxo de produção
+  completo).
+- Empacotamento final v2.2.1 (zip/bundle/checksums/evidência consolidada) -- deliberadamente
+  ainda não gerado.
+
+**O Incremento 2.1.1 continua NÃO concluído.** Só poderá ser declarado concluído depois que a
+interface E2E e os demais critérios pendentes acima forem realmente aprovados.

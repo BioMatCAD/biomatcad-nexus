@@ -19,33 +19,43 @@ backend. Todas essas correções estão **implementadas e testadas** nesta sess�
 testes pytest, 2 skips esperados sem `dotnet`/Windows), worker C# (62 testes xUnit, todos sobre
 código independente do PicoGK), frontend (27 testes Vitest, `tsc`/`eslint`/build limpos).
 
-**Atualização real**: o usuário executou de verdade as TRÊS golden recipes no seu Windows x64.
-Resultado: **bloco aprovado** (watertight, 208.560 triângulos/102.338 vértices únicos,
-determinismo binário confirmado, SHA-256 `cd97e3c2be2029fe54bb4743217254a7ecb769ba24b81bf737d76e73bbc1565d`);
-**cilindro geometricamente aprovado** (contenção verificada em 1.486.788 vértices, zero
-violações -- prova forte de recorte real, não bounding box) **mas com porosidade precisando de
-refinamento** (erro -2,24pp); **preview reprovado quanto à porosidade** (erro real +18,80pp).
-Essa execução revelou um **bug real na calibração de porosidade**: o worker só conferia uma
-estimativa analítica contínua, nunca a malha efetivamente voxelizada -- o que fazia o worker
-declarar `porosity_calibration_converged=true` de forma cientificamente enganosa, mais grave
-quanto mais grosseira a discretização (daí o erro grande em preview). **Corrigido nesta sessão**:
-nova calibração fechada contra a malha real (`GyroidMath.CalibrateByMonotonicBisection`), com
-tolerâncias explícitas por modo (final 2,0pp / preview 5,0pp) e falha estruturada
-`POROSITY_TARGET_NOT_REACHED` quando não converge dentro da tolerância medida -- nunca mais
-finge sucesso científico. Um segundo bug operacional (viewer do PicoGK exigindo fechamento
-manual, inflando `duration_seconds`) também foi corrigido, com o parâmetro oficial
-`bEndAppWithTask: true` (confirmado por reflexão contra o `PicoGK.dll` 2.2.0 real). Ver
-`apps/geometry-worker/WORKER_STATUS.md` §10-§10.3 para o relato completo.
+**Atualização real (execução PÓS-correção -- commit `da75219`)**: o usuário reexecutou de
+verdade as TRÊS golden recipes no seu Windows x64 contra o worker já com a calibração de
+porosidade corrigida. Resultado: **as três receitas foram aprovadas**. Bloco -- watertight,
+208.560 triângulos/102.338 vértices únicos, porosidade dentro da tolerância (alvo 60% / medido
+58,6698791858207% / erro -1,33pp, 1 iteração de calibração por malha), SHA-256
+`cd97e3c2be2029fe54bb4743217254a7ecb769ba24b81bf737d76e73bbc1565d` (idêntico ao da execução
+pré-correção -- esperado, pois a calibração convergiu de primeira). Cilindro -- contenção
+radial/Z real verificada (1.480.992 vértices examinados, raio máximo 4,999950394mm, intervalo Z
+[-6,+6]mm, ZERO violações), porosidade agora dentro da tolerância (alvo 55% / medido
+55,75526607688106% / erro +0,76pp, 5 iterações), SHA-256
+`2cb8cbdf9acbff579c838d8bf3cc2e2a688bcd33a3c475945174272cb278445e`. Preview -- porosidade dentro
+da tolerância de modo preview (alvo 60% / medido 56,733228138231375% / erro -3,27pp, 4
+iterações), SHA-256 `7660dae3ee263445835bbf9d26c16fa4ef8f8ee2fd2c320000b0546c1eaaba78`. Auditoria
+independente (`scripts/audit_stl_vs_worker_output.py`) rodou de verdade contra os 3 STLs: nenhuma
+divergência, três `AuditExitCode=0`, três watertight. Determinismo pós-correção confirmado nas
+três receitas (segunda execução real, hashes Run1/Run2 idênticos,
+`DeterminismoGlobal=True`). Build Release e 62/62 testes xUnit aprovados no Windows do usuário.
+Ver `apps/geometry-worker/WORKER_STATUS.md` §10.4 para o relato completo, literal, desta rodada.
 
-**IMPORTANTE**: todos os SHA-256/STLs obtidos nesta rodada são anteriores à correção de
-calibração -- preservados sem alteração, rotulados como tal. Uma NOVA execução das 3 receitas
-com o código corrigido é necessária para fechar os itens de porosidade do checklist de aceite.
+**Contexto**: essa correção resolveu um bug real de calibração de porosidade encontrado numa
+rodada anterior de execução real (pré-correção), em que o worker só conferia uma estimativa
+analítica contínua, nunca a malha efetivamente voxelizada -- o que fazia o worker declarar
+`porosity_calibration_converged=true` de forma cientificamente enganosa (erro real de até
++18,80pp no preview daquela rodada). A correção introduziu calibração fechada contra a malha
+real (`GyroidMath.CalibrateByMonotonicBisection`), com tolerâncias explícitas por modo (final
+2,0pp / preview 5,0pp) e falha estruturada `POROSITY_TARGET_NOT_REACHED` quando não converge
+dentro da tolerância medida. Os SHA-256/STLs da rodada pré-correção permanecem preservados sem
+alteração e rotulados como evidência anterior à correção (ver `WORKER_STATUS.md` §10.2). Um
+segundo bug operacional anterior (viewer do PicoGK exigindo fechamento manual) também já havia
+sido corrigido com `bEndAppWithTask: true` (confirmado por reflexão contra o `PicoGK.dll` 2.2.0
+real).
 
-**O que ainda falta**: determinismo do cilindro/preview e do código pós-correção, consistência
-STL-vs-manifesto via fluxo completo API→dispatcher (as execuções desta sessão foram invocações
-diretas do worker via CLI), e a execução E2E (Playwright) permanecem pendentes. Para fechar
-esses itens, o usuário continuará executando o worker real no seu próprio Windows x64 e
-devolvendo os resultados — ver o guia completo em `docs/examples/WINDOWS_EXECUTION_KIT.md`. Ver
+**O que ainda falta**: validação da interface integrada (frontend) contra o worker corrigido,
+consistência STL-vs-manifesto via fluxo completo API→dispatcher (as execuções reais desta e da
+rodada anterior foram invocações diretas do worker via CLI), e a execução E2E (Playwright)
+permanecem pendentes. O Incremento 2.1.1 **continua NÃO concluído** até que esses critérios
+também sejam realmente aprovados. Ver
 `IMPLEMENTATION_STATUS.md` para o inventário completo, critério de aceite por critério de
 aceite, do que está fechado vs. pendente.
 
