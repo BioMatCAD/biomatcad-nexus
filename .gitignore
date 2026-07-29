@@ -49,6 +49,7 @@ htmlcov/
 *.vdb
 *.vtk
 !data/demo/**/*.stl
+!apps/web/public/demo-assets/**/*.stl
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/

@@ -86,3 +86,200 @@ export class ApiError extends Error {
     this.errorId = payload.error.id;
   }
 }
+
+// ---------------------------------------------------------------------------------------
+// Incremento 2.1 — materiais, projetos, receitas BioMatCEM, jobs geométricos, artefatos.
+// ---------------------------------------------------------------------------------------
+
+export type MaterialSourceType = "synthetic" | "literature";
+export type ReviewStatus = "draft" | "reviewed" | "deprecated";
+
+export interface MaterialPropertyResponse {
+  id: string;
+  property_name: string;
+  value: number;
+  unit: string;
+  source: string;
+  reference_id: string | null;
+  method: string | null;
+  uncertainty_low: number | null;
+  uncertainty_high: number | null;
+  version: number;
+  review_status: ReviewStatus;
+  created_at: string;
+}
+
+export interface ScientificReferenceResponse {
+  id: string;
+  citation_text: string;
+  doi: string | null;
+  url: string | null;
+  source_document: string | null;
+  page_reference: string | null;
+  created_at: string;
+}
+
+export interface MaterialSummary {
+  id: string;
+  name: string;
+  category: string;
+  source_type: MaterialSourceType;
+  review_status: ReviewStatus;
+  created_at: string;
+}
+
+export interface MaterialDetail extends MaterialSummary {
+  description: string | null;
+  properties: MaterialPropertyResponse[];
+  references: ScientificReferenceResponse[];
+}
+
+export interface MaterialCreateRequest {
+  name: string;
+  category: string;
+  source_type: MaterialSourceType;
+  description?: string | null;
+  properties?: Array<{
+    property_name: string;
+    value: number;
+    unit: string;
+    source: string;
+    reference_id?: string | null;
+    method?: string | null;
+    uncertainty_low?: number | null;
+    uncertainty_high?: number | null;
+    review_status?: ReviewStatus;
+  }>;
+  references?: Array<{
+    citation_text: string;
+    doi?: string | null;
+    url?: string | null;
+    source_document?: string | null;
+    page_reference?: string | null;
+  }>;
+}
+
+export type ProjectStatus = "active" | "archived";
+
+export interface ProjectResponse {
+  id: string;
+  organization_id: string;
+  owner_user_id: string;
+  name: string;
+  description: string | null;
+  status: ProjectStatus;
+  created_at: string;
+}
+
+export interface ProjectCreateRequest {
+  name: string;
+  description?: string | null;
+}
+
+// Corpo de receita BioMatCEM -- espelha schemas/biomatcem/geometry-recipe-v1.schema.json.
+export interface GeometryRecipeBody {
+  schema_version: "1.0.0";
+  domain:
+    | { shape: "block"; dimensions_mm: { kind: "block"; x_mm: number; y_mm: number; z_mm: number } }
+    | { shape: "cylinder"; dimensions_mm: { kind: "cylinder"; radius_mm: number; height_mm: number } };
+  topology: {
+    kind: "gyroid";
+    cell_size_mm: number;
+    wall_thickness_mm?: number;
+    isovalue: number;
+    target_porosity_pct?: number;
+  };
+  resolution?: { voxel_size_mm?: number };
+  mode: "preview" | "final";
+  seed: number;
+  compute_limits: { max_duration_seconds: number; max_memory_mb: number; max_voxel_count: number };
+  output_formats: Array<"stl" | "vdb">;
+}
+
+export interface RecipeValidationErrorItem {
+  path: string;
+  message: string;
+  validator: string;
+}
+
+export interface RecipeValidateResponse {
+  valid: boolean;
+  errors: RecipeValidationErrorItem[];
+  checksum_sha256: string | null;
+  schema_version: string;
+}
+
+export type RecipeStatus = "draft" | "validated";
+
+export interface RecipeResponse {
+  id: string;
+  organization_id: string;
+  project_id: string;
+  name: string;
+  schema_version: string;
+  canonical_json: GeometryRecipeBody;
+  checksum_sha256: string;
+  version: number;
+  parent_recipe_id: string | null;
+  status: RecipeStatus;
+  created_at: string;
+}
+
+export type JobStatusKind = "queued" | "running" | "succeeded" | "failed" | "cancelled";
+
+export interface GeometryMetrics {
+  bounding_box_mm: [[number, number, number], [number, number, number]];
+  volume_mm3: number;
+  porosity_pct_estimated: number;
+  surface_area_mm2: number;
+  vertex_count: number;
+  triangle_count: number;
+  is_watertight: boolean;
+}
+
+export interface GeometryJobResponse {
+  id: string;
+  design_run_id: string;
+  attempt_number: number;
+  status: JobStatusKind;
+  progress_pct: number;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  error_code: string | null;
+  error_message: string | null;
+  worker_version: string | null;
+  dotnet_version: string | null;
+  picogk_version: string | null;
+  metrics: GeometryMetrics | null;
+  duration_seconds: number | null;
+}
+
+export interface DesignRunResponse {
+  id: string;
+  organization_id: string;
+  project_id: string;
+  recipe_id: string;
+  material_id: string | null;
+  idempotency_key: string;
+  created_at: string;
+  created: boolean;
+  latest_job: GeometryJobResponse;
+}
+
+export interface ArtifactResponse {
+  id: string;
+  geometry_job_id: string;
+  kind: "stl" | "vdb" | "thumbnail" | "manifest" | "log";
+  sha256: string;
+  size_bytes: number;
+  created_at: string;
+}
+
+export interface ManifestResponse {
+  id: string;
+  geometry_job_id: string;
+  manifest_json: Record<string, unknown>;
+  manifest_sha256: string;
+  created_at: string;
+}

@@ -3,13 +3,19 @@ import { NavLink } from "react-router-dom";
 // Espaços de trabalho iniciais (Prompt Mestre §8.1). Apenas "Início" tem rota real neste
 // incremento; os demais aparecem desabilitados e rotulados como planejados, para não simular
 // funções inexistentes (Prompt Mestre §3.1).
+// Espaços de trabalho reais do Incremento 2.1 -- têm rota funcional, ao contrário dos
+// planejados abaixo (Prompt Mestre §3.1: nunca simular funções inexistentes).
+const REAL_WORKSPACES = [
+  { label: "Materiais", to: "/app/materials" },
+  { label: "Projetos BioMatCAD", to: "/app/projects" },
+];
+
 const PLANNED_WORKSPACES = [
-  "Projetos BioMatCAD",
   "BioMat Constructor",
   "CAD/Scaffolds",
   "Simulações",
   "Otimização",
-  "Materiais e cristalografia",
+  "Cristalografia",
   "Imagens médicas",
   "Fabricação",
   "Laboratório",
@@ -33,6 +39,13 @@ export function Sidebar() {
             Início
           </NavLink>
         </li>
+        {REAL_WORKSPACES.map((workspace) => (
+          <li key={workspace.to}>
+            <NavLink to={workspace.to} style={({ isActive }) => ({ ...styles.link, ...(isActive ? styles.linkActive : {}) })}>
+              {workspace.label}
+            </NavLink>
+          </li>
+        ))}
         {PLANNED_WORKSPACES.map((workspace) => (
           <li key={workspace}>
             <span style={styles.linkDisabled} aria-disabled="true" title="Planejado — ainda não implementado">
