@@ -1,0 +1,71 @@
+{
+  "created_by_user_id": "f2de247d-fad6-4eab-9fdb-b3accb245804",
+  "design_run_id": "6241b4a1-a080-43d0-be8e-71b9b54ff301",
+  "dotnet_version": "9.0.18",
+  "duration_seconds": 1.1,
+  "generated_at": "2026-07-29T15:02:13.159959+00:00",
+  "git_commit": "d6908da459d0d90fbb3497c9d406c9a46db7a292",
+  "hardware_info": {
+    "platform": "Linux-6.8.0-124-generic-x86_64-with-glibc2.35",
+    "processor": "x86_64",
+    "python_version": "3.10.12"
+  },
+  "job_id": "ff251fa0-0ee3-42c0-b5cc-9c4840debbfd",
+  "metrics": {
+    "bounding_box_mm": [
+      [
+        -5,
+        -5,
+        -5
+      ],
+      [
+        5,
+        5,
+        5
+      ]
+    ],
+    "is_watertight": true,
+    "porosity_pct_estimated": 60.0,
+    "surface_area_mm2": 950.5,
+    "triangle_count": 336,
+    "vertex_count": 168,
+    "volume_mm3": 400.0
+  },
+  "organization_id": "0d2e3e0a-d388-49e7-a7b3-62d128f94ff9",
+  "picogk_version": "2.2.0",
+  "recipe_canonical": {
+    "compute_limits": {
+      "max_duration_seconds": 300,
+      "max_memory_mb": 2048,
+      "max_voxel_count": 5000000
+    },
+    "domain": {
+      "dimensions_mm": {
+        "kind": "block",
+        "x_mm": 10,
+        "y_mm": 10,
+        "z_mm": 10
+      },
+      "shape": "block"
+    },
+    "mode": "final",
+    "output_formats": [
+      "stl"
+    ],
+    "resolution": {
+      "voxel_size_mm": 0.2
+    },
+    "schema_version": "1.0.0",
+    "seed": 42,
+    "topology": {
+      "cell_size_mm": 2.0,
+      "isovalue": 0.0,
+      "kind": "gyroid",
+      "target_porosity_pct": 60
+    }
+  },
+  "recipe_checksum_sha256": "4e44e2f3a5159a04d9a4046e68e00660723dfabf02337f5e87076049d1d83c36",
+  "schema_version": "1.0.0",
+  "seed": 42,
+  "worker_version": "0.1.0-example-for-delivery"
+}
