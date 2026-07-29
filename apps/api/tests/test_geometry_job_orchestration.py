@@ -95,7 +95,10 @@ def test_create_design_run_and_job_is_idempotent(db_session):
     assert job1.status == JobStatus.QUEUED
 
 
-def test_cancel_job_success_then_already_finished_raises(db_session):
+def test_cancel_job_then_cancel_again_is_idempotent_not_an_error(db_session):
+    """Incremento 2.1.1 (item 7): cancelamento deve permanecer idempotente -- cancelar um job já
+    cancelado é um no-op bem-sucedido, não um erro (corrigido em relação ao Incremento 2.1, que
+    levantava JobTransitionError na segunda chamada)."""
     user = create_researcher(db_session, email="orch2@biomatcad.example")
     project, recipe = _setup_project_and_recipe(db_session, user)
     _, job, _ = create_design_run_and_job(
@@ -111,8 +114,38 @@ def test_cancel_job_success_then_already_finished_raises(db_session):
     cancelled = cancel_job(db_session, job=job, cancelled_by_user_id=user.id)
     assert cancelled.status == JobStatus.CANCELLED
 
+    cancelled_again = cancel_job(db_session, job=cancelled, cancelled_by_user_id=user.id)
+    assert cancelled_again.status == JobStatus.CANCELLED
+    assert cancelled_again.id == cancelled.id
+
+
+def test_cancel_already_succeeded_job_raises(db_session, tmp_path):
+    """Cancelar um job que já SUCCEEDED (por outra razão que não cancelamento) continua sendo
+    um erro -- só o estado CANCELLED em si é idempotente, não qualquer estado terminal."""
+    from biomatcad_api.services.geometry_job_service import claim_next_queued_job
+    from biomatcad_api.services.storage import LocalStorageAdapter
+
+    user = create_researcher(db_session, email="orch2b@biomatcad.example")
+    project, recipe = _setup_project_and_recipe(db_session, user)
+    _, job, _ = create_design_run_and_job(
+        db_session,
+        organization_id=user.organization_id,
+        project_id=project.id,
+        recipe_id=recipe.id,
+        material_id=None,
+        created_by_user_id=user.id,
+        idempotency_key="idem-cancel-succeeded",
+    )
+    claim_next_queued_job(db_session, dispatcher_id="test-dispatcher")
+    storage = LocalStorageAdapter(tmp_path / "artifacts")
+    succeeded_job = dispatch_job(
+        db_session, job_id=job.id, worker_client=FakeWorkerClient(), storage=storage,
+        output_dir=tmp_path / "work", repo_root=REPO_ROOT,
+    )
+    assert succeeded_job.status == JobStatus.SUCCEEDED
+
     with pytest.raises(JobTransitionError):
-        cancel_job(db_session, job=cancelled, cancelled_by_user_id=user.id)
+        cancel_job(db_session, job=succeeded_job, cancelled_by_user_id=user.id)
 
 
 def test_retry_rejected_while_queued_allowed_after_cancel(db_session):

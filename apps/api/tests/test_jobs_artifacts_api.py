@@ -74,8 +74,11 @@ def test_job_status_progress_and_cancel_via_http(client, db_session):
     assert cancel_resp.status_code == 200
     assert cancel_resp.json()["status"] == "cancelled"
 
+    # Incremento 2.1.1 (item 7): cancelamento é idempotente -- cancelar de novo não é erro (409),
+    # é um no-op que devolve o mesmo estado cancelled.
     second_cancel = client.post(f"/api/v1/jobs/{job_id}/cancel", headers=headers)
-    assert second_cancel.status_code == 409
+    assert second_cancel.status_code == 200
+    assert second_cancel.json()["status"] == "cancelled"
 
 
 def test_job_from_other_organization_is_not_accessible(client, db_session):
