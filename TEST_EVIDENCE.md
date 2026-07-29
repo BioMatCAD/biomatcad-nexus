@@ -521,6 +521,41 @@ o commit de documentação. A execução E2E real (navegador ponta-a-ponta) perm
 neste sandbox e depende do usuário rodar os comandos documentados em `apps/web/e2e/README.md`
 no seu próprio Windows (mesmo ambiente onde o worker PicoGK já foi validado).
 
+## 9. Bug real do E2E corrigido: `__dirname` em módulo ES + seleção de Python (2026-07-29)
+
+O usuário instalou o Chromium com sucesso no Windows e conseguiu rodar `npm run test:e2e` pela
+primeira vez de verdade -- mas o `globalSetup` (`apps/web/e2e/global-setup.ts`) falhou antes de
+qualquer teste, com o erro literal:
+
+```
+ReferenceError: __dirname is not defined
+    at .../apps/web/e2e/global-setup.ts:10
+```
+
+Causa: `apps/web/package.json` declara `"type": "module"`; `__dirname`/`__filename` não existem
+em módulos ES em nenhuma plataforma. Corrigido derivando o diretório do módulo via
+`path.dirname(fileURLToPath(import.meta.url))`, extraído na função exportada e testável
+`currentModuleDir(moduleUrl)`. Ao mesmo tempo, corrigida a seleção do interpretador Python
+(`resolvePythonBin`, também exportada e testável): preserva `E2E_PYTHON_BIN` quando definida;
+sem ela, usa `"python"` no Windows e `"python3"` nas demais plataformas.
+
+Guarda de regressão real em `apps/web/tests/e2eGlobalSetup.test.ts` (8 testes): comportamento de
+`resolvePythonBin`/`currentModuleDir` para várias combinações de plataforma/env, mais uma guarda
+textual contra a reintrodução de `__dirname` executável ou de um `"python3"` hardcoded sem
+diferenciar Windows. Verifiquei a guarda de verdade: reintroduzi deliberadamente as duas
+regressões no arquivo e confirmei que os testes realmente falham (6 de 6 relacionados falharam),
+depois restaurei a correção e confirmei os 35/35 verdes de novo.
+
+Reexecução real pós-correção neste sandbox: `apps/web/e2e/global-setup.ts` executado via `tsx`
+carregou sem `ReferenceError`; `npm run test:e2e` completo mostrou o `globalSetup` concluindo com
+sucesso (avançou até tentar lançar o Chromium real) -- ou seja, o bug relatado está corrigido e
+comprovado. A suíte então falhou ao lançar o Chromium pela MESMA causa já documentada (Seção 8):
+`libXdamage.so.1` ausente neste sandbox Linux, sem contorno possível aqui. Nenhum resultado de
+E2E foi declarado aprovado.
+
+Suítes completas revalidadas após esta correção: `tsc --noEmit` limpo, `eslint --max-warnings=0`
+limpo, `vitest run` 35/35 (27 anteriores + 8 novos), `vite build` com sucesso.
+
 ## O que esta evidência explicitamente NÃO cobre
 
 - **E2E Playwright real (navegador)** — escrito (`apps/web/e2e/`), nunca executado em nenhum

@@ -3,6 +3,51 @@
 Este diretório contém um teste E2E real (não simulado) do caminho:
 login → materiais → projeto → receita → design-run → status do job → visualização/download.
 
+## Bug real corrigido (2026-07-29): `ReferenceError: __dirname is not defined` no Windows
+
+O usuário instalou o Chromium com sucesso no Windows (via `npx playwright install chromium`) e
+conseguiu rodar `npm run test:e2e` pela primeira vez de verdade -- mas o `globalSetup` falhou
+ANTES de qualquer teste rodar, com o erro literal:
+
+```
+ReferenceError: __dirname is not defined
+    at .../apps/web/e2e/global-setup.ts:10
+    const apiDir = path.resolve(__dirname, "../../api");
+```
+
+Causa raiz real: `apps/web/package.json` declara `"type": "module"`, então este arquivo roda
+como módulo ES. Módulos ES não têm as variáveis globais de CommonJS `__dirname`/`__filename` --
+isso nunca teria funcionado em NENHUMA plataforma sob ESM, mas só apareceu agora porque esta foi
+a primeira execução real (o sandbox Linux nunca chegou a rodar o `globalSetup`, pois o processo
+Chromium falhava antes disso por `libXdamage.so.1` ausente).
+
+**Corrigido**: `global-setup.ts` agora deriva o diretório do módulo via
+`path.dirname(fileURLToPath(import.meta.url))` (multiplataforma, funciona igual em
+Linux/macOS/Windows), extraído na função exportada e testável `currentModuleDir(moduleUrl)`.
+
+Ao mesmo tempo, corrigida a seleção do interpretador Python (`resolvePythonBin`, também
+exportada e testável): `E2E_PYTHON_BIN` continua tendo prioridade quando definida; sem ela, usa
+`"python"` no Windows (onde `python3` tipicamente não existe no PATH) e `"python3"` nas demais
+plataformas (onde `"python"` sem sufixo costuma faltar).
+
+Testes de regressão adicionados em `apps/web/tests/e2eGlobalSetup.test.ts` (fora de `e2e/`
+porque o vitest exclui `e2e/**` da coleta -- aquele diretório é só para specs do Playwright):
+testes de comportamento real de `resolvePythonBin`/`currentModuleDir` mais uma guarda textual
+que falha se `__dirname` for reintroduzido como identificador executável ou se a seleção do
+Python voltar a ser um `"python3"` hardcoded sem diferenciar Windows. Verifiquei a guarda de
+verdade: reintroduzi deliberadamente as duas regressões e confirmei que os testes realmente
+falham (6 falhas), depois restaurei a correção.
+
+Reexecutei `apps/web/e2e/global-setup.ts` de verdade neste sandbox (via `tsx`, chamando a
+função diretamente) após a correção: carregou sem `ReferenceError`, `resolvePythonBin`
+retornou os valores esperados para "win32"/"linux", e o script de seed
+(`apps/api/scripts/seed_e2e_user.py`) rodou até o fim com sucesso. Em seguida rodei
+`npm run test:e2e` de verdade neste sandbox: o `globalSetup` completou sem erro (confirmando a
+correção) e a suíte avançou até tentar lançar o Chromium real, onde falhou -- pela MESMA causa
+já documentada abaixo (`libXdamage.so.1` ausente), não mais pelo bug do `__dirname`. Ou seja: o
+bug relatado pelo usuário está corrigido e comprovado; o bloqueio de navegador neste sandbox
+Linux é outro problema, pré-existente, sem contorno possível aqui (ver seções abaixo).
+
 ## Status neste ambiente de desenvolvimento: BLOQUEADO
 
 Tentei instalar e executar o Playwright de verdade neste sandbox Linux:
