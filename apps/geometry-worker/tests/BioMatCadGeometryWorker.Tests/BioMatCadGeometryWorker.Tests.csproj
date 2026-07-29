@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <!-- Compila SOMENTE os arquivos independentes de PicoGK (nao referencia o pacote PicoGK
+       nem GyroidScaffoldBuilder.cs/Program.cs), permitindo testes reais e executaveis sem o
+       runtime nativo bloqueado (ver WORKER_STATUS.md). -->
+  <ItemGroup>
+    <Compile Include="../../JobEnvelope.cs" Link="JobEnvelope.cs" />
+    <Compile Include="../../SimpleMesh.cs" Link="SimpleMesh.cs" />
+    <Compile Include="../../GeometryMetricsCalculator.cs" Link="GeometryMetricsCalculator.cs" />
+    <Compile Include="../../StlExporter.cs" Link="StlExporter.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+</Project>

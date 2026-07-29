@@ -1,0 +1,25 @@
+BioMatCAD Nexus — apps/geometry-worker
+Avisos de licença de terceiros
+
+Este componente referencia o seguinte software de terceiros via NuGet (PackageReference), sem
+modificar, redistribuir ou incluir seus binários neste repositório Git:
+
+1. PicoGK 2.2.0
+   Autor: LEAP 71
+   Licença: Apache License 2.0 (https://licenses.nuget.org/Apache-2.0)
+   Origem: https://github.com/leap71/PicoGK
+   Uso: geometry kernel (Voxels, Mesh, BBox3, IImplicit) para geração do scaffold Gyroid.
+
+2. SkiaSharp (dependência transitiva do pacote PicoGK, usada internamente por seu visualizador
+   opcional)
+   Licença: MIT (https://github.com/mono/SkiaSharp/blob/main/LICENSE.md)
+
+3. xunit / xunit.runner.visualstudio / Microsoft.NET.Test.Sdk (apenas em
+   tests/BioMatCadGeometryWorker.Tests)
+   Licenças: Apache-2.0 (xunit) / MIT (Microsoft.NET.Test.Sdk)
+
+Este componente NÃO usa, referencia ou deriva de "Noyron" (software proprietário distinto,
+também da LEAP 71) — apenas do PicoGK, que é explicitamente open source (Apache-2.0). O
+algoritmo da superfície mínima periódica Gyroid usado em GyroidImplicit.cs é a fórmula
+matemática clássica publicada por Alan Schoen (1970), de domínio público, não derivada de
+nenhum software proprietário.
