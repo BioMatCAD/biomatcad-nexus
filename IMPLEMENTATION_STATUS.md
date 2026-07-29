@@ -39,41 +39,64 @@ só (a) foi alcançado nesta sessão.
 
 | # | Item | Status | Evidência / observação |
 |---|---|---|---|
-| 1 | Worker PicoGK realmente executado em Windows x64 | **NÃO FEITO** (pendente) | Depende da execução do usuário no seu Windows — ver `docs/examples/WINDOWS_EXECUTION_KIT.md`. Nada foi executado contra PicoGK real nesta sessão, em nenhuma plataforma. |
-| 2 | Geração real de bloco Gyroid | Código corrigido e testado (a); NÃO provado (b) | `GyroidMath.cs` (fórmula de Schoen, 48 testes xUnit incluindo `GyroidMathTests.cs`) e `GyroidDomainImplicit` em `GyroidScaffoldBuilder.cs` aplicam a fórmula corretamente em teoria; nenhuma malha real do PicoGK foi gerada nesta sessão. |
-| 3 | Cilindro realmente recortado (não bounding box) | Código corrigido via interseção de SDF (a); NÃO provado (b) | `GyroidMath.CappedCylinderSignedDistanceMm` + `IntersectSignedDistance` (max de duas SDF, CSG padrão) substituem o corte por bounding box do Incremento 2.1 — testado matematicamente (`GyroidMathTests.cs`), não contra voxelização real. |
-| 4 | Diferença real preview vs. final | Código corrigido (piso de voxel 0.3mm) (a); NÃO provado (b) | `GyroidMath.EffectiveVoxelSizeMm`/`PreviewMinVoxelSizeMm`, testado unitariamente; a diferença real de tempo/resolução entre os dois modos só é observável numa execução real. |
-| 5 | Parâmetros efetivamente aplicados (espessura/isovalor/porosidade/seed) | Código corrigido e testado na camada matemática (a); NÃO provado (b) | `WallThicknessMmToHalfBandWidth`, `SeedToPhaseShiftRad`, `CalibratePorosityByBisection` — todos testados isoladamente (matemática pura); a aplicação real numa malha voxelizada depende da execução real. |
-| 6 | Limites computacionais efetivamente controlados | Código corrigido, parcialmente verificado nesta sessão | Estimativa prévia de voxel/memória (`EstimateVoxelCount`/`EstimateMemoryMbUpperBound`) testada unitariamente; o mecanismo de timeout + kill de árvore de processos (`psutil`) é cross-platform e **foi verificado neste sandbox** (funciona independentemente do PicoGK, pois mata o processo do worker seja qual for o motivo da demora). Limpeza de arquivos parciais: bug real encontrado numa reexecução real do worker nesta sessão (apagava o `job.json` de entrada) e corrigido (`OutputCleanup.cs`, 4 novos testes) — ver `apps/geometry-worker/WORKER_STATUS.md` §9.1. |
+| 1 | Worker PicoGK realmente executado em Windows x64 | **PROVADO PARCIALMENTE** — apenas `block-gyroid-v1` | Usuário executou de verdade no Windows x64: ExitCode 0, PicoGK Core 26.2.0 (pacote 2.2.0), STL de 10.428.084 bytes, SHA-256 `cd97e3c2be2029fe54bb4743217254a7ecb769ba24b81bf737d76e73bbc1565d`. **Ainda faltam `cylinder-gyroid-v1` e `preview-gyroid-low-res-v1`** (explicitamente não executados por instrução do usuário nesta rodada). Números são os reportados pelo usuário/worker; **ainda não conferidos de forma independente** por `scripts/audit_stl_vs_worker_output.py` nesta sessão (arquivos reais ainda não recebidos para auditoria).
+| 2 | Geração real de bloco Gyroid | **PROVADO de verdade para `block-gyroid-v1`** | 208.560 triângulos, 102.338 vértices únicos, watertight, validação de recarga do STL aprovada — reportado pelo usuário a partir de uma execução real no Windows. Bloco genuinamente gerado pelo PicoGK real, não sintético. |
+| 3 | Cilindro realmente recortado (não bounding box) | Código corrigido via interseção de SDF (a); NÃO provado (b) | `GyroidMath.CappedCylinderSignedDistanceMm` + `IntersectSignedDistance` (max de duas SDF, CSG padrão) substituem o corte por bounding box do Incremento 2.1 — testado matematicamente (`GyroidMathTests.cs`). **`cylinder-gyroid-v1` deliberadamente ainda não executado** (instrução explícita do usuário nesta rodada: só `block-gyroid-v1` desta vez) — continua não provado contra voxelização real. |
+| 4 | Diferença real preview vs. final | Código corrigido (piso de voxel 0.3mm) (a); NÃO provado (b) | `GyroidMath.EffectiveVoxelSizeMm`/`PreviewMinVoxelSizeMm`, testado unitariamente. `block-gyroid-v1` executado é modo `final`; **`preview-gyroid-low-res-v1` deliberadamente ainda não executado** nesta rodada — diferença real entre os dois modos continua não observada. |
+| 5 | Parâmetros efetivamente aplicados (espessura/isovalor/porosidade/seed) | **Porosidade PROVADA de verdade para `block-gyroid-v1`**; espessura/isovalor/seed ainda não confirmados isoladamente | Calibração de porosidade convergiu numa execução real: alvo 60%, medida 58,669879%, erro residual −1,330121 p.p. — evidência real de que `CalibratePorosityByBisection` produz um parâmetro geométrico que, aplicado pelo PicoGK real, se aproxima do alvo. Espessura efetiva/isovalor/fase-por-seed continuam sem confirmação isolada (dependeria de reprocessar o STL real e comparar contra os parâmetros efetivos reportados — não feito ainda). Determinismo (mesma seed duas vezes) é item 12, separado, ainda não feito. |
+| 6 | Limites computacionais efetivamente controlados | Código corrigido, parcialmente verificado nesta sessão | Estimativa prévia de voxel/memória (`EstimateVoxelCount`/`EstimateMemoryMbUpperBound`) testada unitariamente; o mecanismo de timeout + kill de árvore de processos (`psutil`) é cross-platform e **foi verificado neste sandbox** (funciona independentemente do PicoGK, pois mata o processo do worker seja qual for o motivo da demora). Limpeza de arquivos parciais: bug real encontrado numa reexecução real do worker nesta sessão (apagava o `job.json` de entrada) e corrigido (`OutputCleanup.cs`, 4 novos testes) — ver `apps/geometry-worker/WORKER_STATUS.md` §9.1. **Segundo bug operacional real encontrado na execução do usuário no Windows**: `Library.Go` mantinha o viewer aberto até fechamento manual, inflando `duration_seconds` com espera humana — corrigido com `bEndAppWithTask: true` (parâmetro oficial confirmado por reflexão contra o PicoGK.dll 2.2.0 real), 2 novos testes de guarda de configuração. Efeito real (viewer fechando sozinho, `duration_seconds` correto) ainda depende de nova execução do usuário para confirmação. |
 | 7 | Fila concorrente seguro | **PROVADO de verdade** | `SELECT ... FOR UPDATE SKIP LOCKED` contra Postgres real, duas conexões/threads reais e independentes, zero jobs reivindicados em duplicidade em 24 jobs (`test_geometry_job_concurrency.py`). |
 | 8 | Cancelamento real | **PROVADO de verdade** | Teste de corrida contra o fluxo real de `dispatch_job`, kill de árvore de processos via `psutil` (cross-platform), idempotência de recancelamento (`test_geometry_job_cancellation.py`). |
 | 9 | Isolamento organizacional | **PROVADO de verdade** | Testes de ataque dedicados (projeto/receita/material de outra organização, receita não pertencente ao projeto, receita não validada) — todos recusados e auditados (`test_geometry_job_security.py`). |
-| 10 | Métricas coerentes com o STL | Código corrigido (solda antes de medir) (a); NÃO provado (b) contra STL real do PicoGK | `SimpleMesh.Weld()` aplicado antes de `GeometryMetricsCalculator` e `StlExporter`, testado contra malhas sintéticas de teste (cubo unitário conhecido, etc. — `SimpleMeshWeldTests.cs`, `GeometryMetricsCalculatorTests.cs`); nunca contra um STL real gerado pelo PicoGK. |
-| 11 | Manifesto coerente com os artefatos | Código corrigido (a); NÃO provado (b) em execução ponta-a-ponta real | Manifesto reestruturado (commit, versões, plataforma, seed/fase, parâmetros efetivos, SHA-256 por artefato, checksum do próprio manifesto fora do JSON) — verificado por testes de unidade/integração do backend, nunca contra uma execução real completa API→worker→artefato. |
+| 10 | Métricas coerentes com o STL | **Autoconsistente para `block-gyroid-v1`, mas NÃO auditado de forma independente ainda** | Números reportados pela execução real: 208.560 triângulos, 102.338 vértices únicos, watertight, validação de recarga aprovada — internamente consistentes e sem o padrão do bug antigo (vértices = 3×triângulos). Porém `scripts/audit_stl_vs_worker_output.py` (segunda implementação independente) ainda **não foi rodado** contra o STL real, porque o arquivo `.stl` em si ainda não foi devolvido para esta sessão — apenas os números foram relatados por texto. Pendente: rodar a auditoria independente contra o arquivo real. |
+| 11 | Manifesto coerente com os artefatos | Código corrigido (a); NÃO provado (b) em execução ponta-a-ponta real | Manifesto reestruturado (commit, versões, plataforma, seed/fase, parâmetros efetivos, SHA-256 por artefato, checksum do próprio manifesto fora do JSON) — verificado por testes de unidade/integração do backend. A execução real desta sessão foi uma invocação direta do worker CLI (`dotnet BioMatCadGeometryWorker.dll job.json`), **fora do fluxo API→dispatcher→manifesto** — nenhum `manifest.json` real foi gerado ainda para conferir contra este STL. |
 | 12 | Determinismo geométrico provado | **NÃO FEITO** (pendente) | Requer duas execuções reais no Windows com a mesma receita/seed, comparando SHA-256 do STL resultante — não pôde ser feito neste sandbox. |
 | 13 | Visualização e download | Inalterado do Incremento 2.1, fora do núcleo de correções deste incremento | `StlViewer.tsx` (Three.js, orbit/pan/zoom/wireframe/corte/screenshot) e `JobDetailPage.tsx` continuam como estavam — nenhum defeito relacionado foi relatado na auditoria que motivou o 2.1.1, então nenhuma mudança foi feita aqui. |
 | 14 | E2E real | Escrito, **nunca executado em nenhum ambiente** | `apps/web/e2e/` (Playwright) — bloqueado neste sandbox Linux (`libXdamage.so.1` ausente, `sudo` desabilitado — ver `apps/web/e2e/README.md`); pendente de execução real no Windows do usuário. |
-| 15 | Todos os testes/builds aprovados | **SIM, para o que é testável sem PicoGK real** | Backend: 83 testes pytest (2 skips esperados sem `dotnet`/Windows), ruff e mypy limpos. Worker C#: 48/48 xUnit passando (só código independente de PicoGK), `dotnet build` sem erros. Frontend: 27/27 Vitest, `tsc --noEmit` e `eslint` limpos, `npm run build` e `npm run build:pages` executados com sucesso. Isso **não** equivale a prova E2E/PicoGK real (itens 1, 12, 14). |
+| 15 | Todos os testes/builds aprovados | **SIM, para o que é testável sem PicoGK real** | Backend: 83 testes pytest (2 skips esperados sem `dotnet`/Windows), ruff e mypy limpos. Worker C#: 50/50 xUnit passando (só código independente de PicoGK; +2 testes de guarda de configuração do `Library.Go`), `dotnet build` sem erros. Frontend: 27/27 Vitest, `tsc --noEmit` e `eslint` limpos, `npm run build` e `npm run build:pages` executados com sucesso. Isso **não** equivale a prova E2E/PicoGK real completa (itens 3, 4, 12, 14 e a auditoria independente do item 10 continuam pendentes); o item 1/2 já tem prova real parcial (só bloco, ver acima). |
 | 16 | Histórico preservado | **SIM, verificado** | Base (tag/commit do v2.2) intacta; apenas novos commits acrescentados nesta sessão (nenhum `git commit --amend`, `rebase` ou `push --force` usado); `git log` mostra a sequência completa desde o Incremento 1. |
 | 17 | Checksums verificados na extração/restauração | **SIM para o bundle base v2.2** (início da sessão); **AINDA NÃO** para o pacote final v2.2.1 | O pacote v2.2.1 (zip/bundle/SHA256SUMS) ainda não foi gerado — é uma tarefa de empacotamento separada, posterior a esta documentação. |
 
 ### Resumo honesto
 
+**Atualização**: o usuário executou de verdade `block-gyroid-v1` no seu Windows x64 e a
+execução teve **sucesso real** (ExitCode 0, PicoGK Core 26.2.0, STL watertight de 208.560
+triângulos/102.338 vértices únicos, calibração de porosidade convergindo perto do alvo). Isso
+prova de verdade, pela primeira vez neste projeto, que o código corrigido do Incremento 2.1.1
+efetivamente gera geometria real contra o PicoGK real — não apenas contra testes matemáticos
+isolados. **Porém, por instrução explícita do usuário, `cylinder-gyroid-v1` e
+`preview-gyroid-low-res-v1` deliberadamente ainda não foram executados nesta rodada**, e nenhum
+arquivo real (.stl/.json) foi devolvido ainda para auditoria independente nesta sessão — apenas
+os números foram relatados por texto.
+
 **Totalmente fechados e provados nesta sessão**: itens 7, 8, 9, 16 (segurança/concorrência/
 cancelamento/preservação de histórico — nenhum depende de PicoGK real, todos exercitados contra
 infraestrutura real: Postgres real, processos reais, git real).
 
-**Código corrigido e testado no que é testável sem PicoGK, mas não provado ponta-a-ponta**:
-itens 2, 3, 4, 5, 6, 10, 11, 15 — este é o grosso das correções deste incremento. A correção é
-real e o teste unitário/de integração que a acompanha também é real; o que falta é a prova final
-contra uma execução genuína do PicoGK.
+**Provados de verdade contra PicoGK real, mas só para `block-gyroid-v1`**: itens 1 e 2
+(parcialmente — falta cilindro e preview) e a parte de porosidade do item 5. O item 10
+(métricas coerentes com o STL) é autoconsistente nos números reportados, mas ainda **não** foi
+conferido por auditoria independente (`scripts/audit_stl_vs_worker_output.py`) porque o arquivo
+real ainda não foi recebido nesta sessão.
 
-**Simplesmente não feitos ainda, dependem do usuário**: itens 1, 12, 14 (execução real,
+**Código corrigido e testado no que é testável sem PicoGK, mas ainda não provado
+ponta-a-ponta**: itens 3, 4 (cilindro e preview — deliberadamente não executados ainda),
+espessura/isovalor/seed isolados dentro do item 5, item 6 (incluindo o segundo bug operacional
+real encontrado e corrigido nesta sessão — viewer não fechava sozinho), item 11 (manifesto —
+esta execução foi direta via CLI do worker, fora do fluxo API→dispatcher→manifesto), e item 15
+(50/50 xUnit agora, +2 testes de guarda de configuração).
+
+**Simplesmente não feitos ainda, dependem do usuário**: itens 3, 4, 12, 14 (cilindro, preview,
 determinismo, E2E) e 17 para o pacote final v2.2.1 especificamente (o v2.2 base já foi
 verificado).
 
 **Sem mudança de escopo neste incremento**: item 13 (visualização/download), que segue como
 estava no Incremento 2.1.
+
+**Declaração explícita**: o Incremento 2.1.1 **continua NÃO concluído**. O sucesso real de
+`block-gyroid-v1` é uma prova parcial importantíssima, mas cilindro, preview, determinismo,
+consistência STL-vs-manifesto (auditoria independente) e E2E Playwright continuam pendentes,
+exatamente como o usuário reafirmou explicitamente.
 
 ## Evidência de teste do Incremento 2.1.1 (resumo; ver `TEST_EVIDENCE.md` para o log consolidado)
 
@@ -81,7 +104,7 @@ estava no Incremento 2.1.
   `dotnet`/ambiente Windows indisponível neste sandbox) — incluindo os novos
   `test_geometry_job_security.py`, `test_geometry_job_concurrency.py`,
   `test_geometry_job_cancellation.py`. `ruff check .` e `mypy src` limpos.
-- **Worker C#** (`apps/geometry-worker`): `dotnet build` sem erros; 48/48 testes xUnit passando
+- **Worker C#** (`apps/geometry-worker`): `dotnet build` sem erros; 50/50 testes xUnit passando
   (`GyroidMathTests.cs`, `SimpleMeshWeldTests.cs`, `StlExporterTests.cs`,
   `GeometryMetricsCalculatorTests.cs`, `JobEnvelopeTests.cs`) — todos sobre código independente
   do PicoGK, nenhum contra o runtime nativo (que continua bloqueado, ver ADR-0007).
@@ -140,7 +163,7 @@ simultaneamente". O usuário identificou e corrigiu essa divergência. O Increme
 | `apps/api` — modelos de materiais/projetos/receitas/jobs/artefatos (9 entidades) | Real | migração `97983fbc0288` aplicada contra banco vazio e populado |
 | `apps/api` — orquestração de job (fila = coluna status, sem fila em memória) | Real | `test_geometry_job_orchestration.py` |
 | `apps/api` — endpoints de materiais/projetos/receitas/jobs/artefatos | Real | `test_materials_projects_recipes_api.py`, `test_jobs_artifacts_api.py` |
-| `apps/geometry-worker` — contrato C#/.NET9+PicoGK 2.2.0 | Real (compila); **execução real BLOQUEADA** (linux-x64 sem runtime nativo) | `WORKER_STATUS.md`, ADR-0007, 9 testes xunit sobre código independente de PicoGK — **atualizado para 48 testes no Incremento 2.1.1, ver seção dedicada acima** |
+| `apps/geometry-worker` — contrato C#/.NET9+PicoGK 2.2.0 | Real (compila); execução real BLOQUEADA neste sandbox (linux-x64 sem runtime nativo), mas **PROVADA com sucesso no Windows x64 do usuário para `block-gyroid-v1`** (ver §10 de `WORKER_STATUS.md`) | `WORKER_STATUS.md`, ADR-0007, 50 testes xunit sobre código independente de PicoGK — **atualizado para 50 testes no Incremento 2.1.1, ver seção dedicada acima** |
 | `apps/web` — catálogo de materiais, projetos, editor de receita, jobs, visualizador 3D (Three.js) | Real | 17 testes Vitest; build normal e de demo executados — **atualizado para 27 testes no Incremento 2.1.1, ver seção dedicada acima** |
 | `scripts/geometry_dispatcher.py` — processo separado da API | Real (contrato); execução de sucesso depende do worker bloqueado | inspeção de código + teste do caminho de falha real |
 | `apps/api` — claim atômico de fila (Incremento 2.1.1) | **Real, provado** | `test_geometry_job_concurrency.py` (24 jobs, duas conexões reais, zero duplicidade) |

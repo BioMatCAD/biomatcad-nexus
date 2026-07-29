@@ -192,9 +192,85 @@ correção -- `job.json` agora sobrevive à falha esperada (`PICOGK_RUNTIME_UNAV
 reproduzida de forma idêntica à evidência anterior, confirmando que o bloqueio em si não mudou,
 apenas o efeito colateral indevido da limpeza foi corrigido).
 
-## 10. Caminho de fechamento (Incremento 2.1.1)
+## 10. EXECUÇÃO REAL BEM-SUCEDIDA -- `block-gyroid-v1` no Windows x64 (marco desta sessão)
 
-Para provar de verdade as correções listadas na seção 6 contra uma execução real do PicoGK,
+Pela primeira vez neste projeto, o worker rodou de verdade contra o PicoGK real e produziu uma
+malha real, reportado pelo usuário a partir de sua própria máquina Windows x64:
+
+```text
+ExitCode:              0
+PicoGK Core:            26.2.0 (pacote NuGet 2.2.0)
+STL:                    10.428.084 bytes
+STL SHA-256:            cd97e3c2be2029fe54bb4743217254a7ecb769ba24b81bf737d76e73bbc1565d
+Triângulos:             208.560
+Vértices únicos:        102.338
+Watertight:             sim
+Validação de recarga do STL: aprovada
+Porosidade alvo:        60%
+Porosidade medida:      58,669879%
+Calibração:             convergiu
+Erro residual:          -1,330121 p.p.
+```
+
+**O que isto prova de verdade**: a fórmula de Schoen, a interseção booleana implícita
+(domínio bloco), a aplicação de `wall_thickness_mm`, a calibração de porosidade por bisseção, e
+a solda de vértices (sem o padrão antigo de vértices = 3×triângulos) funcionam de fato contra o
+PicoGK real -- não apenas nos 50 testes xUnit matemáticos isolados.
+
+**O que isto NÃO prova ainda**: `cylinder-gyroid-v1` (recorte cilíndrico real) e
+`preview-gyroid-low-res-v1` (diferença real preview/final) deliberadamente não foram executados
+nesta rodada, por instrução explícita do usuário. Determinismo (mesma receita+seed rodada duas
+vezes, comparando SHA-256) também não foi testado ainda. Os números acima foram relatados por
+texto pelo usuário -- o arquivo `.stl`/`.json` real em si ainda não foi devolvido para esta
+sessão, então `scripts/audit_stl_vs_worker_output.py` (auditoria independente, Seção 11 do
+Incremento 2.1.1) ainda não pôde ser executado contra o artefato real. Nenhum `manifest.json`
+foi gerado (esta foi uma invocação direta do worker via CLI, fora do fluxo
+API→dispatcher→manifesto).
+
+## 10.1 Bug operacional real encontrado nesta execução: viewer exigia fechamento manual
+
+O usuário relatou que `scaffold.stl` ficou pronto por volta de 15:48:01, mas o processo só
+encerrou às 15:50:07, depois de fechar manualmente a janela branca do visualizador do PicoGK --
+os 127 segundos de `duration_seconds` reportados incluíam esse tempo de espera humana, não
+apenas geração geométrica.
+
+Antes de alterar qualquer coisa, a assinatura real de `PicoGK.Library.Go` no pacote 2.2.0
+efetivamente instalado foi inspecionada nesta sessão por **reflexão contra o `PicoGK.dll` real**
+(não por suposição nem documentação histórica genérica):
+
+```text
+Go(Single fVoxelSizeMM, ThreadStart fnTask, String strLogFilePath = "",
+   Boolean bEndAppWithTask = false, String strWindowTitle = "PicoGK", String strLightsFile = "")
+```
+
+O XML doc do próprio pacote (`PicoGK.xml`, embutido no NuGet) confirma:
+`bEndAppWithTask`: "If true, the viewer exits when your task is done." É o único mecanismo
+oficial e documentado para o viewer encerrar sozinho -- não existe, nesta versão, nenhuma opção
+de execução verdadeiramente headless/sem janela (conferido: nenhuma menção a "headless" em todo
+o XML doc do pacote).
+
+O worker (`GyroidScaffoldBuilder.cs`) chamava `Library.Go(...)` usando apenas os dois primeiros
+parâmetros posicionais, deixando `bEndAppWithTask` no valor padrão `false` -- daí o
+comportamento relatado. Corrigido: `bEndAppWithTask: true` passado explicitamente como argumento
+nomeado. Como `stopwatch.Stop()` (`Program.cs`) só roda depois que `BuildAndExport` retorna, e
+`BuildAndExport` só retorna depois que `Library.Go` retorna, isso também corrige `duration_seconds`
+para medir só a execução útil, sem esperar fechamento manual.
+
+Esta correção **não pôde ser validada em runtime neste sandbox** (a exceção
+`PICOGK_RUNTIME_UNAVAILABLE` acontece antes do corpo de `Library.Go` executar, então o
+comportamento do viewer nunca chega a ser exercitado aqui) -- validado apenas por: (a) reflexão
+real confirmando que o parâmetro existe, tem esse nome e esse comportamento documentado; (b)
+`dotnet build` sem erros; (c) 2 novos testes de guarda de configuração
+(`LibraryGoConfigurationTests.cs`) que leem o código-fonte real de `GyroidScaffoldBuilder.cs` e
+falham se `bEndAppWithTask: true` for removido (sanidade confirmada nesta sessão: revertendo a
+correção manualmente, o teste falha como esperado; restaurando, volta a passar). A confirmação
+final de que o viewer realmente fecha sozinho e `duration_seconds` reflete só o tempo útil
+depende de uma nova execução real do usuário no Windows.
+
+## 11. Caminho de fechamento (Incremento 2.1.1)
+
+Para provar de verdade as correções restantes contra uma execução real do PicoGK -- cilindro,
+preview, determinismo, e a confirmação de que o fechamento automático do viewer funciona --
 siga `docs/examples/WINDOWS_EXECUTION_KIT.md` num Windows x64 real. Esse guia usa
 `apps/geometry-worker/tools/New-JobFromRecipe.ps1` para montar um `job.json` a partir de uma
 golden recipe, e `scripts/audit_stl_vs_worker_output.py` para recomputar de forma independente

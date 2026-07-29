@@ -113,6 +113,22 @@ public static class GyroidScaffoldBuilder
 
         SimpleMesh? resultMesh = null;
 
+        // bEndAppWithTask: true -- Incremento 2.1.1 (correção pós-execução real no Windows).
+        // Execução real do worker (block-gyroid-v1, Windows x64, PicoGK Core 26.2.0) mostrou
+        // que a janela do viewer permanecia aberta após o STL já ter sido gravado, exigindo
+        // fechamento manual e inflando duration_seconds com tempo de espera humana (não de
+        // geração geométrica). Assinatura real de Library.Go confirmada nesta sessão via
+        // reflexão contra o PicoGK.dll 2.2.0 efetivamente instalado (não documentação
+        // presumida nem parâmetro inventado):
+        //   Go(float fVoxelSizeMM, ThreadStart fnTask, string strLogFilePath = "",
+        //      bool bEndAppWithTask = false, string strWindowTitle = "PicoGK",
+        //      string strLightsFile = "")
+        // O parâmetro bEndAppWithTask é o único e oficial mecanismo documentado (XML doc do
+        // pacote: "If true, the viewer exits when your task is done") para o viewer encerrar
+        // sozinho ao final de fnTask -- o valor padrão do parâmetro é false, e o worker nunca
+        // o definia explicitamente, daí o comportamento relatado. Passado aqui como argumento
+        // nomeado para deixar a intenção explícita e à prova de futuras mudanças de ordem de
+        // parâmetros na assinatura.
         Library.Go((float)voxelSizeEffectiveMm, () =>
         {
             BBox3 bounds;
@@ -169,7 +185,7 @@ public static class GyroidScaffoldBuilder
             StlExporter.WriteBinary(weldedMesh, stlOutputPath);
 
             resultMesh = weldedMesh;
-        });
+        }, bEndAppWithTask: true);
 
         return new BuildResult
         {

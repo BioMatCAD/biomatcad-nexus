@@ -304,7 +304,9 @@ convergentes e casos de borda), piso de voxel size em preview, estimativas de vo
 `SimpleMeshWeldTests.cs` (5 testes) cobrindo a solda de vértices (`Weld()`) — cubo com vértices
 duplicados reduzido ao número correto de vértices únicos, preservação da topologia dos
 triângulos, casos de malha já soldada (idempotência). Ampliações em `StlExporterTests.cs` e
-`GeometryMetricsCalculatorTests.cs` para cobrir a malha pós-solda. Todos os 48 testes são
+`GeometryMetricsCalculatorTests.cs` para cobrir a malha pós-solda. `LibraryGoConfigurationTests.cs`
+(2 testes) guarda a configuração `bEndAppWithTask: true` do `Library.Go` (ver seção de atualização
+acima). Todos os 50 testes são
 independentes do runtime nativo do PicoGK — nenhum foi (nem poderia ser, neste sandbox) validado
 contra uma execução real de `Voxels`/`Mesh`.
 
@@ -364,7 +366,7 @@ Ver `docs/security/DEPENDENCY_AUDIT_2.1.1.md` para o detalhamento completo. Resu
 
 ## O que esta evidência explicitamente NÃO cobre
 
-- **Execução real do worker PicoGK** — continua bloqueada neste sandbox Linux (ADR-0007); os 48
+- **Execução real do worker PicoGK neste sandbox Linux** — continua bloqueada (ADR-0007); os 50
   testes xUnit acima são inteiramente sobre código matemático/contratual independente do PicoGK.
 - **E2E Playwright** — escrito (`apps/web/e2e/`), nunca executado neste sandbox (faltam
   bibliotecas nativas do Chromium, `sudo` desabilitado — ver `apps/web/e2e/README.md`).

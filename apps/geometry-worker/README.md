@@ -21,14 +21,14 @@ Apache-2.0) como geometry kernel — não reimplementa nem alega afiliação com
   seed→deslocamento de fase, estimativa de fração sólida por amostragem em grade, calibração de
   porosidade por bisseção, piso de voxel size do modo preview, e estimativas prévias
   (limite superior) de contagem de voxels/memória. É por isso que essa parte É testável de
-  verdade mesmo com o PicoGK bloqueado (27 dos 48 testes xUnit).
+  verdade mesmo com o PicoGK bloqueado (27 dos 50 testes xUnit).
 - `JobEnvelope.cs` — contrato JSON de entrada/saída (independente de PicoGK, testável).
 - `SimpleMesh.cs`, `GeometryMetricsCalculator.cs`, `StlExporter.cs` — matemática de malha,
   métricas geométricas e exportação STL, também independentes de PicoGK. Desde o Incremento
   2.1.1, `SimpleMesh` tem um método `Weld()` (solda de vértices duplicados) aplicado antes de
   medir/exportar — corrige a divergência de contagem de vértices encontrada na auditoria
   (STL com vértices duplicados por triângulo vs. manifesto reportando vértices únicos). Testado
-  em `tests/BioMatCadGeometryWorker.Tests` (48/48 testes passando).
+  em `tests/BioMatCadGeometryWorker.Tests` (50/50 testes passando).
 - `GyroidScaffoldBuilder.cs` — geração real via PicoGK (`Voxels`, `Mesh`, `IImplicit`). Contém a
   classe `GyroidDomainImplicit` (substitui o antigo arquivo `GyroidImplicit.cs` do Incremento
   2.1, que não existe mais separadamente), que combina a banda gyroid com o SDF do domínio real

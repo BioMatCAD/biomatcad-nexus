@@ -16,18 +16,25 @@ produzia contagem de vértices divergente entre STL e manifesto), autorização 
 insuficiente, condição de corrida na fila de jobs e no cancelamento, manifesto com risco de
 circularidade de checksum, e validação de receita duplicada e divergente entre frontend e
 backend. Todas essas correções estão **implementadas e testadas** nesta sessão — backend (83
-testes pytest, 2 skips esperados sem `dotnet`/Windows), worker C# (48 testes xUnit, todos sobre
+testes pytest, 2 skips esperados sem `dotnet`/Windows), worker C# (50 testes xUnit, todos sobre
 código independente do PicoGK), frontend (27 testes Vitest, `tsc`/`eslint`/build limpos).
 
-**O que continua igual em relação ao Incremento 2.1**: a execução real do worker contra o PicoGK
-nativo **continua bloqueada neste sandbox Linux** (o pacote NuGet 2.2.0 só traz runtime nativo
-para `win-x64`/`osx-arm64` — ver ADR-0007). Por isso nenhuma das correções de geometria (domínio
-real, espessura/isovalor, calibração de porosidade, seed→fase, preview vs. final, solda de
-vértices) foi provada contra uma malha PicoGK real nesta sessão — apenas contra os testes
-matemáticos/unitários independentes de PicoGK. Determinismo geométrico real e a execução E2E
-(Playwright) também permanecem pendentes. Para fechar esses itens, o usuário executará o worker
-real no seu próprio Windows x64 e devolverá os resultados — ver o guia completo em
-`docs/examples/WINDOWS_EXECUTION_KIT.md`. Ver `IMPLEMENTATION_STATUS.md` para o inventário
+**Atualização real**: o usuário executou de verdade o worker no seu Windows x64 contra a golden
+recipe `block-gyroid-v1` -- sucesso real (ExitCode 0, PicoGK Core 26.2.0, STL watertight de
+208.560 triângulos/102.338 vértices únicos, calibração de porosidade convergindo perto do
+alvo). É a primeira geometria real gerada pelo PicoGK neste projeto inteiro. Essa execução
+também revelou um segundo bug operacional real (viewer exigindo fechamento manual, inflando
+`duration_seconds`), já corrigido nesta sessão com o parâmetro oficial `bEndAppWithTask: true`
+(confirmado por reflexão contra o `PicoGK.dll` 2.2.0 real) -- ver `apps/geometry-worker/
+WORKER_STATUS.md` §10/§10.1 para o relato completo.
+
+**O que ainda falta**: por instrução explícita do usuário, `cylinder-gyroid-v1` e
+`preview-gyroid-low-res-v1` deliberadamente ainda não foram executados nesta rodada.
+Determinismo geométrico real (duas execuções, mesmo SHA-256), auditoria independente do STL
+real contra o JSON do worker (o arquivo `.stl` em si ainda não foi devolvido para esta sessão),
+e a execução E2E (Playwright) também permanecem pendentes. Para fechar esses itens, o usuário
+continuará executando o worker real no seu próprio Windows x64 e devolvendo os resultados — ver
+o guia completo em `docs/examples/WINDOWS_EXECUTION_KIT.md`. Ver `IMPLEMENTATION_STATUS.md` para o inventário
 completo, critério de aceite por critério de aceite, do que está fechado vs. pendente dessa
 execução.
 
@@ -53,7 +60,7 @@ O que existe de fato agora:
   SDF (cilindro deixa de ser recortado pela bounding box), espessura/isovalor/porosidade/seed
   efetivamente aplicados, diferença real preview-vs-final, solda de vértices (`SimpleMesh.Weld()`)
   corrigindo a divergência de contagem de vértices da auditoria, validação pós-gravação do STL,
-  limites computacionais pré-execução, timeout com kill de árvore de processos — 48 testes xUnit
+  limites computacionais pré-execução, timeout com kill de árvore de processos — 50 testes xUnit
   passando sobre o código matemático/contratual independente do PicoGK (`GyroidMath.cs`,
   `SimpleMesh`, `StlExporter`), nenhum contra PicoGK real.
 - `apps/web`: React/TypeScript/Vite real — landing, login, dashboard, catálogo de materiais,
@@ -195,7 +202,7 @@ dotnet bin/Debug/net9.0/BioMatCadGeometryWorker.dll <job.json>
 # incremento corretivo: o bloqueio de runtime nativo em linux-x64 continua o mesmo.
 
 cd tests/BioMatCadGeometryWorker.Tests
-dotnet test                                          # 48/48 esperado, independe do PicoGK
+dotnet test                                          # 50/50 esperado, independe do PicoGK
 ```
 
 **Execução real (Windows x64)**: para exercitar de verdade o PicoGK nativo — geração real do
