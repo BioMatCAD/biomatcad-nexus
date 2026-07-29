@@ -1,20 +1,36 @@
 # Arquitetura — BioMatCAD Nexus
 
 Este documento descreve a arquitetura oficial (ADR-0002) e o que dela está realmente
-implementado após o Incremento 1.1 da Fase 1 (auditoria de consistência, segurança e
-preservação de histórico — ver ADR-0004 e ADR-0005). Para decisões e motivações, ver
-`docs/adr/`. Para o inventário funcional item a item, ver `IMPLEMENTATION_STATUS.md`.
+implementado após o Incremento 2.1 da Fase 2 (primeira vertical funcional do núcleo BioMatCAD —
+ver ADR-0006 e ADR-0007, parcialmente bloqueada por ausência de runtime nativo do PicoGK em
+linux-x64). Para decisões e motivações, ver `docs/adr/`. Para o inventário funcional item a
+item, ver `IMPLEMENTATION_STATUS.md`.
 
 ## Visão geral
 
 ```text
 apps/web  (React + TS + Vite)  ──HTTP/JSON──►  apps/api  (FastAPI)  ──SQL──►  PostgreSQL
-                                                     │
-                                                     ├── Redis (cache/locks/fila) — não usado ainda
-                                                     ├── MinIO/S3 (artefatos) — não usado ainda
-                                                     ├── geometry-worker (C#/.NET, PicoGK) — não implementado
-                                                     └── compute-worker (Python científico) — não implementado
+                                                     │                          ▲
+                                                     │                          │ fila = coluna
+                                                     │                          │ GeometryJob.status
+                                                     ├── scripts/geometry_dispatcher.py (processo
+                                                     │   Python separado da API, consome jobs QUEUED)
+                                                     │        │
+                                                     │        └──subprocess──► apps/geometry-worker
+                                                     │                          (C#/.NET9 + PicoGK 2.2.0
+                                                     │                          — compila; execução real
+                                                     │                          BLOQUEADA em linux-x64,
+                                                     │                          ver ADR-0007)
+                                                     ├── LocalStorageAdapter (artefatos, disco local;
+                                                     │   mesmo contrato de um MinIO/S3 futuro)
+                                                     ├── Redis (cache/locks) — não usado ainda
+                                                     └── compute-worker (FEM/imagem/ML) — não implementado
 ```
+
+O worker geométrico (`apps/geometry-worker`) é um processo **verdadeiramente separado** da API
+— um binário .NET distinto, invocado via `subprocess` pelo dispatcher Python, nunca importado
+in-process. Isso satisfaz o requisito explícito do Incremento 2.1 de que "o processo geométrico
+deve ser separado da API", mesmo sem Docker disponível neste ambiente.
 
 O build de demonstração de `apps/web` (`npm run build:pages`) gera um site estático que **não**
 se conecta a nenhum backend por padrão — usa `demoClient.ts`, um cliente sintético em memória,
@@ -109,9 +125,29 @@ Essa separação existe para que a garantia de atomicidade viva em um único lug
 isoladamente (`tests/test_clinical_suite.py`), em vez de replicada entre o router de ativação e
 o de desativação.
 
+## BioMatCEM — receita geométrica versionada (Incremento 2.1)
+
+`schemas/biomatcem/geometry-recipe-v1.schema.json` (JSON Schema Draft 2020-12) é o único
+contrato aceito entre frontend, API e worker para descrever uma geometria a gerar (domínio
+block/cylinder, topologia gyroid, resolução, modo preview/final, seed, limites computacionais,
+formatos de saída). Validado em duas camadas independentes — `services/recipe_service.py`
+(Python, fonte de verdade real) e `recipeValidationOffline.ts` (JS, só no modo demo) — nunca
+aceita campos desconhecidos nem qualquer forma de código executável. Ver ADR-0006 e
+`schemas/biomatcem/README.md`.
+
+## apps/geometry-worker (C#/.NET 9 + PicoGK 2.2.0) — Incremento 2.1
+
+Worker real, compilado com sucesso, responsável por gerar o scaffold Gyroid a partir de uma
+receita BioMatCEM já validada e canonicalizada. Separa deliberadamente o código dependente do
+runtime nativo do PicoGK (`GyroidScaffoldBuilder.cs`, `Program.cs`) do código independente
+(`JobEnvelope.cs`, `SimpleMesh.cs`, `GeometryMetricsCalculator.cs`, `StlExporter.cs`), o que
+permite testar genuinamente a segunda parte (9 testes xunit) mesmo com a primeira bloqueada.
+**Execução real bloqueada neste ambiente** — o pacote NuGet 2.2.0 não traz runtime nativo para
+linux-x64 (ver `apps/geometry-worker/WORKER_STATUS.md` e ADR-0007 para a evidência completa:
+inspeção do pacote + `DllNotFoundException` real reproduzida).
+
 ## O que ainda não existe
 
-- `apps/geometry-worker` (C#/.NET, PicoGK/ShapeKernel) — apenas README.
 - `apps/compute-worker` (FEM, imagem, ML, otimização) — apenas README.
 - `packages/biomat-dsl`, `packages/scientific-core`, `packages/contracts`,
   `packages/fhir-mappings`, `packages/ui` — apenas README.
@@ -119,11 +155,14 @@ o de desativação.
 - Todo o envelope clínico/laboratorial (`PM-ONLY-01/02/03/05`).
 - RBAC/ABAC completo (`PM-ONLY-04` parcialmente iniciado: só há um `role` de string simples no
   modelo `User`, sem permissões por instituição/unidade/projeto).
+- Geração real de scaffold Gyroid, thumbnail, exportação VDB e determinismo geométrico
+  verificado (bloqueados pela ausência de runtime nativo do PicoGK — ver acima e ADR-0007).
 
 ## Próximo incremento sugerido
 
-Ver `REQUIREMENTS_MATRIX.md` e `docs/adr/` para prioridades. O Prompt Mestre pede
-explicitamente para não avançar ainda para DICOM/CAD/FEM/LIMS/prontuário — o próximo incremento
-razoável é reforçar esta fundação (RBAC básico por organização, `packages/contracts` gerado a
-partir do OpenAPI real já exposto em `/api/v1/openapi.json`, e um primeiro `Organization`/
-`Project` CRUD) antes de iniciar o núcleo científico (Fase 2).
+Ver `REQUIREMENTS_MATRIX.md`, `ROADMAP.md` e `docs/adr/` para prioridades. O Prompt Mestre
+condiciona explicitamente o avanço à Fase 3 à vertical geométrica estar "realmente executável" —
+isso ainda não é o caso (ADR-0007). O próximo incremento razoável é o desbloqueio do worker
+(executar em Windows/macOS, ou investigar build nativo do PicoGK para linux-x64), seguido do
+carregamento de dados reais de materiais (AP-07: 32+ materiais com DOI) antes de avançar para
+FEM/DICOM/LIMS/prontuário.

@@ -111,6 +111,34 @@ Consequências registradas para rastreabilidade:
 - Ver ADR-0001 (`docs/adr/0001-escopo-completo-prompt-mestre.md`) e ADR-0003
   (`docs/adr/0003-interpretacao-escopo-vs-tese.md`).
 
+## F. Incremento 2.1 (Fase 2) — vertical geométrica funcional do núcleo BioMatCAD
+
+Primeiro incremento que toca diretamente requisitos científicos (`AP-*`/`TP-*`), não apenas
+fundação/segurança. Escopo restrito à vertical executável material → projeto → receita
+BioMatCEM → job → worker C#/PicoGK → scaffold Gyroid → métricas → artefatos → visualização 3D —
+sem FEM, DICOM, LIMS, prontuário ou funcionalidades clínicas (fora de escopo deliberado deste
+incremento).
+
+| ID | Requisito relacionado | O que foi implementado nesta sessão | Status |
+|---|---|---|---|
+| AP-08 (parcial) | Arquiteturas TPMS: Gyroid, Schwarz-P, IWP | Apenas Gyroid, em domínio block/cylinder. Schema versionado (`schemas/biomatcem/geometry-recipe-v1.schema.json`), worker C#/PicoGK implementado e compilado (`apps/geometry-worker`), fórmula de Schoen (1970) implementada em `GyroidImplicit.cs`. **Execução real bloqueada** neste sandbox (ausência de runtime nativo PicoGK linux-x64) — ver ADR-0007 | **Parcialmente implementado, execução bloqueada com evidência** |
+| TP-02 (parcial) | Módulo "CAD 3D Engine" | Camada de dados (`GeometryRecipe`, `DesignRun`, `GeometryJob`), orquestração de job via fila Postgres, worker separado da API, cálculo de métricas geométricas (bounding box, volume, área de superfície, watertight) sobre malhas de teste. Geração real de scaffold via PicoGK não verificada (mesmo bloqueio de AP-08) | **Parcialmente implementado, execução bloqueada com evidência** |
+| AP-07 / TP-07 (parcial) | Banco de materiais com propriedades rastreáveis e referências DOI | Modelo de dados real (`MaterialRecord`, `MaterialProperty`, `ScientificReference`) com valor/unidade/fonte/DOI/método/incerteza/versão/status de revisão por propriedade — mas **sem dados de materiais carregados** nesta sessão (nenhuma propriedade foi inventada; catálogo começa vazio, pronto para receber os 32+ materiais citados em AP-07 num próximo incremento) | **Schema/API implementados; catálogo de dados ainda vazio** |
+
+Novas entidades de dados (9): `MaterialRecord`, `MaterialProperty`, `ScientificReference`,
+`BioMatProject`, `GeometryRecipe`, `DesignRun`, `GeometryJob`, `Artifact`, `ArtifactManifest` —
+migração Alembic aplicada e verificada contra banco vazio e banco populado (`apps/api/alembic/
+versions/97983fbc0288_*.py`).
+
+Testes: 65 testes pytest coletados no backend (64 executados + 1 skip esperado do worker real quando dotnet não está no PATH), incluindo 15 testes de schema JSON; 17 testes
+Vitest (frontend), 9 testes xunit (C#, apenas código independente de PicoGK). Ver
+`TEST_EVIDENCE.md` para o log bruto desta sessão.
+
+Critério de aceite do Prompt Mestre para este incremento ("declare parcialmente bloqueado se o
+PicoGK não puder ser executado") — **aplicado**: este incremento é entregue como parcialmente
+bloqueado, não como concluído. Ver ADR-0007 e `ROADMAP.md` para os próximos passos de
+desbloqueio.
+
 ## Resumo de bloqueios remanescentes antes da Fase 1
 
 1. **`ARCH-DIVERGE-01`:** resolvido definitivamente pelo ADR-0002 (atualizado 2026-07-27):

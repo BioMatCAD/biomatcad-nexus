@@ -1,9 +1,10 @@
 # Status de Implementação — BioMatCAD Nexus
 
-Última atualização: 2026-07-27 (Incremento 1.1 da Fase 1 — auditoria de consistência, segurança e
-preservação do histórico). Este documento existe para que ninguém — incluindo IAs de
-desenvolvimento futuras — precise adivinhar o que é real. Regra do Prompt Mestre §3.1: nada aqui
-é descrito como "completo" sem ter sido executado e testado nesta sessão.
+Última atualização: 2026-07-29 (Incremento 2.1 da Fase 2 — primeira vertical funcional do
+núcleo BioMatCAD, entregue **parcialmente bloqueada** por ausência de runtime nativo do PicoGK
+em linux-x64; ver seção dedicada abaixo e ADR-0007). Este documento existe para que ninguém —
+incluindo IAs de desenvolvimento futuras — precise adivinhar o que é real. Regra do Prompt
+Mestre §3.1: nada aqui é descrito como "completo" sem ter sido executado e testado nesta sessão.
 
 ## Legenda
 
@@ -46,6 +47,79 @@ simultaneamente". O usuário identificou e corrigiu essa divergência. O Increme
 | CAD/FEM/materiais/ML/otimização | Planejado | nenhum código |
 | LIMS/ELN/terapia celular/clínica/telemedicina | Planejado | nenhum código (escopo confirmado, ver ADR-0003) |
 | RBAC/ABAC completo, Keycloak/OIDC, MFA/WebAuthn, step-up | Planejado | ver `REQUIREMENTS_MATRIX.md` seção D (`PM-ONLY-04a`–`04h`) |
+| `schemas/biomatcem` — schema versionado da receita geométrica | Real | `test_recipe_schema.py` (15 testes); ADR-0006 |
+| `apps/api` — modelos de materiais/projetos/receitas/jobs/artefatos (9 entidades) | Real | migração `97983fbc0288` aplicada contra banco vazio e populado |
+| `apps/api` — orquestração de job (fila = coluna status, sem fila em memória) | Real | `test_geometry_job_orchestration.py` |
+| `apps/api` — endpoints de materiais/projetos/receitas/jobs/artefatos | Real | `test_materials_projects_recipes_api.py`, `test_jobs_artifacts_api.py` |
+| `apps/geometry-worker` — contrato C#/.NET9+PicoGK 2.2.0 | Real (compila); **execução real BLOQUEADA** (linux-x64 sem runtime nativo) | `WORKER_STATUS.md`, ADR-0007, 9 testes xunit sobre código independente de PicoGK |
+| `apps/web` — catálogo de materiais, projetos, editor de receita, jobs, visualizador 3D (Three.js) | Real | 17 testes Vitest; build normal e de demo executados |
+| `scripts/geometry_dispatcher.py` — processo separado da API | Real (contrato); execução de sucesso depende do worker bloqueado | inspeção de código + teste do caminho de falha real
+
+## Incremento 2.1 (Fase 2) — vertical geométrica funcional do núcleo BioMatCAD
+
+**Status geral: parcialmente bloqueado**, conforme instrução explícita do usuário ("Se o PicoGK
+não puder ser executado no sandbox, declare o incremento parcialmente bloqueado. Não substitua
+silenciosamente o worker por geometria falsa."). Nenhuma parte deste incremento fabrica sucesso
+onde há bloqueio real.
+
+### O que é REAL e verificado nesta sessão
+
+- Schema JSON Draft 2020-12 da receita BioMatCEM, com validação estrita (`additionalProperties:
+  false` em todos os níveis), canonicalização e checksum SHA-256 reais (`services/recipe_
+  service.py`) — 15 testes dedicados.
+- 9 entidades de dados (`MaterialRecord`, `MaterialProperty`, `ScientificReference`,
+  `BioMatProject`, `GeometryRecipe`, `DesignRun`, `GeometryJob`, `Artifact`,
+  `ArtifactManifest`), com migração Alembic aplicada e verificada contra banco vazio E banco já
+  na revisão anterior.
+- Orquestração real de job: fila baseada na própria coluna `GeometryJob.status` (sem fila em
+  memória), com idempotência (unique constraint organização+chave), cancelamento, retry
+  controlado, e um processo dispatcher (`scripts/geometry_dispatcher.py`) arquiteturalmente
+  separado do processo da API.
+- API real com autorização por organização (403 + auditoria em qualquer tentativa de acesso
+  cross-organização) para materiais, projetos, receitas, jobs e artefatos.
+- Frontend real: catálogo de materiais, projetos, editor de receita com validação ao vivo,
+  acompanhamento de job com polling, visualizador 3D via Three.js (orbit/pan/zoom, wireframe,
+  transparência, eixos, grade, plano de corte, screenshot, indicador de nível de detalhe).
+- Worker C#/.NET 9 + PicoGK 2.2.0: **compila com sucesso** (`dotnet build`, 0 erros). Código
+  matemático/de contrato independente de PicoGK (malha, métricas geométricas, exportador STL,
+  contrato JSON) tem 9 testes xunit genuinamente executados e passando.
+
+### O que está BLOQUEADO nesta sessão (com evidência, não suposição)
+
+O pacote NuGet oficial `PicoGK` 2.2.0 só distribui o runtime nativo compilado (`picogk.26.2`)
+para `win-x64` e `osx-arm64` — **não existe** `runtimes/linux-x64/native/` neste pacote,
+confirmado tanto por inspeção do pacote restaurado quanto por execução real do binário
+compilado, que produz `System.DllNotFoundException` reproduzida integralmente em
+`apps/geometry-worker/WORKER_STATUS.md` e nos logs brutos `EVIDENCE_execution_attempt_std
+{out,err}.log`. Ver ADR-0007 para a decisão e os caminhos de desbloqueio não tentados
+(Windows/macOS, ou build nativo do PicoGK para linux-x64).
+
+Consequências diretas do bloqueio:
+
+1. Nenhum scaffold Gyroid real foi gerado nesta sessão — o STL usado no modo demo (GitHub
+   Pages) é sintético, pré-calculado por script Python, e rotulado explicitamente como não
+   sendo saída do PicoGK.
+2. Determinismo geométrico real (mesma seed + mesma receita ⇒ mesmo STL) não pôde ser
+   verificado — só o contrato de entrada é testável.
+3. Geração de thumbnail e exportação VDB não puderam ser exercitadas (dependem de execução
+   real).
+4. O critério de aceite do Prompt Mestre para este incremento ("worker PicoGK executando de
+   verdade", "geração do scaffold", "visualização do resultado real") **não está satisfeito**
+   — apenas os itens que não dependem da execução real (schema, modelos, orquestração, API,
+   frontend com dado sintético rotulado, testes) estão completos e verificados.
+5. Por decisão explícita do Prompt Mestre, **a Fase 3 não deve começar** até esta vertical estar
+   realmente executável — permanece como o item de maior prioridade do próximo incremento (ver
+   `ROADMAP.md`).
+
+### Testes desta sessão (resumo; ver `TEST_EVIDENCE.md` para o log bruto)
+
+- Backend: 65 coletados (64 executados + 1 skip esperado quando `dotnet` não está no PATH),
+  ruff e mypy limpos.
+- Worker C#: `dotnet build` sem erros; 9/9 testes xunit passando (apenas código independente de
+  PicoGK); execução real do binário reproduz o bloqueio esperado com evidência completa.
+- Frontend: 17/17 testes Vitest, eslint e tsc limpos, `npm run build` e `npm run build:pages`
+  ambos executados com sucesso, smoke HTTP do build de demo confirmado (200 no index e no STL
+  sintético).
 
 ## Limitações do ambiente desta sessão
 
