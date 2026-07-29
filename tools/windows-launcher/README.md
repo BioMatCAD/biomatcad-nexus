@@ -160,3 +160,21 @@ Runtime instalado, já um pré-requisito documentado do worker PicoGK) e
 `IMPLEMENTATION_STATUS.md`): é um artefato de build, reproduzível a qualquer momento a partir
 do código-fonte versionado, e o usuário deve gerá-lo localmente (ou usar o binário entregue
 fora do histórico Git, conforme instruções de entrega).
+
+## Status de validação — duas etapas distintas
+
+- **Cross-build (sandbox Linux)**: `dotnet publish -r win-x64` rodou de verdade neste ambiente
+  de desenvolvimento e produziu um `.exe` PE32+ Windows genuíno (confirmado via `file`), com
+  SHA-256 `b6ae108ca7305b256d778403211cddb14d31d958cabb3f63b1132d99210070f6`. Isso prova que o
+  código **compila** para Windows — não prova que ele **funciona** quando executado (o sandbox
+  Linux não roda binários win-x64).
+- **Execução real (Windows do usuário)**: o usuário baixou este `.exe`, conferiu o SHA-256
+  acima antes de executar, e rodou de verdade. Resultado relatado: o executável abriu
+  corretamente, a API e o frontend foram iniciados pelo launcher, o navegador abriu a
+  interface, a tela de login ficou disponível, e o encerramento (fechar/Ctrl+C) funcionou
+  corretamente — nenhum problema observado. Ver `TEST_EVIDENCE.md` §14 para a transcrição
+  literal desta validação e o que fica explicitamente fora do relato (alguns dos 16
+  comportamentos, como criação vs. reaproveitamento de `.venv`/`node_modules` ou o cenário de
+  porta já ocupada, não foram confirmados individualmente porque o relato não entrou nesse
+  nível de detalhe — isso não invalida a aprovação do caminho principal, apenas não é afirmado
+  aqui como confirmado).

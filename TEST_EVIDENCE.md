@@ -776,6 +776,52 @@ restaurado da NuGet real) e produziu um binário genuíno:
   artefato de build reproduzível a qualquer momento a partir do código-fonte versionado via
   `scripts/Build-WindowsLauncher.ps1`.
 
+## 14. Execução real e aprovação do launcher no Windows do usuário (relatada pelo usuário, 2026-07-29)
+
+**Importante -- distinção explícita entre dois eventos diferentes:**
+
+- **Seção 13 (acima)**: o `.exe` foi **compilado** (cross-publish `win-x64`) neste sandbox
+  Linux. Isso prova que o código compila e produz um binário Windows genuíno, mas **não** prova
+  que ele funciona quando executado de verdade -- este sandbox não roda binários win-x64.
+- **Esta seção 14**: o usuário baixou o `BioMatCAD-Nexus.exe` entregue, conferiu o SHA-256 e
+  **executou de verdade no Windows real dele**. É este evento -- não o cross-build -- que prova
+  que o launcher funciona.
+
+**Evidência relatada pelo usuário** (validação real no Windows, conforme relatado nesta
+conversa -- nenhum detalhe além do que segue foi inventado ou presumido):
+
+- SHA-256 do `BioMatCAD-Nexus.exe` conferido pelo usuário **antes** de executar (confere com o
+  publicado na Seção 13: `b6ae108ca7305b256d778403211cddb14d31d958cabb3f63b1132d99210070f6`).
+- O executável abriu corretamente.
+- A API e o frontend foram iniciados pelo launcher.
+- O navegador abriu a interface.
+- A tela de login ficou disponível.
+- O encerramento (fechar/Ctrl+C) funcionou corretamente.
+- Nenhum problema foi observado pelo usuário durante a execução.
+
+**O que isto prova, com base estritamente no que foi relatado**: os comportamentos 1-2
+(detecção de dependências reais no Windows do usuário, implícito no fato de a API/frontend
+terem subido), 6-11 (segredo gerado, `ENVIRONMENT=test`, API em `:8000`, frontend em `:5173`,
+espera de prontidão, abertura do navegador em `/login`) e 13 (encerramento correto) da lista de
+16 comportamentos pedidos **funcionaram de ponta a ponta no Windows real**, sem nenhum problema
+relatado.
+
+**O que esta evidência, por si só, NÃO detalha** (o usuário não relatou esses pontos
+especificamente, então não são afirmados aqui): se o `.venv`/`node_modules` já existiam
+previamente ou foram criados nesta execução (comportamentos 3-5); se alguma porta já estava
+ocupada e o launcher reaproveitou um serviço existente, ou se ambas as portas estavam livres
+(comportamento 14); confirmação visual explícita do banner permanente "AMBIENTE DE TESTE" e da
+ausência do segredo no console (comportamentos 15-16) -- o código continua garantindo isso (ver
+Seção 13/README.md/testes de guarda de segurança), mas a confirmação visual explícita não foi
+relatada. Nenhum desses pontos foi negado pelo usuário -- apenas não fazem parte do relato
+literal recebido, então esta seção não afirma tê-los confirmado.
+
+**Conclusão**: o launcher está **validado por execução real no Windows do usuário**, cobrindo o
+caminho principal (duplo clique -> dependências detectadas -> API e frontend sobem -> navegador
+abre -> login disponível -> encerramento limpo), sem nenhum problema relatado. Isso fecha o item
+18 do `IMPLEMENTATION_STATUS.md` como aprovado por execução real, distinto do cross-build da
+Seção 13.
+
 ## O que esta evidência explicitamente NÃO cobre
 
 - **Consistência STL-vs-manifesto via fluxo completo API→dispatcher→worker PicoGK real→
@@ -783,10 +829,16 @@ restaurado da NuGet real) e produziu um binário genuíno:
   job PRÉ-SEMEADO (worker fake rotulado); nenhum job NOVO foi submetido e processado através do
   fluxo de produção completo com o worker PicoGK real nesta sessão. Este é o gate final ainda
   pendente (Seção 12).
-- **Execução real do launcher Windows (`BioMatCAD-Nexus.exe`) no Windows do usuário** -- o
-  binário foi compilado e testado (54/54 xUnit) neste sandbox, mas nunca executado como `.exe`
-  win-x64 de verdade (Seção 13). Duplo clique real, os 16 comportamentos ponta a ponta, e
-  confirmação de que a API/frontend sobem e o navegador abre ainda dependem do usuário.
+- **Confirmação visual explícita de alguns dos 16 comportamentos do launcher** (criação vs.
+  reaproveitamento de `.venv`/`node_modules`, decisão de porta ocupada vs. livre, banner
+  "AMBIENTE DE TESTE" visto na tela, ausência do segredo confirmada visualmente) -- a execução
+  real no Windows foi aprovada pelo usuário (Seção 14) para o caminho principal, mas esses
+  detalhes específicos não foram relatados individualmente.
+- **Gate final real do worker PicoGK via fila de produção com job NOVO (não pré-semeado)** --
+  script pronto e automatizado (`scripts/Run-FinalGate.ps1` + `apps/api/scripts/
+  verify_full_pipeline_sha256.py`), com a orquestração validada por dry-run real neste sandbox
+  (Postgres+API reais), mas a execução real no Windows do usuário (com PicoGK disponível) ainda
+  não ocorreu.
 - **Empacotamento final v2.2.1** — deliberadamente ainda não gerado.
 
 Estes itens são o que falta para declarar o Incremento 2.1.1 concluído.

@@ -221,6 +221,33 @@ próprio gate vai usar -- rode ambos a partir do mesmo `apps\api` com o mesmo `.
 sem sobrescrever `ARTIFACT_STORAGE_DIR` de forma diferente entre os dois terminais). O worker
 já precisa estar compilado (passo 2).
 
+**Opção automatizada (recomendada) -- um único comando, um único terminal**:
+
+`scripts/Run-FinalGate.ps1` substitui os dois terminais manuais acima: ele roda
+`alembic upgrade head`, inicia a API em segundo plano, espera a porta 8000 ficar disponível,
+roda o gate de verdade (sem job pré-semeado, sem simulação), e ao final encerra **somente** o
+processo da API que ele mesmo iniciou (nunca um `taskkill` genérico).
+
+```powershell
+cd C:\biomatcad-nexus
+.\apps\api\.venv\Scripts\Activate.ps1
+pwsh -File .\scripts\Run-FinalGate.ps1
+```
+
+Parâmetros opcionais (todos com default sensato):
+
+```powershell
+pwsh -File .\scripts\Run-FinalGate.ps1 -Recipe cylinder-gyroid-v1 -TimeoutSeconds 600 `
+    -DatabaseUrl "postgresql+psycopg://biomatcad:biomatcad@localhost:5432/biomatcad"
+```
+
+Ao final, devolva `C:\biomatcad-runs\gate-final-output.txt` e
+`C:\biomatcad-runs\gate-final-report.json` inteiros, aprovado ou não -- o script nunca fabrica
+um resultado intermediário: termina com `GATE APROVADO` (exit code 0) ou `GATE REPROVADO:
+<motivo real>` (exit code != 0).
+
+**Opção manual (dois terminais, equivalente, caso prefira controlar cada passo manualmente)**:
+
 ```powershell
 # Terminal 1 -- deixe a API rodando (mesma janela usada no passo 6, se já estiver ativa)
 cd C:\biomatcad-nexus\apps\api
