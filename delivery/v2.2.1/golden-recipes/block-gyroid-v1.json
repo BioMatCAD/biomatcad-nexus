@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0.0",
+  "domain": {
+    "shape": "block",
+    "dimensions_mm": {
+      "kind": "block",
+      "x_mm": 10,
+      "y_mm": 10,
+      "z_mm": 10
+    }
+  },
+  "topology": {
+    "kind": "gyroid",
+    "cell_size_mm": 2.0,
+    "wall_thickness_mm": 0.6,
+    "isovalue": 0.0,
+    "target_porosity_pct": 60
+  },
+  "resolution": {
+    "voxel_size_mm": 0.2
+  },
+  "mode": "final",
+  "seed": 42,
+  "compute_limits": {
+    "max_duration_seconds": 300,
+    "max_memory_mb": 2048,
+    "max_voxel_count": 5000000
+  },
+  "output_formats": [
+    "stl"
+  ]
+}

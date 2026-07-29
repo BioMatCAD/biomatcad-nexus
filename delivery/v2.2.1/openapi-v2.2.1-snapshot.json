@@ -1,0 +1,2759 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "BioMatCAD Nexus API",
+    "description": "Incremento 2.1 da Fase 2: primeira vertical funcional do n\u00facleo BioMatCAD (materiais, projetos, receitas BioMatCEM, jobs geom\u00e9tricos, artefatos). O worker C#/PicoGK est\u00e1 implementado e compilado, mas sua execu\u00e7\u00e3o real est\u00e1 BLOQUEADA neste ambiente (aus\u00eancia de runtime nativo linux-x64) -- ver apps/geometry-worker/WORKER_STATUS.md e ADR-0007. FEM/DICOM/LIMS/prontu\u00e1rio/funcionalidades cl\u00ednicas permanecem fora de escopo deste incremento -- ver IMPLEMENTATION_STATUS.md.",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Health",
+        "description": "Liveness: o processo est\u00e1 de p\u00e9. N\u00e3o verifica depend\u00eancias externas.",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Ready",
+        "description": "Readiness: verifica conex\u00e3o real com o banco de dados.",
+        "operationId": "ready_ready_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadyResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/version": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Version",
+        "operationId": "version_version_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/system/status": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "System Status",
+        "operationId": "system_status_api_v1_system_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Login",
+        "operationId": "login_api_v1_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/me": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Me",
+        "operationId": "me_api_v1_auth_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Logout",
+        "operationId": "logout_api_v1_auth_logout_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogoutResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/system/operational-state/activate": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Activate Independent State",
+        "operationId": "activate_independent_state_api_v1_system_operational_state_activate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActivateIndependentStateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivateIndependentStateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/system/clinical-suite/activate": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Activate Clinical Suite",
+        "operationId": "activate_clinical_suite_api_v1_system_clinical_suite_activate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActivateClinicalSuiteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClinicalSuiteChangeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/system/clinical-suite/deactivate": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Deactivate Clinical Suite",
+        "operationId": "deactivate_clinical_suite_api_v1_system_clinical_suite_deactivate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeactivateClinicalSuiteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClinicalSuiteChangeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/materials": {
+      "get": {
+        "tags": [
+          "materials"
+        ],
+        "summary": "List Materials",
+        "operationId": "list_materials_api_v1_materials_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MaterialSummary"
+                  },
+                  "type": "array",
+                  "title": "Response List Materials Api V1 Materials Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "materials"
+        ],
+        "summary": "Create Material",
+        "operationId": "create_material_api_v1_materials_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MaterialCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/materials/{material_id}": {
+      "get": {
+        "tags": [
+          "materials"
+        ],
+        "summary": "Get Material",
+        "operationId": "get_material_api_v1_materials__material_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "material_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Material Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects": {
+      "get": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "List Projects",
+        "operationId": "list_projects_api_v1_projects_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProjectResponse"
+                  },
+                  "type": "array",
+                  "title": "Response List Projects Api V1 Projects Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "Create Project",
+        "operationId": "create_project_api_v1_projects_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}": {
+      "get": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "Get Project",
+        "operationId": "get_project_api_v1_projects__project_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/recipes/validate": {
+      "post": {
+        "tags": [
+          "recipes"
+        ],
+        "summary": "Validate Recipe Endpoint",
+        "operationId": "validate_recipe_endpoint_api_v1_recipes_validate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecipeValidateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecipeValidateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/recipes": {
+      "post": {
+        "tags": [
+          "recipes"
+        ],
+        "summary": "Create Recipe",
+        "operationId": "create_recipe_api_v1_projects__project_id__recipes_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecipeCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecipeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "recipes"
+        ],
+        "summary": "List Recipes",
+        "operationId": "list_recipes_api_v1_projects__project_id__recipes_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RecipeResponse"
+                  },
+                  "title": "Response List Recipes Api V1 Projects  Project Id  Recipes Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/recipes/{recipe_id}": {
+      "get": {
+        "tags": [
+          "recipes"
+        ],
+        "summary": "Get Recipe",
+        "operationId": "get_recipe_api_v1_recipes__recipe_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "recipe_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Recipe Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecipeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/recipes/{recipe_id}/clone": {
+      "post": {
+        "tags": [
+          "recipes"
+        ],
+        "summary": "Clone Recipe",
+        "description": "Clona uma receita como nova vers\u00e3o -- NUNCA modifica o corpo can\u00f4nico da original.",
+        "operationId": "clone_recipe_api_v1_recipes__recipe_id__clone_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "recipe_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Recipe Id"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecipeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/design-runs": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "List Design Runs For Project",
+        "description": "Hist\u00f3rico de execu\u00e7\u00f5es de um projeto (Incremento 2.1, item 6).",
+        "operationId": "list_design_runs_for_project_api_v1_projects__project_id__design_runs_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DesignRunResponse"
+                  },
+                  "title": "Response List Design Runs For Project Api V1 Projects  Project Id  Design Runs Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/design-runs": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Create Design Run",
+        "operationId": "create_design_run_api_v1_design_runs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DesignRunCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesignRunResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/design-runs/{design_run_id}": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Get Design Run",
+        "operationId": "get_design_run_api_v1_design_runs__design_run_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "design_run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Design Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesignRunResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/design-runs/{design_run_id}/retry": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Retry Design Run",
+        "operationId": "retry_design_run_api_v1_design_runs__design_run_id__retry_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "design_run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Design Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeometryJobResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/jobs/{job_id}": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Get Job",
+        "operationId": "get_job_api_v1_jobs__job_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeometryJobResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/jobs/{job_id}/cancel": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Cancel Job Endpoint",
+        "operationId": "cancel_job_endpoint_api_v1_jobs__job_id__cancel_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeometryJobResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/jobs/{job_id}/artifacts": {
+      "get": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "List Job Artifacts",
+        "operationId": "list_job_artifacts_api_v1_jobs__job_id__artifacts_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ArtifactResponse"
+                  },
+                  "title": "Response List Job Artifacts Api V1 Jobs  Job Id  Artifacts Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/artifacts/{artifact_id}/download": {
+      "get": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "Download Artifact",
+        "operationId": "download_artifact_api_v1_artifacts__artifact_id__download_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/jobs/{job_id}/manifest": {
+      "get": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "Get Job Manifest",
+        "operationId": "get_job_manifest_api_v1_jobs__job_id__manifest_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManifestResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/jobs/{job_id}/metrics": {
+      "get": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "Get Job Metrics",
+        "operationId": "get_job_metrics_api_v1_jobs__job_id__metrics_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Job Metrics Api V1 Jobs  Job Id  Metrics Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ActivateClinicalSuiteRequest": {
+        "properties": {
+          "master_key": {
+            "type": "string",
+            "title": "Master Key"
+          },
+          "justification": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 10,
+            "title": "Justification"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At",
+            "description": "Expira\u00e7\u00e3o opcional. Ap\u00f3s esse instante, os tr\u00eas flags passam a ser lidos como desabilitados."
+          }
+        },
+        "type": "object",
+        "required": [
+          "master_key",
+          "justification"
+        ],
+        "title": "ActivateClinicalSuiteRequest"
+      },
+      "ActivateIndependentStateRequest": {
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/OperationalStateKind"
+          },
+          "master_key": {
+            "type": "string",
+            "title": "Master Key"
+          },
+          "justification": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 10,
+            "title": "Justification"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "master_key",
+          "justification"
+        ],
+        "title": "ActivateIndependentStateRequest",
+        "description": "Para contextos independentes (hoje: apenas Laborat\u00f3rio \u2014 Pesquisa j\u00e1 vem habilitada e\nos tr\u00eas flags cl\u00ednicos usam os endpoints dedicados de su\u00edte cl\u00ednica, n\u00e3o este)."
+      },
+      "ActivateIndependentStateResponse": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "enabled"
+        ],
+        "title": "ActivateIndependentStateResponse"
+      },
+      "ArtifactKind": {
+        "type": "string",
+        "enum": [
+          "stl",
+          "vdb",
+          "thumbnail",
+          "manifest",
+          "log"
+        ],
+        "title": "ArtifactKind"
+      },
+      "ArtifactResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "geometry_job_id": {
+            "type": "string",
+            "title": "Geometry Job Id"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ArtifactKind"
+          },
+          "sha256": {
+            "type": "string",
+            "title": "Sha256"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "title": "Size Bytes"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "geometry_job_id",
+          "kind",
+          "sha256",
+          "size_bytes",
+          "created_at"
+        ],
+        "title": "ArtifactResponse"
+      },
+      "ClinicalSuiteChangeResponse": {
+        "properties": {
+          "clinical_test_enabled": {
+            "type": "boolean",
+            "title": "Clinical Test Enabled"
+          },
+          "clinical_pilot_enabled": {
+            "type": "boolean",
+            "title": "Clinical Pilot Enabled"
+          },
+          "clinical_production_enabled": {
+            "type": "boolean",
+            "title": "Clinical Production Enabled"
+          },
+          "previous_state": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "type": "object",
+            "title": "Previous State"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "clinical_test_enabled",
+          "clinical_pilot_enabled",
+          "clinical_production_enabled",
+          "previous_state",
+          "expires_at"
+        ],
+        "title": "ClinicalSuiteChangeResponse"
+      },
+      "DeactivateClinicalSuiteRequest": {
+        "properties": {
+          "master_key": {
+            "type": "string",
+            "title": "Master Key"
+          },
+          "justification": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 10,
+            "title": "Justification"
+          }
+        },
+        "type": "object",
+        "required": [
+          "master_key",
+          "justification"
+        ],
+        "title": "DeactivateClinicalSuiteRequest"
+      },
+      "DesignRunCreate": {
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "title": "Project Id"
+          },
+          "recipe_id": {
+            "type": "string",
+            "title": "Recipe Id"
+          },
+          "material_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material Id"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "title": "Idempotency Key"
+          }
+        },
+        "type": "object",
+        "required": [
+          "project_id",
+          "recipe_id",
+          "idempotency_key"
+        ],
+        "title": "DesignRunCreate"
+      },
+      "DesignRunResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "organization_id": {
+            "type": "string",
+            "title": "Organization Id"
+          },
+          "project_id": {
+            "type": "string",
+            "title": "Project Id"
+          },
+          "recipe_id": {
+            "type": "string",
+            "title": "Recipe Id"
+          },
+          "material_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material Id"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "title": "Idempotency Key"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "created": {
+            "type": "boolean",
+            "title": "Created"
+          },
+          "latest_job": {
+            "$ref": "#/components/schemas/GeometryJobResponse"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "organization_id",
+          "project_id",
+          "recipe_id",
+          "material_id",
+          "idempotency_key",
+          "created_at",
+          "created",
+          "latest_job"
+        ],
+        "title": "DesignRunResponse"
+      },
+      "GeometryJobResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "design_run_id": {
+            "type": "string",
+            "title": "Design Run Id"
+          },
+          "attempt_number": {
+            "type": "integer",
+            "title": "Attempt Number"
+          },
+          "status": {
+            "$ref": "#/components/schemas/JobStatus"
+          },
+          "progress_pct": {
+            "type": "integer",
+            "title": "Progress Pct"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "worker_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worker Version"
+          },
+          "dotnet_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dotnet Version"
+          },
+          "picogk_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Picogk Version"
+          },
+          "metrics": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metrics"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "design_run_id",
+          "attempt_number",
+          "status",
+          "progress_pct",
+          "created_at",
+          "started_at",
+          "finished_at",
+          "error_code",
+          "error_message",
+          "worker_version",
+          "dotnet_version",
+          "picogk_version",
+          "metrics",
+          "duration_seconds"
+        ],
+        "title": "GeometryJobResponse"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "HealthResponse"
+      },
+      "JobStatus": {
+        "type": "string",
+        "enum": [
+          "queued",
+          "running",
+          "succeeded",
+          "failed",
+          "cancelled"
+        ],
+        "title": "JobStatus"
+      },
+      "LoginRequest": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email"
+          },
+          "password": {
+            "type": "string",
+            "title": "Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "LoginRequest"
+      },
+      "LoginResponse": {
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "title": "Access Token"
+          },
+          "token_type": {
+            "type": "string",
+            "title": "Token Type",
+            "default": "bearer"
+          },
+          "expires_in": {
+            "type": "integer",
+            "title": "Expires In"
+          }
+        },
+        "type": "object",
+        "required": [
+          "access_token",
+          "expires_in"
+        ],
+        "title": "LoginResponse"
+      },
+      "LogoutResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "LogoutResponse"
+      },
+      "ManifestResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "geometry_job_id": {
+            "type": "string",
+            "title": "Geometry Job Id"
+          },
+          "manifest_json": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Manifest Json"
+          },
+          "manifest_sha256": {
+            "type": "string",
+            "title": "Manifest Sha256"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "geometry_job_id",
+          "manifest_json",
+          "manifest_sha256",
+          "created_at"
+        ],
+        "title": "ManifestResponse"
+      },
+      "MaterialCreateRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "source_type": {
+            "$ref": "#/components/schemas/MaterialSourceType"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "properties": {
+            "items": {
+              "$ref": "#/components/schemas/MaterialPropertyCreate"
+            },
+            "type": "array",
+            "title": "Properties"
+          },
+          "references": {
+            "items": {
+              "$ref": "#/components/schemas/ScientificReferenceCreate"
+            },
+            "type": "array",
+            "title": "References"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "category",
+          "source_type"
+        ],
+        "title": "MaterialCreateRequest"
+      },
+      "MaterialDetail": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "source_type": {
+            "$ref": "#/components/schemas/MaterialSourceType"
+          },
+          "review_status": {
+            "$ref": "#/components/schemas/ReviewStatus"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "properties": {
+            "items": {
+              "$ref": "#/components/schemas/MaterialPropertyResponse"
+            },
+            "type": "array",
+            "title": "Properties"
+          },
+          "references": {
+            "items": {
+              "$ref": "#/components/schemas/ScientificReferenceResponse"
+            },
+            "type": "array",
+            "title": "References"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "category",
+          "source_type",
+          "review_status",
+          "created_at",
+          "description",
+          "properties",
+          "references"
+        ],
+        "title": "MaterialDetail"
+      },
+      "MaterialPropertyCreate": {
+        "properties": {
+          "property_name": {
+            "type": "string",
+            "title": "Property Name"
+          },
+          "value": {
+            "type": "number",
+            "title": "Value"
+          },
+          "unit": {
+            "type": "string",
+            "title": "Unit"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "reference_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Id"
+          },
+          "method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Method"
+          },
+          "uncertainty_low": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uncertainty Low"
+          },
+          "uncertainty_high": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uncertainty High"
+          },
+          "review_status": {
+            "$ref": "#/components/schemas/ReviewStatus",
+            "default": "draft"
+          }
+        },
+        "type": "object",
+        "required": [
+          "property_name",
+          "value",
+          "unit",
+          "source"
+        ],
+        "title": "MaterialPropertyCreate"
+      },
+      "MaterialPropertyResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "property_name": {
+            "type": "string",
+            "title": "Property Name"
+          },
+          "value": {
+            "type": "number",
+            "title": "Value"
+          },
+          "unit": {
+            "type": "string",
+            "title": "Unit"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "reference_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Id"
+          },
+          "method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Method"
+          },
+          "uncertainty_low": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uncertainty Low"
+          },
+          "uncertainty_high": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uncertainty High"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "review_status": {
+            "$ref": "#/components/schemas/ReviewStatus"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "property_name",
+          "value",
+          "unit",
+          "source",
+          "reference_id",
+          "method",
+          "uncertainty_low",
+          "uncertainty_high",
+          "version",
+          "review_status",
+          "created_at"
+        ],
+        "title": "MaterialPropertyResponse"
+      },
+      "MaterialSourceType": {
+        "type": "string",
+        "enum": [
+          "synthetic",
+          "literature"
+        ],
+        "title": "MaterialSourceType"
+      },
+      "MaterialSummary": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "source_type": {
+            "$ref": "#/components/schemas/MaterialSourceType"
+          },
+          "review_status": {
+            "$ref": "#/components/schemas/ReviewStatus"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "category",
+          "source_type",
+          "review_status",
+          "created_at"
+        ],
+        "title": "MaterialSummary"
+      },
+      "OperationalStateItem": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "enabled"
+        ],
+        "title": "OperationalStateItem"
+      },
+      "OperationalStateKind": {
+        "type": "string",
+        "enum": [
+          "research",
+          "laboratory",
+          "clinical_test",
+          "clinical_pilot",
+          "clinical_production"
+        ],
+        "title": "OperationalStateKind"
+      },
+      "ProjectCreateRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "ProjectCreateRequest"
+      },
+      "ProjectResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "organization_id": {
+            "type": "string",
+            "title": "Organization Id"
+          },
+          "owner_user_id": {
+            "type": "string",
+            "title": "Owner User Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ProjectStatus"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "organization_id",
+          "owner_user_id",
+          "name",
+          "description",
+          "status",
+          "created_at"
+        ],
+        "title": "ProjectResponse"
+      },
+      "ProjectStatus": {
+        "type": "string",
+        "enum": [
+          "active",
+          "archived"
+        ],
+        "title": "ProjectStatus"
+      },
+      "ReadyResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "database": {
+            "type": "string",
+            "title": "Database"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "database"
+        ],
+        "title": "ReadyResponse"
+      },
+      "RecipeCreateRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "recipe_body": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Recipe Body"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "recipe_body"
+        ],
+        "title": "RecipeCreateRequest"
+      },
+      "RecipeResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "organization_id": {
+            "type": "string",
+            "title": "Organization Id"
+          },
+          "project_id": {
+            "type": "string",
+            "title": "Project Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "schema_version": {
+            "type": "string",
+            "title": "Schema Version"
+          },
+          "canonical_json": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Canonical Json"
+          },
+          "checksum_sha256": {
+            "type": "string",
+            "title": "Checksum Sha256"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "parent_recipe_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Recipe Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RecipeStatus"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "organization_id",
+          "project_id",
+          "name",
+          "schema_version",
+          "canonical_json",
+          "checksum_sha256",
+          "version",
+          "parent_recipe_id",
+          "status",
+          "created_at"
+        ],
+        "title": "RecipeResponse"
+      },
+      "RecipeStatus": {
+        "type": "string",
+        "enum": [
+          "draft",
+          "validated"
+        ],
+        "title": "RecipeStatus"
+      },
+      "RecipeValidateRequest": {
+        "properties": {
+          "recipe_body": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Recipe Body"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recipe_body"
+        ],
+        "title": "RecipeValidateRequest"
+      },
+      "RecipeValidateResponse": {
+        "properties": {
+          "valid": {
+            "type": "boolean",
+            "title": "Valid"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/RecipeValidationErrorItem"
+            },
+            "type": "array",
+            "title": "Errors"
+          },
+          "checksum_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checksum Sha256"
+          },
+          "schema_version": {
+            "type": "string",
+            "title": "Schema Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "valid",
+          "errors",
+          "schema_version"
+        ],
+        "title": "RecipeValidateResponse"
+      },
+      "RecipeValidationErrorItem": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "validator": {
+            "type": "string",
+            "title": "Validator"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "message",
+          "validator"
+        ],
+        "title": "RecipeValidationErrorItem"
+      },
+      "ReviewStatus": {
+        "type": "string",
+        "enum": [
+          "draft",
+          "reviewed",
+          "deprecated"
+        ],
+        "title": "ReviewStatus"
+      },
+      "ScientificReferenceCreate": {
+        "properties": {
+          "citation_text": {
+            "type": "string",
+            "title": "Citation Text"
+          },
+          "doi": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Doi"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "source_document": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Document"
+          },
+          "page_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Reference"
+          }
+        },
+        "type": "object",
+        "required": [
+          "citation_text"
+        ],
+        "title": "ScientificReferenceCreate"
+      },
+      "ScientificReferenceResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "citation_text": {
+            "type": "string",
+            "title": "Citation Text"
+          },
+          "doi": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Doi"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "source_document": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Document"
+          },
+          "page_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Reference"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "citation_text",
+          "doi",
+          "url",
+          "source_document",
+          "page_reference",
+          "created_at"
+        ],
+        "title": "ScientificReferenceResponse"
+      },
+      "SystemStatusResponse": {
+        "properties": {
+          "environment": {
+            "type": "string",
+            "title": "Environment"
+          },
+          "auth_mode": {
+            "type": "string",
+            "title": "Auth Mode"
+          },
+          "clinical_suite_enabled": {
+            "type": "boolean",
+            "title": "Clinical Suite Enabled"
+          },
+          "operational_states": {
+            "items": {
+              "$ref": "#/components/schemas/OperationalStateItem"
+            },
+            "type": "array",
+            "title": "Operational States"
+          },
+          "demo_mode": {
+            "type": "boolean",
+            "title": "Demo Mode"
+          }
+        },
+        "type": "object",
+        "required": [
+          "environment",
+          "auth_mode",
+          "clinical_suite_enabled",
+          "operational_states",
+          "demo_mode"
+        ],
+        "title": "SystemStatusResponse"
+      },
+      "UserResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "full_name": {
+            "type": "string",
+            "title": "Full Name"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role"
+          },
+          "organization_id": {
+            "type": "string",
+            "title": "Organization Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "email",
+          "full_name",
+          "role",
+          "organization_id"
+        ],
+        "title": "UserResponse"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "VersionResponse": {
+        "properties": {
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "environment": {
+            "type": "string",
+            "title": "Environment"
+          }
+        },
+        "type": "object",
+        "required": [
+          "version",
+          "environment"
+        ],
+        "title": "VersionResponse"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  }
+}

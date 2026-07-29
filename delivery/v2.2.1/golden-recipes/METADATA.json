@@ -1,0 +1,14 @@
+{
+  "block-gyroid-v1": {
+    "file": "block-gyroid-v1.json",
+    "description": "Bloco 10x10x10mm, gyroid final, caso principal de domínio retangular."
+  },
+  "cylinder-gyroid-v1": {
+    "file": "cylinder-gyroid-v1.json",
+    "description": "Cilindro raio=5mm altura=12mm, gyroid final, caso principal de domínio cilíndrico."
+  },
+  "preview-gyroid-low-res-v1": {
+    "file": "preview-gyroid-low-res-v1.json",
+    "description": "Bloco 5x5x5mm, modo preview, resolução reduzida, iteração rápida."
+  }
+}
