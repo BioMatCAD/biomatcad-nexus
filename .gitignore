@@ -61,3 +61,29 @@ htmlcov/
 # localmente (Incremento 2.1.1, item 10 da correção de calibração) -- é estado local da máquina
 # de quem executa o worker, não deve ser versionado.
 apps/geometry-worker/imgui.ini
+
+# Armazenamento local transitório de artefatos da API (Incremento 2.1.1) -- criado ao rodar a
+# API/worker/seed E2E localmente (config.py: artifact_storage_dir default "./data/artifacts",
+# relativo ao cwd de apps/api). NÃO confundir com data/ na raiz do repositório (data/demo/,
+# data/schemas/), que são canônicos e versionados -- este padrão é ancorado especificamente em
+# apps/api/data/.
+apps/api/data/
+
+# Relatorio local do gate final (API->fila->worker PicoGK real->Artifact/Manifest->
+# download, apps/api/scripts/verify_full_pipeline_sha256.py) -- evidencia pontual de uma
+# execucao especifica, nunca deve ser versionada (o conteudo relevante e transcrito
+# manualmente para TEST_EVIDENCE.md/IMPLEMENTATION_STATUS.md quando o usuario roda o gate).
+apps/api/GATE_FULL_PIPELINE_REPORT.json
+
+# Transcrição literal de execução real do E2E Playwright no Windows do usuário (redirecionada
+# manualmente via PowerShell para evidência, ex.: PLAYWRIGHT_WINDOWS_EVIDENCE_4.txt) -- artefato
+# local de evidência pontual, não faz parte do código nem da documentação versionada (o
+# conteúdo relevante é transcrito manualmente para TEST_EVIDENCE.md/WORKER_STATUS.md).
+PLAYWRIGHT_WINDOWS_EVIDENCE*.txt
+
+# Resultados/relatórios do Playwright (redundante com apps/web/.gitignore, mantido aqui também
+# para o caso de a suíte ser executada a partir da raiz do repositório).
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/

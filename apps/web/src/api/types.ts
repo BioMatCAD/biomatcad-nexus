@@ -229,12 +229,18 @@ export interface RecipeResponse {
 
 export type JobStatusKind = "queued" | "running" | "succeeded" | "failed" | "cancelled";
 
+// Nomes de campo devem bater EXATAMENTE com o JSON emitido pelo worker real
+// (apps/geometry-worker/JobEnvelope.cs: porosity_pct_measured, vertex_count_unique) e
+// repassado verbatim pela API (worker_client.py: metrics=result_json["metrics"], sem
+// renomear nada). Um mismatch aqui (bug real encontrado e corrigido em 2026-07-29 ao preparar
+// o gate final do worker PicoGK real) faz a UI mostrar "undefined" silenciosamente para um job
+// succeeded de verdade -- nunca renomeie estes campos sem conferir o contrato real do worker.
 export interface GeometryMetrics {
   bounding_box_mm: [[number, number, number], [number, number, number]];
   volume_mm3: number;
-  porosity_pct_estimated: number;
+  porosity_pct_measured: number;
   surface_area_mm2: number;
-  vertex_count: number;
+  vertex_count_unique: number;
   triangle_count: number;
   is_watertight: boolean;
 }

@@ -121,9 +121,9 @@ export function JobDetailPage() {
           <table data-testid="job-metrics" style={{ borderCollapse: "collapse" }}>
             <tbody>
               <tr><td style={styles.td}><strong>Volume (mm³)</strong></td><td style={styles.td}>{job.metrics.volume_mm3}</td></tr>
-              <tr><td style={styles.td}><strong>Porosidade estimada (%)</strong></td><td style={styles.td}>{job.metrics.porosity_pct_estimated}</td></tr>
+              <tr><td style={styles.td}><strong>Porosidade medida (%)</strong></td><td style={styles.td}>{job.metrics.porosity_pct_measured}</td></tr>
               <tr><td style={styles.td}><strong>Área de superfície (mm²)</strong></td><td style={styles.td}>{job.metrics.surface_area_mm2}</td></tr>
-              <tr><td style={styles.td}><strong>Vértices</strong></td><td style={styles.td}>{job.metrics.vertex_count}</td></tr>
+              <tr><td style={styles.td}><strong>Vértices únicos</strong></td><td style={styles.td}>{job.metrics.vertex_count_unique}</td></tr>
               <tr><td style={styles.td}><strong>Triângulos</strong></td><td style={styles.td}>{job.metrics.triangle_count}</td></tr>
               <tr><td style={styles.td}><strong>Watertight</strong></td><td style={styles.td}>{job.metrics.is_watertight ? "sim" : "não"}</td></tr>
             </tbody>

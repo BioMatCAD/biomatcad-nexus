@@ -606,16 +606,97 @@ dois testes tentam lançar o Chromium real e falham pela MESMA causa já documen
 execução real do usuário no Windows para confirmar que a navegação e as asserções corrigidas
 batem com a interface de produção.
 
+## 11. E2E Playwright real APROVADO no Windows (commit `f7a9614`)
+
+Transcrito literalmente, tal como recebido do usuário, sem qualquer alteração.
+
+Infraestrutura confirmada pelo usuário: API real em `localhost:8000`; frontend real em
+`localhost:5173`; Chromium real e funcional; ambiente Python isolado (venv da API); seed
+sintético `already_seeded`; as duas portas verificadas previamente como
+`TcpTestSucceeded=True`.
+
+```text
+Running 2 tests using 1 worker
+
+ok 1 -- login, criação de projeto e receita via UI real
+ok 2 -- página de job succeeded (pré-semeado) exibe status, métricas e link de download do STL
+
+2 passed (8.9s)
+PlaywrightExitCode=0
+```
+
+**Veredito**: os dois cenários do E2E Playwright (`apps/web/e2e/vertical.spec.ts`) passaram de
+verdade contra a interface, a API e o Postgres reais rodando no Windows do usuário, com o
+Chromium real (não simulado, não headless-fake). As correções de navegação (nunca `page.goto()`
+em rota protegida) e de asserção de status localizado (Seção 10) estão confirmadas contra a
+interface de produção real, não apenas contra os testes unitários/guardas deste sandbox.
+
+**Ressalva importante, para não confundir escopos de prova**: o cenário 2 (`ok 2`) verifica a
+UI real (status "Concluído", tabela de métricas, link de download) sobre um job **succeeded
+PRÉ-SEMEADO** por `scripts/seed_e2e_user.py`, via o `_FakeWorkerClientForE2ESeed` -- um test
+double explícito que NUNCA executa o PicoGK real (ver docstring do próprio script e
+`apps/geometry-worker/WORKER_STATUS.md`). Este E2E prova que a **interface** (frontend + API +
+Postgres + navegação real) está correta e íntegra ponta-a-ponta para exibir um job já
+concluído. Ele **NÃO** prova, e nunca teve a intenção de provar, que o **worker PicoGK real**
+foi executado através do fluxo de produção completo (API → fila → dispatcher → worker →
+STL → Artifact/Manifest → download) -- essa prova é um gate SEPARADO, ainda pendente (ver
+Seção 12 abaixo e "O que esta evidência NÃO cobre").
+
+## 12. Gate final pendente: vertical completa com worker PicoGK real via fila de produção
+
+Ainda não provado com o worker PicoGK real (nem nesta sessão, nem em nenhuma anterior): submeter
+um job NOVO (não pré-semeado) através do fluxo de produção real -- API cria
+`DesignRun`/`GeometryJob` → dispatcher reivindica via fila Postgres → worker PicoGK real gera o
+STL → API persiste `Artifact`/`ArtifactManifest` → download via endpoint real -- com o status
+transitando `queued` → `running` → `succeeded` de verdade, e o SHA-256 do STL físico conferido
+contra o registro `Artifact`, o `ArtifactManifest` e o arquivo baixado via API.
+
+Script criado para automatizar exatamente essa verificação:
+`apps/api/scripts/verify_full_pipeline_sha256.py`. Ele: cria um usuário/organização dedicados
+(idempotente); autentica via HTTP real; cria projeto e receita reais; submete um `DesignRun`
+NOVO com `idempotency_key` única por execução (nunca reaproveita nem pré-semeia); invoca o
+dispatcher real (`geometry_dispatcher.py --once`) em segundo plano e faz polling concorrente do
+status; usa `started_at` (gravado atomicamente por `claim_next_queued_job`) como prova
+autoritativa da transição `queued`→`running` (independente de o polling "flagrar" o estado
+intermediário ao vivo, o que é inerentemente sujeito a corrida para jobs rápidos); e, se o job
+chegar a `succeeded`, compara o SHA-256 em 5 fontes (arquivo físico lido via o `storage_key`
+real do `Artifact`, o campo `sha256` do `Artifact` via API, o mesmo campo via DB direto, o
+`stl_sha256` do `ArtifactManifest`, e os bytes baixados via `GET /api/v1/artifacts/{id}/download`),
+confirma métricas persistidas com os nomes de campo REAIS do worker, confirma a trilha de
+`AuditEvent` (`geometry_job_created`, `geometry_job_succeeded`) e a associação
+usuário/organização/projeto/receita. Nunca fabrica sucesso: qualquer divergência real produz
+`FAILED` com o motivo exato e código de saída != 0.
+
+**Dry-run real feito neste sandbox** (sem PicoGK disponível, como sempre): subi um Postgres
+efêmero real via `pgserver`, uma instância `uvicorn` real da API, e rodei o script de ponta a
+ponta contra elas. Resultado honesto: todos os passos via HTTP (login, criar projeto, criar
+receita, submeter job) passaram; o dispatcher real foi invocado e `started_at` confirmou a
+transição real para `running`; o job então falhou exatamente com `WORKER_RUNTIME_UNAVAILABLE`
+("O runtime nativo do PicoGK não está disponível nesta plataforma") -- a mesma limitação
+conhecida de sempre, detectada e reportada honestamente pelo script (`GATE REPROVADO`, exit
+code 1), sem nenhuma tentativa de disfarçar ou contornar. Isso valida que a mecânica do script
+(chamadas HTTP reais, invocação do dispatcher real, detecção de falha real) funciona
+corretamente; falta apenas a execução no Windows do usuário, onde o PicoGK real está disponível,
+para percorrer também a parte de comparação de SHA-256/métricas/auditoria.
+
+**Bug real descoberto e corrigido ao preparar este gate**: cruzando o contrato real do worker
+(`apps/geometry-worker/JobEnvelope.cs`: `porosity_pct_measured`, `vertex_count_unique`) contra
+o frontend, encontrei que `JobDetailPage.tsx`/`types.ts`/`demoClient.ts` liam os campos errados
+(`porosity_pct_estimated`, `vertex_count`, que NUNCA existiram na API real) -- a página de um
+job succeeded real mostraria "undefined" silenciosamente para porosidade e vértices. Corrigido
+nos 3 arquivos (mais o teste `JobDetailPage.test.tsx`, atualizado para usar os nomes reais).
+Verificado quebrando deliberadamente de novo e confirmando a falha do teste, depois restaurado.
+
+Um kit PowerShell para o usuário executar este gate real no Windows foi preparado (ver
+`docs/examples/WINDOWS_EXECUTION_KIT.md`, nova Seção 9).
+
 ## O que esta evidência explicitamente NÃO cobre
 
-- **E2E Playwright real (navegador)** — escrito (`apps/web/e2e/`), nunca executado em nenhum
-  ambiente até agora (bloqueado neste sandbox Linux por dupla causa: bibliotecas nativas
-  ausentes E rede bloqueada para instalá-las sem `sudo` — ver Seção 8 e
-  `apps/web/e2e/README.md`). Backend e frontend foram validados isoladamente (Seção 8), mas
-  isso NÃO substitui o percurso E2E real através do navegador.
-- **Consistência STL-vs-manifesto via fluxo completo API→dispatcher→manifesto** — todas as
-  execuções reais desta sessão continuam sendo invocações diretas do worker via CLI, não pelo
-  fluxo de produção completo.
+- **Consistência STL-vs-manifesto via fluxo completo API→dispatcher→worker PicoGK real→
+  Artifact/Manifest→download** -- o E2E aprovado (Seção 11) valida a interface real, mas com um
+  job PRÉ-SEMEADO (worker fake rotulado); nenhum job NOVO foi submetido e processado através do
+  fluxo de produção completo com o worker PicoGK real nesta sessão. Este é o gate final ainda
+  pendente (Seção 12).
 - **Empacotamento final v2.2.1** — deliberadamente ainda não gerado.
 
 Estes itens são o que falta para declarar o Incremento 2.1.1 concluído.

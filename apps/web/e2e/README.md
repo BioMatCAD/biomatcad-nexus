@@ -3,6 +3,34 @@
 Este diretório contém um teste E2E real (não simulado) do caminho:
 login → materiais → projeto → receita → design-run → status do job → visualização/download.
 
+## APROVADO no Windows (2026-07-29, commit `f7a9614`)
+
+Com as duas correções abaixo aplicadas, o usuário rodou `npm run test:e2e` de verdade no
+Windows: API real em `localhost:8000`, frontend real em `localhost:5173`, Chromium real,
+ambiente Python isolado, seed `already_seeded`, as duas portas confirmadas
+(`TcpTestSucceeded=True`). Resultado literal:
+
+```text
+Running 2 tests using 1 worker
+
+ok 1 -- login, criação de projeto e receita via UI real
+ok 2 -- página de job succeeded (pré-semeado) exibe status, métricas e link de download do STL
+
+2 passed (8.9s)
+PlaywrightExitCode=0
+```
+
+**O que isso prova**: a interface (frontend real + API real + Postgres real), a navegação
+client-side pós-login e a exibição de status/métricas/download funcionam corretamente ponta-a-
+ponta contra uma execução de navegador real, não simulada.
+
+**O que isso NÃO prova** (ressalva importante de escopo): o cenário 2 usa um job succeeded
+PRÉ-SEMEADO (`scripts/seed_e2e_user.py`, via `_FakeWorkerClientForE2ESeed` -- nunca PicoGK
+real). Este E2E não executa nem prova a execução do worker PicoGK real através do fluxo de
+produção completo (API → fila → dispatcher → worker → STL → Artifact/Manifest → download).
+Essa é uma prova separada, ainda pendente -- ver `docs/examples/WINDOWS_EXECUTION_KIT.md` e
+`apps/api/scripts/verify_full_pipeline_sha256.py` para o kit que prepara exatamente essa verificação.
+
 ## Duas falhas reais corrigidas (2026-07-29): navegação via reload perdia a sessão + status testado em inglês
 
 Com o bug do `__dirname` já corrigido, o usuário rodou o E2E completo de verdade no Windows:

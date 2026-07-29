@@ -207,10 +207,53 @@ npm run test:e2e | Tee-Object -FilePath C:\biomatcad-runs\playwright-windows-out
 
 ---
 
-## 8. O que devolver
+## 9. Gate final: vertical completa com worker PicoGK real (item 11/12 -- o mais rigoroso)
+
+Diferente do passo 7 (E2E), que usa um job succeeded PRÉ-SEMEADO (worker fake rotulado) para
+validar a INTERFACE, este gate submete um job NOVO através do fluxo de produção real e só
+aceita como aprovado se o worker PicoGK REAL o processar até `succeeded`, com o SHA-256 do STL
+idêntico em todas as fontes (arquivo físico, registro `Artifact`, `ArtifactManifest`, download
+via API). Não usa nem simula nada -- se o worker falhar, o gate falha honestamente com o motivo
+real.
+
+Requer: API rodando em outro terminal (mesma `DATABASE_URL`/`ARTIFACT_STORAGE_DIR` que o
+próprio gate vai usar -- rode ambos a partir do mesmo `apps\api` com o mesmo `.venv` ativado, e
+sem sobrescrever `ARTIFACT_STORAGE_DIR` de forma diferente entre os dois terminais). O worker
+já precisa estar compilado (passo 2).
+
+```powershell
+# Terminal 1 -- deixe a API rodando (mesma janela usada no passo 6, se já estiver ativa)
+cd C:\biomatcad-nexus\apps\api
+.venv\Scripts\Activate.ps1
+$env:DATABASE_URL = "postgresql+psycopg://biomatcad:biomatcad@localhost:5432/biomatcad"
+uvicorn biomatcad_api.main:app --host 127.0.0.1 --port 8000
+
+# Terminal 2 -- confirma que a API está de pé, então roda o gate
+cd C:\biomatcad-nexus\apps\api
+.venv\Scripts\Activate.ps1
+$env:DATABASE_URL = "postgresql+psycopg://biomatcad:biomatcad@localhost:5432/biomatcad"
+Test-NetConnection -ComputerName localhost -Port 8000   # espere TcpTestSucceeded : True
+
+python scripts\verify_full_pipeline_sha256.py 2>&1 | Tee-Object -FilePath C:\biomatcad-runs\gate-full-pipeline-output.txt
+Copy-Item GATE_FULL_PIPELINE_REPORT.json C:\biomatcad-runs\gate-full-pipeline-report.json
+```
+
+Por padrão usa a golden recipe `block-gyroid-v1` (modo `final`, já aprovada nesta sessão --
+nenhuma alteração). Para rodar com outra: `--recipe cylinder-gyroid-v1` ou
+`--recipe preview-gyroid-low-res-v1`. Para um timeout maior (jobs `final` maiores podem levar
+mais que os 300s padrão): `--timeout-seconds 600`.
+
+O script imprime cada passo com `[OK]`/`[FALHA]` e termina com `GATE APROVADO` (exit code 0) ou
+`GATE REPROVADO: <motivo real>` (exit code != 0) -- nunca fabrica um resultado intermediário.
+Devolva `gate-full-pipeline-output.txt` e `gate-full-pipeline-report.json` inteiros, aprovado ou
+não.
+
+---
+
+## 10. O que devolver
 
 Compacte a pasta `C:\biomatcad-runs\` inteira (todas as subpastas das 3 receitas, mais os logs
-opcionais dos passos 6 e 7) e devolva. Idealmente:
+opcionais dos passos 6, 7 e 9) e devolva. Idealmente:
 
 ```powershell
 Compress-Archive -Path C:\biomatcad-runs\* -DestinationPath C:\biomatcad-runs-resultado.zip

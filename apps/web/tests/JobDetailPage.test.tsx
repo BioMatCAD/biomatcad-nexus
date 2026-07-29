@@ -66,12 +66,16 @@ function mockFetch() {
           dotnet_version: "9.0.0",
           picogk_version: "2.2.0",
           duration_seconds: 5,
+          // Nomes de campo iguais ao contrato real do worker (JobEnvelope.cs:
+          // porosity_pct_measured, vertex_count_unique) -- NÃO usar porosity_pct_estimated
+          // nem vertex_count, que nunca existiram na API real (bug real encontrado e
+          // corrigido em 2026-07-29, ver types.ts).
           metrics: {
             bounding_box_mm: [[0, 0, 0], [10, 10, 10]],
             volume_mm3: 400.0,
-            porosity_pct_estimated: 60.0,
+            porosity_pct_measured: 60.0,
             surface_area_mm2: 950.5,
-            vertex_count: 168,
+            vertex_count_unique: 168,
             triangle_count: 100,
             is_watertight: true,
           },
@@ -119,8 +123,10 @@ describe("JobDetailPage (smoke test) -- status/métricas/download realmente rend
     expect(status.textContent).not.toContain("succeeded");
 
     const metrics = screen.getByTestId("job-metrics");
-    expect(metrics).toHaveTextContent("400");
-    expect(metrics).toHaveTextContent("sim");
+    expect(metrics).toHaveTextContent("400"); // volume_mm3
+    expect(metrics).toHaveTextContent("60"); // porosity_pct_measured
+    expect(metrics).toHaveTextContent("168"); // vertex_count_unique
+    expect(metrics).toHaveTextContent("sim"); // is_watertight
 
     // Guarda de unicidade: apenas o artefato STL ganha este data-testid -- o de thumbnail
     // (kind !== "stl") não deve ser confundido com o link de download do STL.

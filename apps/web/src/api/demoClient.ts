@@ -153,9 +153,9 @@ function simulateJobProgress(jobId: string): void {
         [5, 5, 5],
       ],
       volume_mm3: 400.0,
-      porosity_pct_estimated: 60.0,
+      porosity_pct_measured: 60.0,
       surface_area_mm2: 950.5,
-      vertex_count: 168,
+      vertex_count_unique: 168,
       triangle_count: 336,
       is_watertight: true,
     };
