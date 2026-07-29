@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://biomatcad.example/schemas/biomatcem/geometry-recipe-v1.schema.json",
+  "title": "BioMatCEM Geometry Recipe v1",
+  "description": "Receita canônica e versionada para geração de geometria científica (scaffold) pelo BioMatCEM. Incremento 2.1 aceita apenas topologia gyroid em domínio block ou cylinder. Nenhum campo aceita código executável (C#, Python) ou expressões arbitrárias — apenas valores numéricos/enumerados.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "domain",
+    "topology",
+    "mode",
+    "seed",
+    "output_formats",
+    "compute_limits"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0",
+      "description": "Versão exata do schema aceito por esta versão da API. Requisições com outra versão são rejeitadas (400), não migradas silenciosamente."
+    },
+    "domain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["shape", "dimensions_mm"],
+      "properties": {
+        "shape": { "enum": ["block", "cylinder"] },
+        "dimensions_mm": {
+          "description": "Unidade sempre em milímetros, explícita no nome do campo (Prompt Mestre: unidades nunca implícitas).",
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["kind", "x_mm", "y_mm", "z_mm"],
+              "properties": {
+                "kind": { "const": "block" },
+                "x_mm": { "type": "number", "exclusiveMinimum": 0, "maximum": 200 },
+                "y_mm": { "type": "number", "exclusiveMinimum": 0, "maximum": 200 },
+                "z_mm": { "type": "number", "exclusiveMinimum": 0, "maximum": 200 }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["kind", "radius_mm", "height_mm"],
+              "properties": {
+                "kind": { "const": "cylinder" },
+                "radius_mm": { "type": "number", "exclusiveMinimum": 0, "maximum": 100 },
+                "height_mm": { "type": "number", "exclusiveMinimum": 0, "maximum": 200 }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "topology": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "cell_size_mm", "isovalue"],
+      "properties": {
+        "kind": { "const": "gyroid" },
+        "cell_size_mm": {
+          "type": "number",
+          "exclusiveMinimum": 0.1,
+          "maximum": 20,
+          "description": "Tamanho da célula unitária da superfície mínima periódica (TPMS), em mm."
+        },
+        "wall_thickness_mm": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 5,
+          "description": "Espessura de parede, em mm. Mutuamente informativo com isovalue — ambos podem ser fornecidos; o worker usa wall_thickness_mm quando presente."
+        },
+        "isovalue": {
+          "type": "number",
+          "minimum": -1.5,
+          "maximum": 1.5,
+          "description": "Isovalor da superfície implícita gyroid (sin x cos y + sin y cos z + sin z cos x = isovalue)."
+        },
+        "target_porosity_pct": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 99,
+          "description": "Porosidade-alvo aproximada, em percentual. Estimativa, não garantia exata — ver métricas calculadas pós-execução."
+        }
+      }
+    },
+    "resolution": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "voxel_size_mm": {
+          "type": "number",
+          "exclusiveMinimum": 0.01,
+          "maximum": 5,
+          "default": 0.2
+        }
+      }
+    },
+    "mode": {
+      "enum": ["preview", "final"],
+      "description": "preview: resolução reduzida, limites computacionais mais baixos, para iteração rápida. final: resolução configurável dentro dos limites de compute_limits."
+    },
+    "seed": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295,
+      "description": "Semente determinística. A mesma receita canônica + mesma versão do worker deve produzir os mesmos artefatos (determinismo, requisito de teste)."
+    },
+    "compute_limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_duration_seconds", "max_memory_mb", "max_voxel_count"],
+      "properties": {
+        "max_duration_seconds": { "type": "integer", "minimum": 1, "maximum": 3600 },
+        "max_memory_mb": { "type": "integer", "minimum": 64, "maximum": 16384 },
+        "max_voxel_count": { "type": "integer", "minimum": 1000, "maximum": 500000000 }
+      }
+    },
+    "output_formats": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "enum": ["stl", "vdb"] },
+      "uniqueItems": true,
+      "description": "vdb só é gerado se oficialmente suportado pelo worker instalado (ver IMPLEMENTATION_STATUS.md); caso contrário o job falha com erro estruturado, nunca silenciosamente ignorado."
+    }
+  }
+}
