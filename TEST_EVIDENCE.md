@@ -306,7 +306,7 @@ duplicados reduzido ao número correto de vértices únicos, preservação da to
 triângulos, casos de malha já soldada (idempotência). Ampliações em `StlExporterTests.cs` e
 `GeometryMetricsCalculatorTests.cs` para cobrir a malha pós-solda. `LibraryGoConfigurationTests.cs`
 (2 testes) guarda a configuração `bEndAppWithTask: true` do `Library.Go` (ver seção de atualização
-acima). Todos os 50 testes são
+acima). Todos os 62 testes são
 independentes do runtime nativo do PicoGK — nenhum foi (nem poderia ser, neste sandbox) validado
 contra uma execução real de `Voxels`/`Mesh`.
 
@@ -364,16 +364,71 @@ Ver `docs/security/DEPENDENCY_AUDIT_2.1.1.md` para o detalhamento completo. Resu
 | NuGet (`apps/geometry-worker`) | `dotnet list package --vulnerable` | 0 pacotes vulneráveis |
 | npm (`apps/web` + raiz) | `npm audit` | 18 reportadas — 1 corrigida sem breaking change (react-router 6.26.2→6.30.4), 17 deferidas (tooling de dev, ver `ROADMAP.md`) |
 
+## 6. Execução real das 3 golden recipes no Windows x64 + correção de calibração de porosidade
+
+O usuário executou de verdade `block-gyroid-v1`, `cylinder-gyroid-v1` e `preview-gyroid-low-res-v1`
+no seu Windows x64. Resumo dos resultados (evidência completa em
+`apps/geometry-worker/WORKER_STATUS.md` §10-§10.3):
+
+| Receita | Watertight | Auditoria independente | Porosidade (alvo/medido/erro) | Veredito |
+|---|---|---|---|---|
+| Bloco | sim | aprovada | 60% / 58,669879% / -1,330121pp | **APROVADO** |
+| Cilindro | sim | aprovada | 55% / 52,756863% / -2,243137pp | Geometria aprovada (contenção real verificada em 1.486.788 vértices, zero violações); porosidade marginalmente fora da tolerância |
+| Preview | sim | aprovada (métricas internamente consistentes) | 60% / 78,804521% / +18,804521pp | **REPROVADO** quanto à porosidade |
+
+Determinismo binário confirmado para o bloco (mesma receita+seed, mesmo SHA-256 em duas
+execuções).
+
+**Bug real encontrado**: a calibração de porosidade (`GyroidMath.CalibratePorosityByBisection`)
+só conferia uma estimativa analítica contínua contra o alvo, nunca a malha efetivamente
+voxelizada pelo PicoGK. O worker declarava `porosity_calibration_converged=true` mesmo quando a
+malha real divergia muito do alvo (caso do preview) — sucesso científico falso.
+
+**Correção**: nova calibração FECHADA (`GyroidMath.CalibrateByMonotonicBisection`) que gera
+Voxels/Mesh reais a cada candidato de espessura e mede a porosidade de verdade sobre a malha
+efetivamente exportada, com tolerâncias explícitas por modo (final 2,0pp / preview 5,0pp,
+`GyroidMath.DefaultPorosityToleranceFinalPctPoints`/`DefaultPorosityTolerancePreviewPctPoints`)
+e falha estruturada `POROSITY_TARGET_NOT_REACHED` quando não converge dentro da tolerância
+medida. A saída JSON agora distingue explicitamente `analytical_porosity_estimate_pct`/
+`analytical_calibration_converged` (Passo 1, palpite) de `measured_porosity_pct`/
+`porosity_tolerance_pct_points`/`measured_porosity_error_pct_points`/
+`measured_porosity_within_tolerance`/`mesh_calibration_iterations` (Passo 2, valor de
+referência definitivo).
+
+```text
+$ dotnet test
+Passed! - Failed: 0, Passed: 62, Skipped: 0, Total: 62
+```
+
+12 novos testes (`MonotonicPorosityCalibrationTests.cs`): divergência analítico-vs-medido
+(didático), convergência dentro de ±2pp (bloco/cilindro), convergência dentro de ±5pp (preview,
+incluindo comparação direta entre as duas tolerâncias com o mesmo oráculo), falha quando o alvo é
+inatingível, invariante "nunca `Converged=true` fora da tolerância medida" (testada contra 5
+cenários), determinismo do algoritmo, e validação de limites inválidos.
+
+Também corrigidos nesta rodada: limpeza de artefatos parciais apagava o `job.json` de entrada
+(`OutputCleanup.cs`); o viewer do PicoGK não fechava sozinho, inflando `duration_seconds`
+(`bEndAppWithTask: true`, confirmado por reflexão contra o `PicoGK.dll` real). E o kit de
+auditoria independente (`scripts/audit_stl_vs_worker_output.py`) foi corrigido para detectar
+UTF-8/UTF-16 automaticamente e extrair o último objeto JSON válido de um stdout com logs
+misturados.
+
+**IMPORTANTE**: todos os SHA-256/STLs reportados acima são anteriores à correção de calibração —
+preservados sem alteração, rotulados como tal.
+
 ## O que esta evidência explicitamente NÃO cobre
 
-- **Execução real do worker PicoGK neste sandbox Linux** — continua bloqueada (ADR-0007); os 50
-  testes xUnit acima são inteiramente sobre código matemático/contratual independente do PicoGK.
+- **Nova execução das 3 golden recipes com o código de calibração corrigido** — a evidência da
+  seção 6 acima é anterior à correção; uma nova rodada real é necessária para confirmar que
+  cilindro e preview agora convergem dentro da tolerância medida.
+- **Determinismo do cilindro/preview e do código pós-correção** — só o bloco pré-correção teve
+  determinismo confirmado.
+- **Consistência STL-vs-manifesto via fluxo completo API→dispatcher→manifesto** — as execuções
+  reais desta sessão foram invocações diretas do worker via CLI.
 - **E2E Playwright** — escrito (`apps/web/e2e/`), nunca executado neste sandbox (faltam
   bibliotecas nativas do Chromium, `sudo` desabilitado — ver `apps/web/e2e/README.md`).
-- **Determinismo geométrico real** (mesma seed ⇒ mesmo SHA-256 de STL) — depende de duas
-  execuções reais, pendente da execução do usuário no Windows.
 
-Ambos os itens acima só poderão ser fechados depois que o usuário executar
-`apps/geometry-worker` de verdade em Windows x64 e devolver os resultados — ver
+Estes itens só poderão ser fechados depois que o usuário executar `apps/geometry-worker` de
+verdade em Windows x64 com o código corrigido e devolver os resultados — ver
 `docs/examples/WINDOWS_EXECUTION_KIT.md` e o checklist de aceite completo em
 `IMPLEMENTATION_STATUS.md`.

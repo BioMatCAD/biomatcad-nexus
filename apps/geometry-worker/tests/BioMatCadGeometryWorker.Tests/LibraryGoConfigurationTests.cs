@@ -42,12 +42,13 @@ public class LibraryGoConfigurationTests
         int callIndex = source.IndexOf("Library.Go(", StringComparison.Ordinal);
         Assert.True(callIndex >= 0);
 
-        // A chamada é multi-linha (lambda como segundo argumento); procura o argumento nomeado
-        // dentro de uma janela razoável de caracteres após o início da chamada (cobre o corpo
-        // do lambda até o fechamento da invocação).
-        int windowEnd = Math.Min(source.Length, callIndex + 4000);
-        string callRegion = source.Substring(callIndex, windowEnd - callIndex);
-
+        // A chamada é multi-linha (lambda como segundo argumento, agora com o laço de
+        // calibração fechada contra a malha real -- correção pós-execução real). Em vez de uma
+        // janela de tamanho fixo (frágil a crescimento do corpo do lambda), procura o argumento
+        // nomeado em todo o restante do arquivo a partir do início da chamada -- seguro porque
+        // há apenas UMA chamada a Library.Go neste arquivo (confirmado logo acima).
+        string callRegion = source.Substring(callIndex);
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(source, @"Library\.Go\("));
         Assert.Contains("bEndAppWithTask: true", callRegion);
     }
 

@@ -16,27 +16,38 @@ produzia contagem de vértices divergente entre STL e manifesto), autorização 
 insuficiente, condição de corrida na fila de jobs e no cancelamento, manifesto com risco de
 circularidade de checksum, e validação de receita duplicada e divergente entre frontend e
 backend. Todas essas correções estão **implementadas e testadas** nesta sessão — backend (83
-testes pytest, 2 skips esperados sem `dotnet`/Windows), worker C# (50 testes xUnit, todos sobre
+testes pytest, 2 skips esperados sem `dotnet`/Windows), worker C# (62 testes xUnit, todos sobre
 código independente do PicoGK), frontend (27 testes Vitest, `tsc`/`eslint`/build limpos).
 
-**Atualização real**: o usuário executou de verdade o worker no seu Windows x64 contra a golden
-recipe `block-gyroid-v1` -- sucesso real (ExitCode 0, PicoGK Core 26.2.0, STL watertight de
-208.560 triângulos/102.338 vértices únicos, calibração de porosidade convergindo perto do
-alvo). É a primeira geometria real gerada pelo PicoGK neste projeto inteiro. Essa execução
-também revelou um segundo bug operacional real (viewer exigindo fechamento manual, inflando
-`duration_seconds`), já corrigido nesta sessão com o parâmetro oficial `bEndAppWithTask: true`
-(confirmado por reflexão contra o `PicoGK.dll` 2.2.0 real) -- ver `apps/geometry-worker/
-WORKER_STATUS.md` §10/§10.1 para o relato completo.
+**Atualização real**: o usuário executou de verdade as TRÊS golden recipes no seu Windows x64.
+Resultado: **bloco aprovado** (watertight, 208.560 triângulos/102.338 vértices únicos,
+determinismo binário confirmado, SHA-256 `cd97e3c2be2029fe54bb4743217254a7ecb769ba24b81bf737d76e73bbc1565d`);
+**cilindro geometricamente aprovado** (contenção verificada em 1.486.788 vértices, zero
+violações -- prova forte de recorte real, não bounding box) **mas com porosidade precisando de
+refinamento** (erro -2,24pp); **preview reprovado quanto à porosidade** (erro real +18,80pp).
+Essa execução revelou um **bug real na calibração de porosidade**: o worker só conferia uma
+estimativa analítica contínua, nunca a malha efetivamente voxelizada -- o que fazia o worker
+declarar `porosity_calibration_converged=true` de forma cientificamente enganosa, mais grave
+quanto mais grosseira a discretização (daí o erro grande em preview). **Corrigido nesta sessão**:
+nova calibração fechada contra a malha real (`GyroidMath.CalibrateByMonotonicBisection`), com
+tolerâncias explícitas por modo (final 2,0pp / preview 5,0pp) e falha estruturada
+`POROSITY_TARGET_NOT_REACHED` quando não converge dentro da tolerância medida -- nunca mais
+finge sucesso científico. Um segundo bug operacional (viewer do PicoGK exigindo fechamento
+manual, inflando `duration_seconds`) também foi corrigido, com o parâmetro oficial
+`bEndAppWithTask: true` (confirmado por reflexão contra o `PicoGK.dll` 2.2.0 real). Ver
+`apps/geometry-worker/WORKER_STATUS.md` §10-§10.3 para o relato completo.
 
-**O que ainda falta**: por instrução explícita do usuário, `cylinder-gyroid-v1` e
-`preview-gyroid-low-res-v1` deliberadamente ainda não foram executados nesta rodada.
-Determinismo geométrico real (duas execuções, mesmo SHA-256), auditoria independente do STL
-real contra o JSON do worker (o arquivo `.stl` em si ainda não foi devolvido para esta sessão),
-e a execução E2E (Playwright) também permanecem pendentes. Para fechar esses itens, o usuário
-continuará executando o worker real no seu próprio Windows x64 e devolvendo os resultados — ver
-o guia completo em `docs/examples/WINDOWS_EXECUTION_KIT.md`. Ver `IMPLEMENTATION_STATUS.md` para o inventário
-completo, critério de aceite por critério de aceite, do que está fechado vs. pendente dessa
-execução.
+**IMPORTANTE**: todos os SHA-256/STLs obtidos nesta rodada são anteriores à correção de
+calibração -- preservados sem alteração, rotulados como tal. Uma NOVA execução das 3 receitas
+com o código corrigido é necessária para fechar os itens de porosidade do checklist de aceite.
+
+**O que ainda falta**: determinismo do cilindro/preview e do código pós-correção, consistência
+STL-vs-manifesto via fluxo completo API→dispatcher (as execuções desta sessão foram invocações
+diretas do worker via CLI), e a execução E2E (Playwright) permanecem pendentes. Para fechar
+esses itens, o usuário continuará executando o worker real no seu próprio Windows x64 e
+devolvendo os resultados — ver o guia completo em `docs/examples/WINDOWS_EXECUTION_KIT.md`. Ver
+`IMPLEMENTATION_STATUS.md` para o inventário completo, critério de aceite por critério de
+aceite, do que está fechado vs. pendente.
 
 O que existe de fato agora:
 
@@ -60,7 +71,7 @@ O que existe de fato agora:
   SDF (cilindro deixa de ser recortado pela bounding box), espessura/isovalor/porosidade/seed
   efetivamente aplicados, diferença real preview-vs-final, solda de vértices (`SimpleMesh.Weld()`)
   corrigindo a divergência de contagem de vértices da auditoria, validação pós-gravação do STL,
-  limites computacionais pré-execução, timeout com kill de árvore de processos — 50 testes xUnit
+  limites computacionais pré-execução, timeout com kill de árvore de processos — 62 testes xUnit
   passando sobre o código matemático/contratual independente do PicoGK (`GyroidMath.cs`,
   `SimpleMesh`, `StlExporter`), nenhum contra PicoGK real.
 - `apps/web`: React/TypeScript/Vite real — landing, login, dashboard, catálogo de materiais,
@@ -202,7 +213,7 @@ dotnet bin/Debug/net9.0/BioMatCadGeometryWorker.dll <job.json>
 # incremento corretivo: o bloqueio de runtime nativo em linux-x64 continua o mesmo.
 
 cd tests/BioMatCadGeometryWorker.Tests
-dotnet test                                          # 50/50 esperado, independe do PicoGK
+dotnet test                                          # 62/62 esperado, independe do PicoGK
 ```
 
 **Execução real (Windows x64)**: para exercitar de verdade o PicoGK nativo — geração real do

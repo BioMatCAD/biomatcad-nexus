@@ -211,6 +211,103 @@ public static class GyroidMath
         };
     }
 
+    /// <summary>Resultado de uma calibração genérica por bisseção monotônica sobre uma
+    /// grandeza medida por um oráculo injetado (ver CalibrateByMonotonicBisection). Usado tanto
+    /// para a calibração analítica quanto para a calibração baseada em malha real do PicoGK
+    /// (Incremento 2.1.1, correção pós-execução real: a auditoria do usuário no Windows revelou
+    /// que a calibração puramente analítica diverge muito da porosidade real em modo preview
+    /// -- alvo 60%, medido no STL 78,80%, erro real +18,80 p.p. -- porque a estimativa analítica
+    /// nunca era conferida contra a malha efetivamente voxelizada/gerada).</summary>
+    public sealed class MonotonicCalibrationResult
+    {
+        public double EffectiveWallThicknessMm { get; init; }
+        public double MeasuredPorosityPct { get; init; }
+        public double ResidualErrorPctPoints { get; init; }
+        public double ToleranceUsedPctPoints { get; init; }
+        public int Iterations { get; init; }
+        public bool Converged { get; init; }
+    }
+
+    /// <summary>Tolerância padrão (pontos percentuais) para considerar a porosidade MEDIDA
+    /// (contra a malha real, não a estimativa analítica) dentro do alvo. Modo `final` exige mais
+    /// precisão (a malha é gerada na resolução solicitada); modo `preview` tolera mais erro
+    /// (voxel size tem piso de 0.3mm -- GyroidMath.PreviewMinVoxelSizeMm -- então a malha
+    /// discretizada diverge mais da estimativa contínua).</summary>
+    public const double DefaultPorosityToleranceFinalPctPoints = 2.0;
+    public const double DefaultPorosityTolerancePreviewPctPoints = 5.0;
+
+    public static double DefaultPorosityTolerancePctPointsForMode(string mode) =>
+        mode == "preview" ? DefaultPorosityTolerancePreviewPctPoints : DefaultPorosityToleranceFinalPctPoints;
+
+    /// <summary>Número máximo de iterações da calibração baseada em malha REAL (cada uma gera
+    /// Voxels+Mesh de verdade contra o PicoGK -- caro, ao contrário da calibração puramente
+    /// analítica). 12 iterações de bisseção já reduzem o intervalo de busca em 2^12 = 4096x,
+    /// muito além da precisão prática de wall_thickness_mm.</summary>
+    public const int DefaultMeshCalibrationMaxIterations = 12;
+
+    /// <summary>Calibração genérica por bisseção monotônica de wall_thickness_mm, dentro de
+    /// limites físicos seguros [minWallThicknessMm, maxWallThicknessMm], usando
+    /// measurePorosityForThickness como oráculo de MEDIÇÃO -- injetado propositalmente para que
+    /// este método permaneça testável sem PicoGK (oráculo sintético nos testes) e, em produção,
+    /// o oráculo real gere Voxels/Mesh de verdade contra o PicoGK e meça o volume da malha
+    /// resultante (ver GyroidScaffoldBuilder.BuildAndExport). Premissa documentada: porosidade
+    /// medida é monotonicamente DECRESCENTE conforme wall_thickness_mm cresce (mais parede
+    /// sólida = menos poro) -- válida para a faixa de parâmetros aceita pelo schema.
+    ///
+    /// NUNCA declara Converged=true fora da tolerância efetivamente medida por
+    /// measurePorosityForThickness -- ao contrário da calibração puramente analítica
+    /// (CalibratePorosityByBisection), que só mede contra uma estimativa contínua e pode
+    /// convergir "no papel" enquanto a malha real discretizada diverge muito do alvo (bug real
+    /// encontrado nesta sessão em modo preview).</summary>
+    public static MonotonicCalibrationResult CalibrateByMonotonicBisection(
+        double targetPorosityPct,
+        double initialWallThicknessMm,
+        double minWallThicknessMm,
+        double maxWallThicknessMm,
+        double toleranceAbsPctPoints,
+        int maxIterations,
+        Func<double, double> measurePorosityForThickness)
+    {
+        if (maxWallThicknessMm <= minWallThicknessMm)
+            throw new ArgumentException("maxWallThicknessMm deve ser maior que minWallThicknessMm.", nameof(maxWallThicknessMm));
+        if (maxIterations < 1)
+            throw new ArgumentOutOfRangeException(nameof(maxIterations), "maxIterations deve ser >= 1.");
+        if (toleranceAbsPctPoints < 0)
+            throw new ArgumentOutOfRangeException(nameof(toleranceAbsPctPoints), "toleranceAbsPctPoints deve ser >= 0.");
+
+        double lo = minWallThicknessMm;
+        double hi = maxWallThicknessMm;
+        double bestThickness = Math.Clamp(initialWallThicknessMm, lo, hi);
+        double bestPorosityPct = 0.0;
+        int iterations = 0;
+        bool converged = false;
+
+        for (; iterations < maxIterations; iterations++)
+        {
+            bestPorosityPct = measurePorosityForThickness(bestThickness);
+            double error = bestPorosityPct - targetPorosityPct;
+            if (Math.Abs(error) <= toleranceAbsPctPoints)
+            {
+                converged = true;
+                iterations++;
+                break;
+            }
+            // Porosidade decresce com espessura crescente (premissa documentada acima).
+            if (bestPorosityPct > targetPorosityPct) lo = bestThickness; else hi = bestThickness;
+            bestThickness = (lo + hi) / 2.0;
+        }
+
+        return new MonotonicCalibrationResult
+        {
+            EffectiveWallThicknessMm = bestThickness,
+            MeasuredPorosityPct = bestPorosityPct,
+            ResidualErrorPctPoints = bestPorosityPct - targetPorosityPct,
+            ToleranceUsedPctPoints = toleranceAbsPctPoints,
+            Iterations = iterations,
+            Converged = converged,
+        };
+    }
+
     /// <summary>Diferença real preview vs. final (item 2): em modo preview, o voxel size
     /// EFETIVO nunca é mais fino que um piso documentado, mesmo que a receita peça algo mais
     /// fino -- garante iteração rápida real, não apenas rótulo. Em modo final, o voxel size

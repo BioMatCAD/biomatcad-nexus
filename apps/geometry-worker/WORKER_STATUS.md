@@ -192,7 +192,7 @@ correção -- `job.json` agora sobrevive à falha esperada (`PICOGK_RUNTIME_UNAV
 reproduzida de forma idêntica à evidência anterior, confirmando que o bloqueio em si não mudou,
 apenas o efeito colateral indevido da limpeza foi corrigido).
 
-## 10. EXECUÇÃO REAL BEM-SUCEDIDA -- `block-gyroid-v1` no Windows x64 (marco desta sessão)
+## 10. EXECUÇÃO REAL BEM-SUCEDIDA -- `block-gyroid-v1` no Windows x64 (marco desta sessão; **evidência ANTERIOR à correção de calibração de porosidade da seção 10.2 -- ver rótulo abaixo**)
 
 Pela primeira vez neste projeto, o worker rodou de verdade contra o PicoGK real e produziu uma
 malha real, reportado pelo usuário a partir de sua própria máquina Windows x64:
@@ -217,15 +217,20 @@ Erro residual:          -1,330121 p.p.
 a solda de vértices (sem o padrão antigo de vértices = 3×triângulos) funcionam de fato contra o
 PicoGK real -- não apenas nos 50 testes xUnit matemáticos isolados.
 
-**O que isto NÃO prova ainda**: `cylinder-gyroid-v1` (recorte cilíndrico real) e
-`preview-gyroid-low-res-v1` (diferença real preview/final) deliberadamente não foram executados
-nesta rodada, por instrução explícita do usuário. Determinismo (mesma receita+seed rodada duas
-vezes, comparando SHA-256) também não foi testado ainda. Os números acima foram relatados por
-texto pelo usuário -- o arquivo `.stl`/`.json` real em si ainda não foi devolvido para esta
-sessão, então `scripts/audit_stl_vs_worker_output.py` (auditoria independente, Seção 11 do
-Incremento 2.1.1) ainda não pôde ser executado contra o artefato real. Nenhum `manifest.json`
-foi gerado (esta foi uma invocação direta do worker via CLI, fora do fluxo
-API→dispatcher→manifesto).
+**O que isto NÃO provou ainda nesta rodada específica**: `cylinder-gyroid-v1` e
+`preview-gyroid-low-res-v1` foram executados numa rodada SEGUINTE (ver seção 10.2 abaixo), que
+revelou um problema real na calibração de porosidade -- corrigido na seção 10.3. Determinismo
+binário (mesma receita+seed rodada duas vezes, comparando SHA-256) **foi** confirmado pelo
+usuário para `block-gyroid-v1` (ver seção 10.2). Nenhum `manifest.json` foi gerado em nenhuma
+das rodadas (execuções diretas do worker via CLI, fora do fluxo API→dispatcher→manifesto).
+
+**IMPORTANTE -- rótulo de evidência**: os números do bloco acima (STL SHA-256
+`cd97e3c2be2029fe54bb4743217254a7ecb769ba24b81bf737d76e73bbc1565d`) foram produzidos ANTES da
+correção de calibração de porosidade descrita nas seções 10.2/10.3. O bloco em si (geometria,
+watertight, vértices, SHA-256, auditoria independente aprovada) permanece válido como evidência
+de execução real -- só a calibração de porosidade daquele run específico usa o código ANTIGO
+(analítico, sem conferência contra a malha real). Preservado aqui sem alteração, exatamente como
+recebido -- nunca "corrigido" manualmente.
 
 ## 10.1 Bug operacional real encontrado nesta execução: viewer exigia fechamento manual
 
@@ -267,11 +272,130 @@ correção manualmente, o teste falha como esperado; restaurando, volta a passar
 final de que o viewer realmente fecha sozinho e `duration_seconds` reflete só o tempo útil
 depende de uma nova execução real do usuário no Windows.
 
+## 10.2 EXECUÇÃO REAL das três golden recipes -- `cylinder-gyroid-v1` e `preview-gyroid-low-res-v1`
+(evidência ANTERIOR à correção de calibração da seção 10.3)
+
+Numa rodada seguinte, o usuário executou de verdade as três golden recipes no Windows x64.
+Reportado tal como recebido, sem qualquer alteração manual dos números:
+
+```text
+BLOCK (block-gyroid-v1) -- repete o run da seção 10, agora com determinismo confirmado:
+  Alvo:                60%
+  Medido:              58,669879%
+  Erro:                -1,330121 p.p.
+  Watertight:           sim
+  Auditoria independente: aprovada
+  Determinismo binário: CONFIRMADO em duas execuções (mesmo SHA-256 nas duas)
+  STL SHA-256:          cd97e3c2be2029fe54bb4743217254a7ecb769ba24b81bf737d76e73bbc1565d
+
+CYLINDER (cylinder-gyroid-v1):
+  Alvo:                55%
+  Medido:              52,756863%
+  Erro:                -2,243137 p.p.
+  Watertight:           sim
+  Auditoria independente: aprovada
+  Contenção cilíndrica: verificada em 1.486.788 vértices, ZERO violações radiais e em Z
+  STL SHA-256:          6004d7c1f1075e504ff6a25abd86b3118f54bf15dfb7364c5d8b34cdb5f61810
+
+PREVIEW (preview-gyroid-low-res-v1):
+  Alvo:                60%
+  Estimativa analítica: 59,402332%
+  Medido no STL:        78,804521%
+  Erro REAL:           +18,804521 p.p.
+  "porosity_calibration_converged=true" declarado pelo worker -- ENGANOSO, refere-se apenas à
+    estimativa analítica, não à malha real
+  Watertight:           sim
+  Auditoria STL vs. métricas: aprovada (métricas internamente consistentes com o STL, mesmo
+    estando erradas em relação ao alvo de porosidade)
+  STL SHA-256:          14a46df73731e09c6fb9712702945fcc4c211ad11f0e8d3a8af8d6ded832455d
+```
+
+**Avaliação honesta por receita**:
+
+- **Bloco**: **APROVADO**. Geometria real, watertight, auditoria independente aprovada,
+  determinismo binário confirmado, porosidade dentro de uma margem pequena (-1,33 p.p.).
+- **Cilindro**: **geometria APROVADA** (recorte cilíndrico real -- SDF, não bounding box --
+  contenção verificada em quase 1,5 milhão de vértices com zero violação, watertight, auditoria
+  independente aprovada). **Porosidade precisa de refinamento**: -2,24 p.p. de erro é maior que a
+  tolerância de modo final agora definida (2,0 p.p., ver seção 10.3) -- marginalmente fora.
+- **Preview**: **REPROVADO quanto à porosidade**. Erro real de +18,80 pontos percentuais é
+  inaceitável sob qualquer tolerância razoável (a tolerância de preview definida na seção 10.3 é
+  5,0 p.p.) -- este é o caso que expôs a causa raiz: a calibração antiga só conferia contra a
+  estimativa analítica contínua, nunca contra a malha real discretizada, e por isso declarava
+  convergência de forma cientificamente falsa.
+
+Nenhum destes três SHA-256/STLs foi ou será substituído -- permanecem como evidência real do
+comportamento ANTERIOR à correção de calibração, exatamente para que a comparação com as
+próximas execuções (pós-correção) seja honesta e verificável.
+
+## 10.3 Causa raiz e correção: calibração de porosidade agora é fechada contra a malha real
+
+**Causa raiz**: `GyroidMath.CalibratePorosityByBisection` (calibração analítica) usa
+`EstimateSolidFractionForBand` -- uma estimativa CONTÍNUA por amostragem em grade sobre o campo
+gyroid puro, sem qualquer voxelização real -- como único oráculo de medição. O worker declarava
+`porosity_calibration_converged=true` baseado SOMENTE nessa estimativa contínua convergir,
+mesmo sem nunca conferir o resultado contra a malha efetivamente gerada pelo PicoGK. Em modo
+`final` (voxel size mais fino), a estimativa contínua aproxima razoavelmente a malha discretizada
+resultante (erros de -1,33 e -2,24 p.p. nos casos reais). Em modo `preview` (voxel size com piso
+de 0.3mm, deliberadamente mais grosseiro -- `GyroidMath.PreviewMinVoxelSizeMm`), a discretização
+grosseira faz a malha real divergir MUITO da estimativa contínua (erro real de +18,80 p.p.) --
+mas o worker nunca detectava isso, porque nunca comparava a estimativa contra a malha real.
+
+**Correção** (`GyroidMath.cs`, `GyroidScaffoldBuilder.cs`, `JobEnvelope.cs`, `Program.cs`,
+`PorosityCalibrationExceptions.cs` -- ver commit desta correção):
+
+1. Novo método genérico `GyroidMath.CalibrateByMonotonicBisection` -- bisseção monotônica sobre
+   um oráculo de MEDIÇÃO injetado (testável com oráculos sintéticos sem PicoGK; em produção, o
+   oráculo real gera Voxels+Mesh de verdade a cada candidato de espessura e mede o volume real).
+2. `GyroidScaffoldBuilder.BuildAndExport` agora, quando `target_porosity_pct` é solicitado: usa a
+   calibração analítica só como palpite inicial (Passo 1), depois roda a calibração FECHADA
+   (Passo 2) -- cada iteração gera Voxels+Mesh reais (descartados via `using`/`Dispose()` entre
+   iterações, para não acumular memória nativa), mede a porosidade real, e ajusta
+   `wall_thickness_effective_mm` por bisseção até convergir dentro da tolerância MEDIDA ou atingir
+   o máximo de iterações (`GyroidMath.DefaultMeshCalibrationMaxIterations = 12`).
+3. Tolerâncias explícitas por modo: `final` = 2,0 pontos percentuais,
+   `preview` = 5,0 pontos percentuais (`GyroidMath.DefaultPorosityToleranceFinalPctPoints` /
+   `DefaultPorosityTolerancePreviewPctPoints`).
+4. Se a calibração fechada NÃO converge dentro da tolerância medida, o worker lança
+   `PorosityTargetNotReachedException` ANTES de soldar/exportar qualquer STL -- Program.cs
+   mapeia isso para o erro estruturado `POROSITY_TARGET_NOT_REACHED` (com `measured_porosity_pct`,
+   `porosity_tolerance_pct_points`, `measured_porosity_error_pct_points` e
+   `mesh_calibration_iterations` nos detalhes). Nunca finge sucesso científico.
+5. Saída JSON agora distingue explicitamente: `analytical_porosity_estimate_pct` /
+   `analytical_calibration_converged` (Passo 1, só um palpite) vs. `measured_porosity_pct` /
+   `porosity_tolerance_pct_points` / `measured_porosity_error_pct_points` /
+   `measured_porosity_within_tolerance` / `mesh_calibration_iterations` (Passo 2, valor de
+   referência definitivo, calculado sobre a MESMA malha soldada gravada no STL).
+
+**Testes**: 12 novos testes xUnit (`MonotonicPorosityCalibrationTests.cs`) cobrindo os cenários
+pedidos -- divergência analítico-vs-medido (didático, inspirado no caso real de preview),
+convergência dentro de ±2pp (cenários tipo bloco e tipo cilindro), convergência dentro de ±5pp
+(tipo preview, incluindo um teste que prova a diferença prática entre as duas tolerâncias com o
+mesmo oráculo), falha quando o alvo é inatingível, invariante "nunca `Converged=true` fora da
+tolerância medida" (testada contra 5 cenários distintos), determinismo do algoritmo, e validação
+de limites inválidos. Total: 62/62 testes xUnit passando (antes desta correção: 50/50).
+
+**O que esta correção NÃO prova ainda**: o código foi corrigido e testado com oráculos
+SINTÉTICOS (sem PicoGK, exatamente como toda a matemática de `GyroidMath.cs`). A calibração
+FECHADA rodando de verdade contra Voxels/Mesh reais do PicoGK -- e confirmando que as três
+receitas agora convergem dentro da tolerância medida -- depende de uma NOVA execução real do
+usuário no Windows com o código corrigido. Os SHA-256 das seções 10 e 10.2 são anteriores a esta
+correção e não devem ser reutilizados como prova do código novo.
+
 ## 11. Caminho de fechamento (Incremento 2.1.1)
 
-Para provar de verdade as correções restantes contra uma execução real do PicoGK -- cilindro,
-preview, determinismo, e a confirmação de que o fechamento automático do viewer funciona --
-siga `docs/examples/WINDOWS_EXECUTION_KIT.md` num Windows x64 real. Esse guia usa
-`apps/geometry-worker/tools/New-JobFromRecipe.ps1` para montar um `job.json` a partir de uma
-golden recipe, e `scripts/audit_stl_vs_worker_output.py` para recomputar de forma independente
-(Python) as métricas do STL resultante, para conferência cruzada contra o manifesto.
+Para provar de verdade as correções restantes contra uma execução real do PicoGK -- calibração
+de porosidade FECHADA (bloco, cilindro e preview, agora com tolerâncias explícitas de 2,0pp/
+5,0pp), determinismo pós-correção, confirmação de que o viewer fecha sozinho, e consistência
+STL-vs-manifesto via fluxo completo API→dispatcher -- siga `docs/examples/WINDOWS_EXECUTION_KIT.md`
+num Windows x64 real. Esse guia usa `apps/geometry-worker/tools/New-JobFromRecipe.ps1` para
+montar um `job.json` a partir de uma golden recipe, e
+`scripts/audit_stl_vs_worker_output.py` (agora com detecção automática de codificação
+UTF-8/UTF-16 e extração do último objeto JSON válido em stdout com logs misturados) para
+recomputar de forma independente (Python) as métricas do STL resultante, para conferência
+cruzada contra o manifesto.
+
+**O Incremento 2.1.1 continua NÃO concluído.** Pendências explícitas: nova execução real das
+três golden recipes com o código de calibração corrigido (a evidência das seções 10/10.2 é
+anterior à correção); determinismo pós-correção; consistência STL-vs-manifesto via fluxo
+completo (não apenas invocação direta do worker); E2E Playwright.

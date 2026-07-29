@@ -82,10 +82,20 @@ public sealed class EffectiveParameters
     [JsonPropertyName("wall_thickness_effective_mm")] public double WallThicknessEffectiveMm { get; set; }
     [JsonPropertyName("isovalue_center")] public double IsovalueCenter { get; set; }
     [JsonPropertyName("target_porosity_pct_requested")] public double? TargetPorosityPctRequested { get; set; }
-    [JsonPropertyName("porosity_pct_calibration_estimate")] public double? PorosityPctCalibrationEstimate { get; set; }
-    [JsonPropertyName("porosity_calibration_iterations")] public int? PorosityCalibrationIterations { get; set; }
-    [JsonPropertyName("porosity_calibration_converged")] public bool? PorosityCalibrationConverged { get; set; }
-    [JsonPropertyName("porosity_residual_error_pct_vs_measured")] public double? PorosityResidualErrorPctVsMeasured { get; set; }
+    // Correção pós-execução real (Incremento 2.1.1): distinção EXPLÍCITA entre a estimativa
+    // analítica contínua (Passo 1, palpite inicial, nunca prova sucesso sozinha) e a porosidade
+    // MEDIDA de verdade sobre a malha real do PicoGK (Passo 2, valor de referência definitivo).
+    // A auditoria do usuário no Windows encontrou um caso real (preview) em que a estimativa
+    // analítica "convergia" (59,40% vs. alvo 60%) enquanto a malha real media 78,80% -- por isso
+    // analytical_calibration_converged NUNCA deve ser interpretado como prova de que o alvo foi
+    // atingido; measured_porosity_within_tolerance é quem responde essa pergunta de verdade.
+    [JsonPropertyName("analytical_porosity_estimate_pct")] public double? AnalyticalPorosityEstimatePct { get; set; }
+    [JsonPropertyName("analytical_calibration_converged")] public bool? AnalyticalCalibrationConverged { get; set; }
+    [JsonPropertyName("measured_porosity_pct")] public double? MeasuredPorosityPct { get; set; }
+    [JsonPropertyName("porosity_tolerance_pct_points")] public double? PorosityTolerancePctPoints { get; set; }
+    [JsonPropertyName("measured_porosity_error_pct_points")] public double? MeasuredPorosityErrorPctPoints { get; set; }
+    [JsonPropertyName("measured_porosity_within_tolerance")] public bool? MeasuredPorosityWithinTolerance { get; set; }
+    [JsonPropertyName("mesh_calibration_iterations")] public int? MeshCalibrationIterations { get; set; }
     [JsonPropertyName("seed")] public long Seed { get; set; }
     [JsonPropertyName("seed_phase_shift_rad")] public double SeedPhaseShiftRad { get; set; }
     [JsonPropertyName("mode")] public string Mode { get; set; } = "";

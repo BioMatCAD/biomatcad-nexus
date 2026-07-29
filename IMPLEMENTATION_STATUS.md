@@ -39,64 +39,84 @@ só (a) foi alcançado nesta sessão.
 
 | # | Item | Status | Evidência / observação |
 |---|---|---|---|
-| 1 | Worker PicoGK realmente executado em Windows x64 | **PROVADO PARCIALMENTE** — apenas `block-gyroid-v1` | Usuário executou de verdade no Windows x64: ExitCode 0, PicoGK Core 26.2.0 (pacote 2.2.0), STL de 10.428.084 bytes, SHA-256 `cd97e3c2be2029fe54bb4743217254a7ecb769ba24b81bf737d76e73bbc1565d`. **Ainda faltam `cylinder-gyroid-v1` e `preview-gyroid-low-res-v1`** (explicitamente não executados por instrução do usuário nesta rodada). Números são os reportados pelo usuário/worker; **ainda não conferidos de forma independente** por `scripts/audit_stl_vs_worker_output.py` nesta sessão (arquivos reais ainda não recebidos para auditoria).
-| 2 | Geração real de bloco Gyroid | **PROVADO de verdade para `block-gyroid-v1`** | 208.560 triângulos, 102.338 vértices únicos, watertight, validação de recarga do STL aprovada — reportado pelo usuário a partir de uma execução real no Windows. Bloco genuinamente gerado pelo PicoGK real, não sintético. |
-| 3 | Cilindro realmente recortado (não bounding box) | Código corrigido via interseção de SDF (a); NÃO provado (b) | `GyroidMath.CappedCylinderSignedDistanceMm` + `IntersectSignedDistance` (max de duas SDF, CSG padrão) substituem o corte por bounding box do Incremento 2.1 — testado matematicamente (`GyroidMathTests.cs`). **`cylinder-gyroid-v1` deliberadamente ainda não executado** (instrução explícita do usuário nesta rodada: só `block-gyroid-v1` desta vez) — continua não provado contra voxelização real. |
-| 4 | Diferença real preview vs. final | Código corrigido (piso de voxel 0.3mm) (a); NÃO provado (b) | `GyroidMath.EffectiveVoxelSizeMm`/`PreviewMinVoxelSizeMm`, testado unitariamente. `block-gyroid-v1` executado é modo `final`; **`preview-gyroid-low-res-v1` deliberadamente ainda não executado** nesta rodada — diferença real entre os dois modos continua não observada. |
-| 5 | Parâmetros efetivamente aplicados (espessura/isovalor/porosidade/seed) | **Porosidade PROVADA de verdade para `block-gyroid-v1`**; espessura/isovalor/seed ainda não confirmados isoladamente | Calibração de porosidade convergiu numa execução real: alvo 60%, medida 58,669879%, erro residual −1,330121 p.p. — evidência real de que `CalibratePorosityByBisection` produz um parâmetro geométrico que, aplicado pelo PicoGK real, se aproxima do alvo. Espessura efetiva/isovalor/fase-por-seed continuam sem confirmação isolada (dependeria de reprocessar o STL real e comparar contra os parâmetros efetivos reportados — não feito ainda). Determinismo (mesma seed duas vezes) é item 12, separado, ainda não feito. |
-| 6 | Limites computacionais efetivamente controlados | Código corrigido, parcialmente verificado nesta sessão | Estimativa prévia de voxel/memória (`EstimateVoxelCount`/`EstimateMemoryMbUpperBound`) testada unitariamente; o mecanismo de timeout + kill de árvore de processos (`psutil`) é cross-platform e **foi verificado neste sandbox** (funciona independentemente do PicoGK, pois mata o processo do worker seja qual for o motivo da demora). Limpeza de arquivos parciais: bug real encontrado numa reexecução real do worker nesta sessão (apagava o `job.json` de entrada) e corrigido (`OutputCleanup.cs`, 4 novos testes) — ver `apps/geometry-worker/WORKER_STATUS.md` §9.1. **Segundo bug operacional real encontrado na execução do usuário no Windows**: `Library.Go` mantinha o viewer aberto até fechamento manual, inflando `duration_seconds` com espera humana — corrigido com `bEndAppWithTask: true` (parâmetro oficial confirmado por reflexão contra o PicoGK.dll 2.2.0 real), 2 novos testes de guarda de configuração. Efeito real (viewer fechando sozinho, `duration_seconds` correto) ainda depende de nova execução do usuário para confirmação. |
+| 1 | Worker PicoGK realmente executado em Windows x64 | **PROVADO para as 3 golden recipes, mas com bug de calibração de porosidade encontrado e corrigido depois** | Usuário executou de verdade as três receitas no Windows x64 (bloco, cilindro, preview) — todas com ExitCode 0, watertight, auditoria independente aprovada. Essa execução revelou um problema real na calibração de porosidade (ver item 5) que já foi corrigido nesta sessão. **Uma NOVA execução das 3 receitas com o código corrigido ainda é necessária** para fechar este item de verdade — os SHA-256 já obtidos são anteriores à correção (ver `apps/geometry-worker/WORKER_STATUS.md` §10.2/§10.3). |
+| 2 | Geração real de bloco Gyroid | **APROVADO** | 208.560 triângulos, 102.338 vértices únicos, watertight, validação de recarga do STL aprovada, determinismo binário confirmado em duas execuções (mesmo SHA-256), auditoria independente aprovada. SHA-256: `cd97e3c2be2029fe54bb4743217254a7ecb769ba24b81bf737d76e73bbc1565d`. Porosidade dentro de margem pequena (erro -1,33 p.p., dentro da tolerância de 2,0pp agora definida para modo final). Bloco genuinamente gerado pelo PicoGK real, não sintético. |
+| 3 | Cilindro realmente recortado (não bounding box) | **GEOMETRIA APROVADA; porosidade precisa de refinamento** | Executado de verdade: contenção cilíndrica verificada em 1.486.788 vértices, ZERO violações radiais e em Z — prova real e forte de que o SDF do cilindro recorta corretamente (não bounding box). Watertight, auditoria independente aprovada. SHA-256: `6004d7c1f1075e504ff6a25abd86b3118f54bf15dfb7364c5d8b34cdb5f61810` (evidência PRÉ-correção de calibração). Porosidade: alvo 55%, medido 52,756863%, erro -2,243137 p.p. — marginalmente acima da tolerância de modo final agora definida (2,0pp); depende de nova execução com a calibração corrigida (§10.3 do WORKER_STATUS.md) para fechar. |
+| 4 | Diferença real preview vs. final | **Diferença real CONFIRMADA (voxel size), mas preview REPROVADO quanto à porosidade** | `preview-gyroid-low-res-v1` executado de verdade: watertight, auditoria STL-vs-métricas aprovada — prova que o modo preview gera geometria real e internamente consistente, distinta do modo final. Porém a porosidade medida (78,804521%) divergiu MUITO do alvo (60%, erro real +18,80 p.p.) porque a calibração antiga só conferia a estimativa analítica (59,40%), nunca a malha discretizada real — bug real encontrado e corrigido nesta sessão (§10.3 do WORKER_STATUS.md). Nova execução com o código corrigido é necessária para fechar este item. |
+| 5 | Parâmetros efetivamente aplicados (espessura/isovalor/porosidade/seed) | **BUG REAL ENCONTRADO E CORRIGIDO** — calibração de porosidade antiga era cientificamente enganosa | Execução real das 3 receitas expôs o problema: a calibração `CalibratePorosityByBisection` só conferia uma estimativa ANALÍTICA contínua, nunca a malha real. Em modo final o erro era pequeno (bloco -1,33pp, cilindro -2,24pp) mas em preview o erro real chegou a +18,80pp enquanto o worker declarava `converged=true` — sucesso científico falso. Corrigido: nova calibração FECHADA (`GyroidMath.CalibrateByMonotonicBisection`) que gera Voxels/Mesh reais a cada candidato de espessura e mede a porosidade de verdade, com tolerâncias explícitas (final 2,0pp / preview 5,0pp) e falha estruturada `POROSITY_TARGET_NOT_REACHED` se não convergir dentro da tolerância MEDIDA. 12 novos testes xUnit (62/62 no total). Espessura efetiva/isovalor/fase-por-seed continuam sem confirmação isolada contra a malha real. Determinismo (item 12) confirmado para o bloco nesta rodada (mesma seed, mesmo SHA-256 em duas execuções), pendente para cilindro/preview e para o código pós-correção. |
+| 6 | Limites computacionais efetivamente controlados | Código corrigido, parcialmente verificado nesta sessão; laço de calibração também respeita os limites | Estimativa prévia de voxel/memória testada unitariamente; timeout + kill de árvore de processos **verificado neste sandbox** (cross-platform). Três bugs operacionais reais encontrados e corrigidos ao longo desta sessão via execução real: (1) limpeza de artefatos parciais apagava `job.json` de entrada — corrigido (`OutputCleanup.cs`); (2) viewer do PicoGK não fechava sozinho, inflando `duration_seconds` — corrigido (`bEndAppWithTask: true`); (3) calibração de porosidade cientificamente enganosa (item 5) — corrigida (calibração fechada). O novo laço de calibração fechada descarta Voxels/Mesh de cada candidato via `using`/`Dispose()` entre iterações, respeitando o mesmo limite de memória. Efeitos reais das correções (2) e (3) ainda dependem de nova execução do usuário para confirmação final. |
 | 7 | Fila concorrente seguro | **PROVADO de verdade** | `SELECT ... FOR UPDATE SKIP LOCKED` contra Postgres real, duas conexões/threads reais e independentes, zero jobs reivindicados em duplicidade em 24 jobs (`test_geometry_job_concurrency.py`). |
 | 8 | Cancelamento real | **PROVADO de verdade** | Teste de corrida contra o fluxo real de `dispatch_job`, kill de árvore de processos via `psutil` (cross-platform), idempotência de recancelamento (`test_geometry_job_cancellation.py`). |
 | 9 | Isolamento organizacional | **PROVADO de verdade** | Testes de ataque dedicados (projeto/receita/material de outra organização, receita não pertencente ao projeto, receita não validada) — todos recusados e auditados (`test_geometry_job_security.py`). |
-| 10 | Métricas coerentes com o STL | **Autoconsistente para `block-gyroid-v1`, mas NÃO auditado de forma independente ainda** | Números reportados pela execução real: 208.560 triângulos, 102.338 vértices únicos, watertight, validação de recarga aprovada — internamente consistentes e sem o padrão do bug antigo (vértices = 3×triângulos). Porém `scripts/audit_stl_vs_worker_output.py` (segunda implementação independente) ainda **não foi rodado** contra o STL real, porque o arquivo `.stl` em si ainda não foi devolvido para esta sessão — apenas os números foram relatados por texto. Pendente: rodar a auditoria independente contra o arquivo real. |
-| 11 | Manifesto coerente com os artefatos | Código corrigido (a); NÃO provado (b) em execução ponta-a-ponta real | Manifesto reestruturado (commit, versões, plataforma, seed/fase, parâmetros efetivos, SHA-256 por artefato, checksum do próprio manifesto fora do JSON) — verificado por testes de unidade/integração do backend. A execução real desta sessão foi uma invocação direta do worker CLI (`dotnet BioMatCadGeometryWorker.dll job.json`), **fora do fluxo API→dispatcher→manifesto** — nenhum `manifest.json` real foi gerado ainda para conferir contra este STL. |
-| 12 | Determinismo geométrico provado | **NÃO FEITO** (pendente) | Requer duas execuções reais no Windows com a mesma receita/seed, comparando SHA-256 do STL resultante — não pôde ser feito neste sandbox. |
+| 10 | Métricas coerentes com o STL | **PROVADO para as 3 receitas** (via auditoria independente relatada pelo usuário) | As três execuções reais reportam "auditoria independente aprovada"/"auditoria STL vs. métricas aprovada" usando `scripts/audit_stl_vs_worker_output.py` — sem o padrão do bug antigo (vértices = 3×triângulos). O script em si foi corrigido nesta sessão para detectar UTF-8/UTF-16 e extrair o último JSON válido de stdout com logs misturados (item 10 da correção de calibração), então uma nova rodada de auditoria após a correção de porosidade é recomendada para reconfirmar. |
+| 11 | Manifesto coerente com os artefatos | Código corrigido (a); NÃO provado (b) em execução ponta-a-ponta real | Manifesto reestruturado, verificado por testes de unidade/integração do backend. Todas as execuções reais desta sessão foram invocações diretas do worker CLI, **fora do fluxo API→dispatcher→manifesto** — nenhum `manifest.json` real foi gerado ainda para conferir contra os STLs reais obtidos. |
+| 12 | Determinismo geométrico provado | **PROVADO para o bloco (pré-correção); pendente para cilindro/preview e para o código pós-correção** | Usuário confirmou: mesma receita+seed (`block-gyroid-v1`) rodada duas vezes produziu o MESMO SHA-256 de STL. Prova real de determinismo binário — mas só para o código de calibração ANTERIOR à correção desta sessão. Determinismo do cilindro/preview, e do bloco/cilindro/preview com o código corrigido, ainda pendente. |
 | 13 | Visualização e download | Inalterado do Incremento 2.1, fora do núcleo de correções deste incremento | `StlViewer.tsx` (Three.js, orbit/pan/zoom/wireframe/corte/screenshot) e `JobDetailPage.tsx` continuam como estavam — nenhum defeito relacionado foi relatado na auditoria que motivou o 2.1.1, então nenhuma mudança foi feita aqui. |
 | 14 | E2E real | Escrito, **nunca executado em nenhum ambiente** | `apps/web/e2e/` (Playwright) — bloqueado neste sandbox Linux (`libXdamage.so.1` ausente, `sudo` desabilitado — ver `apps/web/e2e/README.md`); pendente de execução real no Windows do usuário. |
-| 15 | Todos os testes/builds aprovados | **SIM, para o que é testável sem PicoGK real** | Backend: 83 testes pytest (2 skips esperados sem `dotnet`/Windows), ruff e mypy limpos. Worker C#: 50/50 xUnit passando (só código independente de PicoGK; +2 testes de guarda de configuração do `Library.Go`), `dotnet build` sem erros. Frontend: 27/27 Vitest, `tsc --noEmit` e `eslint` limpos, `npm run build` e `npm run build:pages` executados com sucesso. Isso **não** equivale a prova E2E/PicoGK real completa (itens 3, 4, 12, 14 e a auditoria independente do item 10 continuam pendentes); o item 1/2 já tem prova real parcial (só bloco, ver acima). |
+| 15 | Todos os testes/builds aprovados | **SIM, para o que é testável sem PicoGK real** | Backend: 83 testes pytest (2 skips esperados sem `dotnet`/Windows), ruff e mypy limpos. Worker C#: 62/62 xUnit passando (só código independente de PicoGK; +12 testes de calibração fechada de porosidade), `dotnet build` sem erros. Frontend: 27/27 Vitest, `tsc --noEmit` e `eslint` limpos, `npm run build` e `npm run build:pages` executados com sucesso. Isso **não** substitui a necessidade de uma NOVA execução real das 3 receitas com o código de calibração corrigido (itens 3, 4, 5) e a E2E (item 14) continua pendente. |
 | 16 | Histórico preservado | **SIM, verificado** | Base (tag/commit do v2.2) intacta; apenas novos commits acrescentados nesta sessão (nenhum `git commit --amend`, `rebase` ou `push --force` usado); `git log` mostra a sequência completa desde o Incremento 1. |
 | 17 | Checksums verificados na extração/restauração | **SIM para o bundle base v2.2** (início da sessão); **AINDA NÃO** para o pacote final v2.2.1 | O pacote v2.2.1 (zip/bundle/SHA256SUMS) ainda não foi gerado — é uma tarefa de empacotamento separada, posterior a esta documentação. |
 
 ### Resumo honesto
 
-**Atualização**: o usuário executou de verdade `block-gyroid-v1` no seu Windows x64 e a
-execução teve **sucesso real** (ExitCode 0, PicoGK Core 26.2.0, STL watertight de 208.560
-triângulos/102.338 vértices únicos, calibração de porosidade convergindo perto do alvo). Isso
-prova de verdade, pela primeira vez neste projeto, que o código corrigido do Incremento 2.1.1
-efetivamente gera geometria real contra o PicoGK real — não apenas contra testes matemáticos
-isolados. **Porém, por instrução explícita do usuário, `cylinder-gyroid-v1` e
-`preview-gyroid-low-res-v1` deliberadamente ainda não foram executados nesta rodada**, e nenhum
-arquivo real (.stl/.json) foi devolvido ainda para auditoria independente nesta sessão — apenas
-os números foram relatados por texto.
+**Atualização (execução real das 3 golden recipes)**: o usuário executou de verdade bloco,
+cilindro e preview no seu Windows x64. Resultado por receita:
+
+- **Bloco: APROVADO.** Watertight, 208.560 triângulos/102.338 vértices únicos, auditoria
+  independente aprovada, determinismo binário confirmado (mesmo SHA-256 em duas execuções),
+  porosidade dentro de margem pequena (-1,33 p.p.).
+- **Cilindro: GEOMETRIA APROVADA** (contenção verificada em 1.486.788 vértices, zero violações
+  radiais/em Z — prova forte de que o corte é real, não bounding box), **mas a porosidade
+  precisa de refinamento** (erro -2,24 p.p., marginalmente acima da tolerância de 2,0pp agora
+  definida para modo final).
+- **Preview: REPROVADO quanto à porosidade** (erro real +18,80 p.p. — a calibração antiga
+  declarava `converged=true` baseada apenas numa estimativa analítica que divergia muito da
+  malha real discretizada).
+
+Essa execução expôs um **bug real na calibração de porosidade**: o worker só conferia uma
+estimativa analítica contínua contra o alvo, nunca a malha efetivamente voxelizada/gerada pelo
+PicoGK — o que produzia declarações de convergência cientificamente enganosas, mais graves
+quanto mais grosseira a discretização (daí o erro grande em preview). **Corrigido nesta
+sessão**: nova calibração FECHADA (`GyroidMath.CalibrateByMonotonicBisection`) que gera
+Voxels/Mesh reais a cada candidato de espessura e mede a porosidade de verdade, com tolerâncias
+explícitas por modo (final 2,0pp / preview 5,0pp) e falha estruturada
+`POROSITY_TARGET_NOT_REACHED` quando não converge dentro da tolerância medida. 12 novos testes
+xUnit (62/62 no total). Dois outros bugs operacionais reais também foram encontrados e
+corrigidos nesta sessão via execução/reexecução real: limpeza de artefatos parciais apagava o
+`job.json` de entrada (corrigido); o viewer do PicoGK não fechava sozinho, inflando
+`duration_seconds` (corrigido com `bEndAppWithTask: true`).
+
+**IMPORTANTE**: todos os SHA-256/STLs obtidos nesta rodada são evidência **ANTERIOR** à correção
+de calibração — preservados sem alteração (nunca "corrigidos" manualmente), rotulados como tal
+em `apps/geometry-worker/WORKER_STATUS.md` §10/§10.2. Uma NOVA execução real das 3 receitas com
+o código corrigido é necessária para fechar os itens 1, 3, 4, 5 do checklist de aceite de
+verdade.
 
 **Totalmente fechados e provados nesta sessão**: itens 7, 8, 9, 16 (segurança/concorrência/
 cancelamento/preservação de histórico — nenhum depende de PicoGK real, todos exercitados contra
-infraestrutura real: Postgres real, processos reais, git real).
+infraestrutura real: Postgres real, processos reais, git real). Item 2 (bloco) também está
+totalmente fechado. Item 10 (métricas coerentes com o STL) está provado para as 3 receitas via
+auditoria independente relatada pelo usuário, embora a própria ferramenta de auditoria tenha
+sido corrigida nesta sessão (detecção de UTF-8/UTF-16, extração do último JSON de stdout com
+logs) e mereça uma nova rodada para reconfirmação.
 
-**Provados de verdade contra PicoGK real, mas só para `block-gyroid-v1`**: itens 1 e 2
-(parcialmente — falta cilindro e preview) e a parte de porosidade do item 5. O item 10
-(métricas coerentes com o STL) é autoconsistente nos números reportados, mas ainda **não** foi
-conferido por auditoria independente (`scripts/audit_stl_vs_worker_output.py`) porque o arquivo
-real ainda não foi recebido nesta sessão.
+**Geometricamente aprovado mas com pendência de porosidade**: item 3 (cilindro).
 
-**Código corrigido e testado no que é testável sem PicoGK, mas ainda não provado
-ponta-a-ponta**: itens 3, 4 (cilindro e preview — deliberadamente não executados ainda),
-espessura/isovalor/seed isolados dentro do item 5, item 6 (incluindo o segundo bug operacional
-real encontrado e corrigido nesta sessão — viewer não fechava sozinho), item 11 (manifesto —
-esta execução foi direta via CLI do worker, fora do fluxo API→dispatcher→manifesto), e item 15
-(50/50 xUnit agora, +2 testes de guarda de configuração).
+**Reprovado nesta rodada, corrigido no código, pendente de nova prova real**: item 4 (preview) e
+a parte de calibração do item 5.
 
-**Simplesmente não feitos ainda, dependem do usuário**: itens 3, 4, 12, 14 (cilindro, preview,
-determinismo, E2E) e 17 para o pacote final v2.2.1 especificamente (o v2.2 base já foi
-verificado).
+**Simplesmente não feitos ainda**: item 14 (E2E) e item 17 para o pacote final v2.2.1
+especificamente (o v2.2 base já foi verificado). Item 12 (determinismo) está provado só para o
+bloco pré-correção; pendente para cilindro/preview e para o código pós-correção.
 
 **Sem mudança de escopo neste incremento**: item 13 (visualização/download), que segue como
 estava no Incremento 2.1.
 
-**Declaração explícita**: o Incremento 2.1.1 **continua NÃO concluído**. O sucesso real de
-`block-gyroid-v1` é uma prova parcial importantíssima, mas cilindro, preview, determinismo,
-consistência STL-vs-manifesto (auditoria independente) e E2E Playwright continuam pendentes,
-exatamente como o usuário reafirmou explicitamente.
+**Declaração explícita**: o Incremento 2.1.1 **continua NÃO concluído**. Bloco aprovado;
+cilindro geometricamente aprovado mas com porosidade pendente de refinamento; preview reprovado
+quanto à porosidade (bug real já corrigido no código, mas não reexecutado); determinismo,
+consistência STL-vs-manifesto via fluxo completo e E2E Playwright continuam pendentes. Nenhum
+pacote final foi gerado ou regenerado.
 
 ## Evidência de teste do Incremento 2.1.1 (resumo; ver `TEST_EVIDENCE.md` para o log consolidado)
 
@@ -327,12 +347,12 @@ $ python -c "... SELECT table_name FROM information_schema.tables ..."
 
 | # | Cenário pedido | Teste | Resultado |
 |---|---|---|---|
-| 1 | Estado inicial: os 3 flags clínicos desabilitados | `test_initial_state_all_three_clinical_flags_disabled` | PASSED |
-| 2 | Ativação conjunta habilita os 3 | `test_activation_enables_all_three_flags_atomically` | PASSED |
-| 3 | Desativação conjunta desabilita os 3 | `test_deactivation_disables_all_three_flags_atomically` | PASSED |
-| 4 | Tentativa por usuário não autorizado | `test_activation_denied_for_non_admin_user` | PASSED |
-| 5 | Rollback completo em caso de falha | `test_activation_rolls_back_completely_on_failure` (via monkeypatch forçando exceção no meio da transação) | PASSED |
-| 6 | Expiração | `test_clinical_suite_expiration_is_respected` | PASSED |
+| 1 | Worker PicoGK realmente executado em Windows x64 | **PROVADO para as 3 golden recipes, mas com bug de calibração de porosidade encontrado e corrigido depois** | Usuário executou de verdade as três receitas no Windows x64 (bloco, cilindro, preview) — todas com ExitCode 0, watertight, auditoria independente aprovada. Essa execução revelou um problema real na calibração de porosidade (ver item 5) que já foi corrigido nesta sessão. **Uma NOVA execução das 3 receitas com o código corrigido ainda é necessária** para fechar este item de verdade — os SHA-256 já obtidos são anteriores à correção (ver `apps/geometry-worker/WORKER_STATUS.md` §10.2/§10.3). |
+| 2 | Geração real de bloco Gyroid | **APROVADO** | 208.560 triângulos, 102.338 vértices únicos, watertight, validação de recarga do STL aprovada, determinismo binário confirmado em duas execuções (mesmo SHA-256), auditoria independente aprovada. SHA-256: `cd97e3c2be2029fe54bb4743217254a7ecb769ba24b81bf737d76e73bbc1565d`. Porosidade dentro de margem pequena (erro -1,33 p.p., dentro da tolerância de 2,0pp agora definida para modo final). Bloco genuinamente gerado pelo PicoGK real, não sintético. |
+| 3 | Cilindro realmente recortado (não bounding box) | **GEOMETRIA APROVADA; porosidade precisa de refinamento** | Executado de verdade: contenção cilíndrica verificada em 1.486.788 vértices, ZERO violações radiais e em Z — prova real e forte de que o SDF do cilindro recorta corretamente (não bounding box). Watertight, auditoria independente aprovada. SHA-256: `6004d7c1f1075e504ff6a25abd86b3118f54bf15dfb7364c5d8b34cdb5f61810` (evidência PRÉ-correção de calibração). Porosidade: alvo 55%, medido 52,756863%, erro -2,243137 p.p. — marginalmente acima da tolerância de modo final agora definida (2,0pp); depende de nova execução com a calibração corrigida (§10.3 do WORKER_STATUS.md) para fechar. |
+| 4 | Diferença real preview vs. final | **Diferença real CONFIRMADA (voxel size), mas preview REPROVADO quanto à porosidade** | `preview-gyroid-low-res-v1` executado de verdade: watertight, auditoria STL-vs-métricas aprovada — prova que o modo preview gera geometria real e internamente consistente, distinta do modo final. Porém a porosidade medida (78,804521%) divergiu MUITO do alvo (60%, erro real +18,80 p.p.) porque a calibração antiga só conferia a estimativa analítica (59,40%), nunca a malha discretizada real — bug real encontrado e corrigido nesta sessão (§10.3 do WORKER_STATUS.md). Nova execução com o código corrigido é necessária para fechar este item. |
+| 5 | Parâmetros efetivamente aplicados (espessura/isovalor/porosidade/seed) | **BUG REAL ENCONTRADO E CORRIGIDO** — calibração de porosidade antiga era cientificamente enganosa | Execução real das 3 receitas expôs o problema: a calibração `CalibratePorosityByBisection` só conferia uma estimativa ANALÍTICA contínua, nunca a malha real. Em modo final o erro era pequeno (bloco -1,33pp, cilindro -2,24pp) mas em preview o erro real chegou a +18,80pp enquanto o worker declarava `converged=true` — sucesso científico falso. Corrigido: nova calibração FECHADA (`GyroidMath.CalibrateByMonotonicBisection`) que gera Voxels/Mesh reais a cada candidato de espessura e mede a porosidade de verdade, com tolerâncias explícitas (final 2,0pp / preview 5,0pp) e falha estruturada `POROSITY_TARGET_NOT_REACHED` se não convergir dentro da tolerância MEDIDA. 12 novos testes xUnit (62/62 no total). Espessura efetiva/isovalor/fase-por-seed continuam sem confirmação isolada contra a malha real. Determinismo (item 12) confirmado para o bloco nesta rodada (mesma seed, mesmo SHA-256 em duas execuções), pendente para cilindro/preview e para o código pós-correção. |
+| 6 | Limites computacionais efetivamente controlados | Código corrigido, parcialmente verificado nesta sessão; laço de calibração também respeita os limites | Estimativa prévia de voxel/memória testada unitariamente; timeout + kill de árvore de processos **verificado neste sandbox** (cross-platform). Três bugs operacionais reais encontrados e corrigidos ao longo desta sessão via execução real: (1) limpeza de artefatos parciais apagava `job.json` de entrada — corrigido (`OutputCleanup.cs`); (2) viewer do PicoGK não fechava sozinho, inflando `duration_seconds` — corrigido (`bEndAppWithTask: true`); (3) calibração de porosidade cientificamente enganosa (item 5) — corrigida (calibração fechada). O novo laço de calibração fechada descarta Voxels/Mesh de cada candidato via `using`/`Dispose()` entre iterações, respeitando o mesmo limite de memória. Efeitos reais das correções (2) e (3) ainda dependem de nova execução do usuário para confirmação final. |
 | 7 | Independência do contexto Laboratório | `test_clinical_suite_is_independent_from_laboratory` | PASSED |
 
 ## Frontend — comandos executados e resultado (revalidação do Incremento 1.1)

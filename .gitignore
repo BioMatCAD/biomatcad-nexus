@@ -56,3 +56,8 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 *.tsbuildinfo
+
+# PicoGK/ImGui grava configuração de layout de janela do viewer neste arquivo ao rodar
+# localmente (Incremento 2.1.1, item 10 da correção de calibração) -- é estado local da máquina
+# de quem executa o worker, não deve ser versionado.
+apps/geometry-worker/imgui.ini

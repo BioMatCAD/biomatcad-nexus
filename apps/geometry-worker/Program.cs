@@ -143,11 +143,20 @@ try
     string? picogkVersion = Assembly.Load("PicoGK").GetName().Version?.ToString();
     string stlSha256 = StlExporter.ComputeSha256Hex(stlPath);
 
-    double? porosityResidualVsMeasured = null;
-    if (buildResult.PorosityCalibration is not null)
-    {
-        porosityResidualVsMeasured = metrics.PorosityPctMeasured - topology.TargetPorosityPct!.Value;
-    }
+    // Item 6/7 (correção pós-execução real): measured_porosity_pct SEMPRE vem de
+    // metrics.PorosityPctMeasured -- calculada sobre buildResult.Mesh, que é EXATAMENTE a malha
+    // soldada gravada no STL (não uma medição separada em memória que poderia divergir do
+    // arquivo). Quando há calibração (target_porosity_pct presente), este valor coincide com
+    // buildResult.MeshPorosityCalibration.MeasuredPorosityPct (mesma malha vencedora), mas
+    // metrics.PorosityPctMeasured é a fonte de verdade única, por vir da malha efetivamente
+    // exportada.
+    bool hasCalibration = buildResult.MeshPorosityCalibration is not null;
+    double? measuredPorosityErrorPctPoints = hasCalibration
+        ? metrics.PorosityPctMeasured - topology.TargetPorosityPct!.Value
+        : null;
+    bool? measuredPorosityWithinTolerance = hasCalibration
+        ? Math.Abs(measuredPorosityErrorPctPoints!.Value) <= buildResult.PorosityToleranceUsedPctPoints
+        : null;
 
     var output = new WorkerResultOutput
     {
@@ -162,10 +171,13 @@ try
             WallThicknessEffectiveMm = buildResult.EffectiveWallThicknessMm,
             IsovalueCenter = buildResult.IsovalueCenter,
             TargetPorosityPctRequested = topology.TargetPorosityPct,
-            PorosityPctCalibrationEstimate = buildResult.PorosityCalibration?.EstimatedPorosityPct,
-            PorosityCalibrationIterations = buildResult.PorosityCalibration?.Iterations,
-            PorosityCalibrationConverged = buildResult.PorosityCalibration?.Converged,
-            PorosityResidualErrorPctVsMeasured = porosityResidualVsMeasured,
+            AnalyticalPorosityEstimatePct = buildResult.AnalyticalPorosityCalibration?.EstimatedPorosityPct,
+            AnalyticalCalibrationConverged = buildResult.AnalyticalPorosityCalibration?.Converged,
+            MeasuredPorosityPct = hasCalibration ? metrics.PorosityPctMeasured : null,
+            PorosityTolerancePctPoints = hasCalibration ? buildResult.PorosityToleranceUsedPctPoints : null,
+            MeasuredPorosityErrorPctPoints = measuredPorosityErrorPctPoints,
+            MeasuredPorosityWithinTolerance = measuredPorosityWithinTolerance,
+            MeshCalibrationIterations = buildResult.MeshPorosityCalibration?.Iterations,
             Seed = job.Recipe.Seed,
             SeedPhaseShiftRad = buildResult.SeedPhaseShiftRad,
             Mode = job.Recipe.Mode,
@@ -182,6 +194,27 @@ try
     };
     Console.WriteLine(JsonSerializer.Serialize(output));
     return 0;
+}
+catch (PorosityTargetNotReachedException porosityEx)
+{
+    // Correção pós-execução real (Incremento 2.1.1): NUNCA finge sucesso científico quando a
+    // calibração fechada contra a malha real não converge dentro da tolerância medida. Erro
+    // estruturado dedicado (não WORKER_EXECUTION_FAILED genérico) para que quem consome a saída
+    // do worker distinga claramente este caso de uma falha de execução comum.
+    if (outputDirForCleanup is not null) OutputCleanup.CleanupPartialOutputs(outputDirForCleanup);
+
+    var cal = porosityEx.CalibrationResult;
+    Console.Error.WriteLine(JsonSerializer.Serialize(MakeError(
+        "POROSITY_TARGET_NOT_REACHED",
+        porosityEx.Message,
+        new Dictionary<string, string>
+        {
+            ["measured_porosity_pct"] = cal.MeasuredPorosityPct.ToString("F6"),
+            ["porosity_tolerance_pct_points"] = cal.ToleranceUsedPctPoints.ToString("F2"),
+            ["measured_porosity_error_pct_points"] = cal.ResidualErrorPctPoints.ToString("F6"),
+            ["mesh_calibration_iterations"] = cal.Iterations.ToString(),
+        })));
+    return 1;
 }
 catch (Exception ex)
 {

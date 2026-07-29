@@ -76,7 +76,14 @@ public static class GyroidScaffoldBuilder
     public sealed class BuildResult
     {
         public SimpleMesh Mesh { get; init; } = new();
-        public GyroidMath.PorosityCalibrationResult? PorosityCalibration { get; init; }
+        // Calibração analítica (Passo 1, palpite inicial) -- estimativa contínua, PicoGK-
+        // independente. NUNCA usada isoladamente para declarar sucesso (ver correção pós-
+        // execução real abaixo).
+        public GyroidMath.PorosityCalibrationResult? AnalyticalPorosityCalibration { get; init; }
+        // Calibração fechada contra a malha REAL do PicoGK (Passo 2) -- só populada quando
+        // target_porosity_pct foi solicitado. É o valor de referência definitivo.
+        public GyroidMath.MonotonicCalibrationResult? MeshPorosityCalibration { get; init; }
+        public double PorosityToleranceUsedPctPoints { get; init; }
         public double EffectiveWallThicknessMm { get; init; }
         public double IsovalueCenter { get; init; }
         public double SeedPhaseShiftRad { get; init; }
@@ -92,96 +99,158 @@ public static class GyroidScaffoldBuilder
         double isovalueCenter = topology.Isovalue;
         double phaseShiftRad = GyroidMath.SeedToPhaseShiftRad(recipe.Seed);
         double voxelSizeEffectiveMm = GyroidMath.EffectiveVoxelSizeMm(recipe.Resolution.VoxelSizeMm, recipe.Mode);
+        double domainVolumeMm3 = GeometryMetricsCalculator.ComputeDomainVolumeMm3(domain);
+        double toleranceUsedPctPoints = GyroidMath.DefaultPorosityTolerancePctPointsForMode(recipe.Mode);
 
-        // Calibração de porosidade (item 2): se target_porosity_pct foi solicitado, a espessura
-        // EFETIVA usada na construção vem da calibração analítica por bisseção (GyroidMath, sem
-        // PicoGK); caso contrário, wall_thickness_mm solicitado é usado diretamente.
-        GyroidMath.PorosityCalibrationResult? calibration = null;
+        // Passo 1 (item 2): calibração ANALÍTICA -- serve apenas de palpite inicial rápido para
+        // a bisseção real do Passo 2 (dentro de Library.Go, abaixo). Nunca é o valor final
+        // reportado como "convergido" -- ver AnalyticalPorosityCalibration vs.
+        // MeshPorosityCalibration no BuildResult, e os campos análogos e explicitamente
+        // distintos no JSON de saída (Program.cs): analytical_calibration_converged nunca deve
+        // ser confundido com measured_porosity_within_tolerance.
+        GyroidMath.PorosityCalibrationResult? analyticalCalibration = null;
         double effectiveWallThicknessMm = topology.WallThicknessMm;
         if (topology.TargetPorosityPct is double targetPct)
         {
-            calibration = GyroidMath.CalibratePorosityByBisection(
+            analyticalCalibration = GyroidMath.CalibratePorosityByBisection(
                 targetPorosityPct: targetPct,
                 isovalueCenter: isovalueCenter,
                 phaseShiftRad: phaseShiftRad,
                 cellSizeMm: topology.CellSizeMm,
                 initialWallThicknessMm: topology.WallThicknessMm);
-            effectiveWallThicknessMm = calibration.EffectiveWallThicknessMm;
+            effectiveWallThicknessMm = analyticalCalibration.EffectiveWallThicknessMm;
         }
 
-        double halfBandWidth = GyroidMath.WallThicknessMmToHalfBandWidth(effectiveWallThicknessMm, topology.CellSizeMm);
-
         SimpleMesh? resultMesh = null;
+        GyroidMath.MonotonicCalibrationResult? meshCalibration = null;
 
-        // bEndAppWithTask: true -- Incremento 2.1.1 (correção pós-execução real no Windows).
-        // Execução real do worker (block-gyroid-v1, Windows x64, PicoGK Core 26.2.0) mostrou
-        // que a janela do viewer permanecia aberta após o STL já ter sido gravado, exigindo
-        // fechamento manual e inflando duration_seconds com tempo de espera humana (não de
-        // geração geométrica). Assinatura real de Library.Go confirmada nesta sessão via
-        // reflexão contra o PicoGK.dll 2.2.0 efetivamente instalado (não documentação
-        // presumida nem parâmetro inventado):
-        //   Go(float fVoxelSizeMM, ThreadStart fnTask, string strLogFilePath = "",
-        //      bool bEndAppWithTask = false, string strWindowTitle = "PicoGK",
-        //      string strLightsFile = "")
-        // O parâmetro bEndAppWithTask é o único e oficial mecanismo documentado (XML doc do
-        // pacote: "If true, the viewer exits when your task is done") para o viewer encerrar
-        // sozinho ao final de fnTask -- o valor padrão do parâmetro é false, e o worker nunca
-        // o definia explicitamente, daí o comportamento relatado. Passado aqui como argumento
-        // nomeado para deixar a intenção explícita e à prova de futuras mudanças de ordem de
-        // parâmetros na assinatura.
+        // bEndAppWithTask: true -- ver histórico da correção do viewer em WORKER_STATUS.md §10.1
+        // (assinatura real confirmada por reflexão contra o PicoGK.dll 2.2.0 instalado).
         Library.Go((float)voxelSizeEffectiveMm, () =>
         {
             BBox3 bounds;
-            IImplicit combinedImplicit;
+            double halfX = 0, halfY = 0, halfZ = 0, radiusMm = 0, heightMm = 0, cylinderCenterZOffsetMm = 0;
 
             if (domain.Shape == "block")
             {
-                double halfX = domain.DimensionsMm.XMm!.Value / 2.0;
-                double halfY = domain.DimensionsMm.YMm!.Value / 2.0;
-                double halfZ = domain.DimensionsMm.ZMm!.Value / 2.0;
+                halfX = domain.DimensionsMm.XMm!.Value / 2.0;
+                halfY = domain.DimensionsMm.YMm!.Value / 2.0;
+                halfZ = domain.DimensionsMm.ZMm!.Value / 2.0;
                 bounds = new BBox3(
                     new Vector3((float)-halfX, (float)-halfY, (float)-halfZ),
                     new Vector3((float)halfX, (float)halfY, (float)halfZ));
-                combinedImplicit = new GyroidDomainImplicit(
-                    topology.CellSizeMm, isovalueCenter, halfBandWidth, phaseShiftRad,
-                    "block", halfX, halfY, halfZ, 0, 0, 0);
             }
             else if (domain.Shape == "cylinder")
             {
-                double radiusMm = domain.DimensionsMm.RadiusMm!.Value;
-                double heightMm = domain.DimensionsMm.HeightMm!.Value;
+                radiusMm = domain.DimensionsMm.RadiusMm!.Value;
+                heightMm = domain.DimensionsMm.HeightMm!.Value;
                 // Voxels centraliza a bbox em torno da origem; o cilindro é modelado com base em
                 // z=0 internamente (GyroidMath.CappedCylinderSignedDistanceMm), então a bbox vai
                 // de -height/2 a +height/2 e aplicamos um deslocamento de +height/2 nas consultas
                 // ao SDF (cylinderCenterZOffsetMm) para recentralizar sem alterar a fórmula do SDF.
+                cylinderCenterZOffsetMm = heightMm / 2.0;
                 bounds = new BBox3(
                     new Vector3((float)-radiusMm, (float)-radiusMm, (float)(-heightMm / 2.0)),
                     new Vector3((float)radiusMm, (float)radiusMm, (float)(heightMm / 2.0)));
-                combinedImplicit = new GyroidDomainImplicit(
-                    topology.CellSizeMm, isovalueCenter, halfBandWidth, phaseShiftRad,
-                    "cylinder", 0, 0, 0, radiusMm, heightMm, heightMm / 2.0);
             }
             else
             {
                 throw new NotSupportedException($"Domínio não suportado: {domain.Shape}");
             }
 
-            var voxels = new Voxels(combinedImplicit, bounds);
-            var mesh = new Mesh(voxels);
-
-            var rawMesh = new SimpleMesh();
-            int triangleCount = mesh.nTriangleCount();
-            for (int i = 0; i < triangleCount; i++)
+            // Constrói o implicit combinado para um candidato de espessura -- reutilizado por
+            // cada iteração da calibração fechada (Passo 2) sem duplicar a lógica de domínio.
+            GyroidDomainImplicit BuildImplicitForThickness(double candidateWallThicknessMm)
             {
-                mesh.GetTriangle(i, out Vector3 a, out Vector3 b, out Vector3 c);
-                rawMesh.AddTriangle(new Vec3(a.X, a.Y, a.Z), new Vec3(b.X, b.Y, b.Z), new Vec3(c.X, c.Y, c.Z));
+                double candidateHalfBandWidth = GyroidMath.WallThicknessMmToHalfBandWidth(candidateWallThicknessMm, topology.CellSizeMm);
+                return domain.Shape == "block"
+                    ? new GyroidDomainImplicit(
+                        topology.CellSizeMm, isovalueCenter, candidateHalfBandWidth, phaseShiftRad,
+                        "block", halfX, halfY, halfZ, 0, 0, 0)
+                    : new GyroidDomainImplicit(
+                        topology.CellSizeMm, isovalueCenter, candidateHalfBandWidth, phaseShiftRad,
+                        "cylinder", 0, 0, 0, radiusMm, heightMm, cylinderCenterZOffsetMm);
+            }
+
+            // Gera Voxels+Mesh REAIS contra o PicoGK para um candidato de espessura, e extrai a
+            // malha crua (sem solda -- volume/área não dependem de solda, só a contagem de
+            // vértices únicos e o teste de watertight dependem; a solda final só acontece uma
+            // vez, sobre a malha vencedora, depois do laço de calibração). Voxels/Mesh
+            // implementam IDisposable -- descartados explicitamente a cada iteração (`using`)
+            // para não acumular memória nativa entre candidatos (item 8: respeitar limite de
+            // memória mesmo durante a calibração).
+            SimpleMesh BuildRawMeshForThickness(double candidateWallThicknessMm)
+            {
+                var implicitForCandidate = BuildImplicitForThickness(candidateWallThicknessMm);
+                using var candidateVoxels = new Voxels(implicitForCandidate, bounds);
+                using var candidateMeshObj = new Mesh(candidateVoxels);
+                var raw = new SimpleMesh();
+                int triangleCount = candidateMeshObj.nTriangleCount();
+                for (int i = 0; i < triangleCount; i++)
+                {
+                    candidateMeshObj.GetTriangle(i, out Vector3 a, out Vector3 b, out Vector3 c);
+                    raw.AddTriangle(new Vec3(a.X, a.Y, a.Z), new Vec3(b.X, b.Y, b.Z), new Vec3(c.X, c.Y, c.Z));
+                }
+                return raw;
+            }
+
+            SimpleMesh finalRawMesh;
+
+            if (topology.TargetPorosityPct is double targetPorosityPct)
+            {
+                // Passo 2 (correção pós-execução real): calibração FECHADA contra a malha real.
+                // Cada candidato de espessura gera Voxels+Mesh de verdade e mede o volume real
+                // resultante -- nunca confia apenas na estimativa analítica do Passo 1.
+                SimpleMesh? lastCandidateMesh = null;
+
+                double MeasureMeshPorosityForThickness(double candidateWallThicknessMm)
+                {
+                    var candidateRawMesh = BuildRawMeshForThickness(candidateWallThicknessMm);
+                    lastCandidateMesh = candidateRawMesh;
+                    double solidVolumeMm3 = GeometryMetricsCalculator.ComputeVolumeMm3(candidateRawMesh);
+                    return GeometryMetricsCalculator.EstimatePorosityPct(solidVolumeMm3, domainVolumeMm3);
+                }
+
+                // Limites físicos seguros para a busca: mesma faixa que a checagem de
+                // contradição espessura/isovalor já usa (0 exclusive .. cell_size_mm/2 exclusive
+                // -- acima disso, a célula fica sem poro algum, ver TOPOLOGY_PARAMETERS_INCONSISTENT
+                // em Program.cs).
+                double minWallThicknessMm = 1e-6;
+                double maxWallThicknessMm = topology.CellSizeMm / 2.0 - 1e-6;
+
+                meshCalibration = GyroidMath.CalibrateByMonotonicBisection(
+                    targetPorosityPct: targetPorosityPct,
+                    initialWallThicknessMm: effectiveWallThicknessMm,
+                    minWallThicknessMm: minWallThicknessMm,
+                    maxWallThicknessMm: maxWallThicknessMm,
+                    toleranceAbsPctPoints: toleranceUsedPctPoints,
+                    maxIterations: GyroidMath.DefaultMeshCalibrationMaxIterations,
+                    measurePorosityForThickness: MeasureMeshPorosityForThickness);
+
+                if (!meshCalibration.Converged)
+                {
+                    // Não finge sucesso científico: interrompe ANTES de soldar/exportar
+                    // qualquer STL. Program.cs mapeia esta exceção para
+                    // POROSITY_TARGET_NOT_REACHED (erro estruturado) e aciona a limpeza de
+                    // artefatos parciais normalmente (nenhum arquivo foi gravado ainda).
+                    throw new PorosityTargetNotReachedException(meshCalibration);
+                }
+
+                effectiveWallThicknessMm = meshCalibration.EffectiveWallThicknessMm;
+                finalRawMesh = lastCandidateMesh!;
+            }
+            else
+            {
+                // Sem target_porosity_pct: usa wall_thickness_mm solicitado diretamente, uma
+                // única geração real (sem laço de calibração).
+                finalRawMesh = BuildRawMeshForThickness(effectiveWallThicknessMm);
             }
 
             // Solda os vértices ANTES de exportar/medir (item 2/11): corrige a divergência de
             // contagem de vértices encontrada na auditoria (STL sempre grava 3 vértices "soltos"
             // por triângulo por limitação do próprio formato -- mas a malha em memória usada para
             // métricas e para o teste de watertight deve refletir vértices únicos reais).
-            var weldedMesh = rawMesh.Weld();
+            var weldedMesh = finalRawMesh.Weld();
             StlExporter.WriteBinary(weldedMesh, stlOutputPath);
 
             resultMesh = weldedMesh;
@@ -190,7 +259,9 @@ public static class GyroidScaffoldBuilder
         return new BuildResult
         {
             Mesh = resultMesh ?? new SimpleMesh(),
-            PorosityCalibration = calibration,
+            AnalyticalPorosityCalibration = analyticalCalibration,
+            MeshPorosityCalibration = meshCalibration,
+            PorosityToleranceUsedPctPoints = toleranceUsedPctPoints,
             EffectiveWallThicknessMm = effectiveWallThicknessMm,
             IsovalueCenter = isovalueCenter,
             SeedPhaseShiftRad = phaseShiftRad,

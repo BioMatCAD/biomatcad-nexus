@@ -15,6 +15,15 @@ Uso:
 Sem argumentos além do STL, apenas imprime as métricas recalculadas. Com --worker-json e/ou
 --manifest-json, compara campo a campo e retorna exit code 1 se houver qualquer divergência
 acima de uma tolerância numérica pequena (ponto flutuante).
+
+Correção (Incremento 2.1.1, item 10 da correção de calibração de porosidade): os arquivos
+--worker-json/--manifest-json capturados no Windows via redirecionamento de stdout
+(`dotnet ... > stdout.json`) podem vir em UTF-16 (comportamento comum do PowerShell em alguns
+locais/versões) em vez de UTF-8, e podem conter linhas de log do PicoGK/ImGui misturadas com o
+JSON real do worker (que é sempre a ÚLTIMA linha JSON válida emitida via Console.WriteLine).
+Este script agora detecta a codificação automaticamente (BOM UTF-8/UTF-16 LE/BE, ou heurística de
+bytes nulos na ausência de BOM) e extrai o ÚLTIMO objeto JSON válido do texto, em vez de assumir
+que o arquivo inteiro é um único documento JSON limpo.
 """
 from __future__ import annotations
 
@@ -26,6 +35,80 @@ import sys
 from pathlib import Path
 
 TOLERANCE_REL = 1e-3  # 0.1% -- tolerância para diferenças de arredondamento float32 vs float64
+
+
+def read_text_auto_encoding(path: Path) -> str:
+    """Lê um arquivo de texto detectando a codificação automaticamente (item 10 da correção).
+
+    Cobre: UTF-8 com/sem BOM, UTF-16 LE/BE com BOM, e UTF-16 LE sem BOM (heurística: muitos bytes
+    nulos intercalados -- assinatura típica de texto UTF-16 sendo lido erroneamente como UTF-8,
+    comum quando `dotnet`/PowerShell gravam a saída redirecionada em codificações diferentes
+    dependendo da versão/locale do Windows)."""
+    raw = path.read_bytes()
+    if raw.startswith(b"\xff\xfe\x00\x00") or raw.startswith(b"\x00\x00\xfe\xff"):
+        return raw.decode("utf-32")
+    if raw.startswith(b"\xff\xfe"):
+        return raw.decode("utf-16-le")
+    if raw.startswith(b"\xfe\xff"):
+        return raw.decode("utf-16-be")
+    if raw.startswith(b"\xef\xbb\xbf"):
+        return raw.decode("utf-8-sig")
+    # Sem BOM: heurística -- UTF-16 (LE) sem BOM tem aproximadamente 1 byte nulo a cada 2 bytes
+    # para texto ASCII/latin puro; um limiar conservador de 1 em 4 evita falsos positivos em
+    # UTF-8 comum (que raramente contém bytes nulos).
+    if raw and raw.count(b"\x00") > len(raw) // 4:
+        try:
+            return raw.decode("utf-16-le")
+        except UnicodeDecodeError:
+            pass
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw.decode("utf-8", errors="replace")
+
+
+def extract_last_json_object(text: str) -> dict:
+    """Extrai o ÚLTIMO objeto JSON válido de um texto que pode conter linhas de log misturadas
+    (item 10 da correção). O worker sempre emite sua saída/erro estruturado como uma única linha
+    de JSON compacto via Console.WriteLine/Console.Error.WriteLine -- mas o PicoGK/ImGui pode
+    escrever outras linhas de log (não-JSON) antes ou depois dessa linha no mesmo stream.
+
+    Estratégia: primeiro tenta linha por linha, de trás para frente (caminho rápido e correto
+    para o caso comum de uma linha JSON compacta). Se nenhuma linha isolada for um JSON válido
+    (ex.: JSON formatado em várias linhas, ou linhas de log entrelaçadas de forma inesperada),
+    cai para uma varredura de chaves balanceadas por todo o texto, mantendo o ÚLTIMO objeto que
+    parsear com sucesso.
+    """
+    for line in reversed(text.splitlines()):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            return json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+
+    decoder = json.JSONDecoder()
+    best: dict | None = None
+    search_from = 0
+    while True:
+        brace_index = text.find("{", search_from)
+        if brace_index == -1:
+            break
+        try:
+            candidate, _ = decoder.raw_decode(text, brace_index)
+            if isinstance(candidate, dict):
+                best = candidate
+        except json.JSONDecodeError:
+            pass
+        search_from = brace_index + 1
+
+    if best is None:
+        raise ValueError(
+            "Nenhum objeto JSON valido encontrado no texto fornecido "
+            "(nem linha a linha, nem por varredura de chaves balanceadas)."
+        )
+    return best
 
 
 def read_binary_stl(path: Path) -> tuple[list[tuple[float, float, float]], list[tuple[int, int, int]]]:
@@ -159,7 +242,7 @@ def main() -> int:
     mismatches: list[str] = []
 
     if args.worker_json is not None:
-        worker_output = json.loads(args.worker_json.read_text(encoding="utf-8"))
+        worker_output = extract_last_json_object(read_text_auto_encoding(args.worker_json))
         worker_metrics = worker_output.get("metrics", {})
         print("\n=== Comparando contra metrics do worker (stdout JSON) ===")
         compare_field("volume_mm3", worker_metrics.get("volume_mm3"), metrics["volume_mm3"], mismatches)
@@ -170,7 +253,7 @@ def main() -> int:
         compare_field("stl_sha256", worker_output.get("stl_sha256"), stl_sha256, mismatches)
 
     if args.manifest_json is not None:
-        manifest = json.loads(args.manifest_json.read_text(encoding="utf-8"))
+        manifest = extract_last_json_object(read_text_auto_encoding(args.manifest_json))
         manifest_metrics = manifest.get("metrics", {})
         print("\n=== Comparando contra metrics do manifest.json ===")
         compare_field("volume_mm3 (manifest)", manifest_metrics.get("volume_mm3"), metrics["volume_mm3"], mismatches)

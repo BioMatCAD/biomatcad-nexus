@@ -17,6 +17,7 @@
     <Compile Include="../../StlExporter.cs" Link="StlExporter.cs" />
     <Compile Include="../../GyroidMath.cs" Link="GyroidMath.cs" />
     <Compile Include="../../OutputCleanup.cs" Link="OutputCleanup.cs" />
+    <Compile Include="../../PorosityCalibrationExceptions.cs" Link="PorosityCalibrationExceptions.cs" />
   </ItemGroup>
 
   <ItemGroup>
