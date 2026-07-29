@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Launcher executável do BioMatCAD Nexus (Incremento 2.1.1). Roda em qualquer .NET 9 (Linux
+    para desenvolvimento/testes neste sandbox, Windows para o uso real com duplo clique). O
+    publish de distribuição usa -r win-x64, self-contained=false, PublishSingleFile=true (ver
+    scripts/Build-WindowsLauncher.ps1); é framework-dependente porque o .NET 9 Runtime já é um
+    pré-requisito documentado do worker PicoGK (ver docs/examples/WINDOWS_EXECUTION_KIT.md),
+    então não há necessidade de inflar o executável com um runtime autocontido.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>BioMatCAD.Launcher</RootNamespace>
+    <AssemblyName>BioMatCAD-Nexus</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Publicado apenas para win-x64 (ver csproj do worker: mesma decisão de plataforma).
+         Não força a RID durante dotnet build/dotnet test normais (Linux, CI, sandbox); apenas
+         o publish explícito com -r win-x64 usa este runtime. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="tests/**/*.cs" />
+  </ItemGroup>
+
+</Project>

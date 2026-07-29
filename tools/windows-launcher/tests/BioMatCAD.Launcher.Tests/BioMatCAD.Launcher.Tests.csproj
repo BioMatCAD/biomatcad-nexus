@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <!-- Compila os arquivos de lógica do launcher por link direto (mesmo padrão de
+       apps/geometry-worker/tests), exceto Program.cs, que usa top-level statements e é o ponto
+       de entrada do executável; não é uma classe testável isoladamente. Toda a lógica que
+       Program.cs orquestra vive nas classes abaixo, que são testadas diretamente aqui. -->
+  <ItemGroup>
+    <Compile Include="../../src/RepositoryLocator.cs" Link="RepositoryLocator.cs" />
+    <Compile Include="../../src/PathResolver.cs" Link="PathResolver.cs" />
+    <Compile Include="../../src/DependencyDetector.cs" Link="DependencyDetector.cs" />
+    <Compile Include="../../src/PortChecker.cs" Link="PortChecker.cs" />
+    <Compile Include="../../src/SecretGenerator.cs" Link="SecretGenerator.cs" />
+    <Compile Include="../../src/StartupPlanner.cs" Link="StartupPlanner.cs" />
+    <Compile Include="../../src/ProcessSupervisor.cs" Link="ProcessSupervisor.cs" />
+    <Compile Include="../../src/EnvironmentSetup.cs" Link="EnvironmentSetup.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+</Project>

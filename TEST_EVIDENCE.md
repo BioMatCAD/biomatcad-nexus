@@ -690,6 +690,92 @@ Verificado quebrando deliberadamente de novo e confirmando a falha do teste, dep
 Um kit PowerShell para o usuário executar este gate real no Windows foi preparado (ver
 `docs/examples/WINDOWS_EXECUTION_KIT.md`, nova Seção 9).
 
+## 13. Launcher executável do BioMatCAD Nexus para Windows (`tools/windows-launcher/`) -- código, testes reais e cross-publish (2026-07-29)
+
+Implementado o iniciador de duplo clique pedido explicitamente nesta rodada (Turno anterior
+aceitou o commit `75ebd1e`, mas registrou que o launcher NÃO havia sido criado ainda -- este é
+o trabalho que fecha essa pendência, sem abrir novo incremento).
+
+**Estrutura criada**:
+- `tools/windows-launcher/BioMatCAD.Launcher.csproj` (.NET 9, `AssemblyName=BioMatCAD-Nexus`)
+- `tools/windows-launcher/Program.cs` -- orquestração real dos 16 comportamentos pedidos
+- `tools/windows-launcher/src/`: `RepositoryLocator.cs`, `PathResolver.cs`,
+  `DependencyDetector.cs`, `PortChecker.cs`, `SecretGenerator.cs`, `StartupPlanner.cs`,
+  `ProcessSupervisor.cs`, `EnvironmentSetup.cs`
+- `tools/windows-launcher/tests/BioMatCAD.Launcher.Tests/` -- suíte xUnit real
+- `tools/windows-launcher/README.md` -- documentação completa (comportamento, arquitetura,
+  segurança, testes, build)
+- `scripts/Build-WindowsLauncher.ps1` -- roda os testes e depois publica win-x64
+- `Start-BioMatCAD.cmd` -- ponto de entrada de duplo clique (substitui os "três PowerShells
+  manuais")
+
+**Testes: 54/54 xUnit REAIS aprovados neste sandbox** (sem fakes de sistema operacional --
+diretórios temporários reais, sockets TCP reais via `TcpListener`/`TcpClient`, subprocessos
+reais via `python3`/`node`/`npm`/`dotnet` genuinamente instalados no ambiente, e `sleep`/
+`cmd.exe timeout` como processos de longa duração descartáveis para os testes de supervisão de
+processos). Cobrem os 10 cenários explicitamente pedidos: raiz do projeto, caminhos com
+espaços, detecção de dependências, segredo não exposto, portas ocupadas, início parcial,
+encerramento dos filhos, composição de comandos Windows, Python 3.14 (comparação de versão
+numérica -- `3.14 > 3.9`, nunca lexicográfica), e API/frontend já ativos.
+
+**Verificação de que os testes de guarda de segurança realmente detectam regressão** (mesmo
+padrão de rigor já usado nos testes de guarda do E2E): troquei deliberadamente
+`ProcessSupervisor.StartTracked` para usar `psi.Arguments = string.Join(" ", arguments)` (o
+padrão de command injection que o código real evita) e confirmei que
+`SecurityReviewGuardTests.ProcessSupervisor_NuncaUsaArgumentsConcatenadoComoString` falhou
+imediatamente; revertido em seguida e confirmado verde de novo (9/9 nesse arquivo).
+
+**Bugs reais encontrados e corrigidos durante esta implementação** (antes de qualquer commit):
+1. `PathResolver.WhichCommand` expandia sufixos do PATHEXT mesmo sobre nomes que já tinham
+   extensão explícita (ex.: `"npm.cmd"` viraria candidato a `"npm.cmd.EXE"`) -- corrigido com
+   checagem `Path.HasExtension(commandName)`.
+2. `WhichCommand` comparava sufixos do PATHEXT (convencionalmente maiúsculos, ex. `.EXE`)
+   contra nomes de arquivo reais em minúsculas (ex. `python.exe`) sem tentar a variante em
+   minúsculas -- em NTFS isso nunca importaria (case-insensitive), mas o bug só apareceu ao
+   testar a lógica de resolução de verdade contra arquivos reais em disco (mesmo em sandbox
+   Linux, sensível a caixa) -- corrigido tentando explicitamente a variante em minúsculas do
+   sufixo antes de desistir do diretório.
+3. Dois testes de guarda de segurança tinham falso-positivo: o comentário explicativo do
+   próprio código cita as palavras proibidas ("nunca um taskkill genérico", "nunca habilita um
+   ambiente clínico") para documentar que elas são evitadas, e o banner permanente obrigatório
+   contém literalmente "CLÍNICOS" (dentro de "NÃO UTILIZAR DADOS CLÍNICOS REAIS") -- corrigido
+   filtrando linhas de comentário puro antes da checagem de `taskkill`, e trocando a checagem
+   ingênua "a palavra 'clínico' nunca aparece" por uma checagem precisa: toda atribuição a
+   `ENVIRONMENT` no código deve ser exatamente `"test"` (via regex sobre as atribuições reais,
+   não sobre a presença da palavra em qualquer contexto). Mesma técnica de "guarda textual com
+   comentários filtrados" já usada em `apps/web/tests/verticalSpecGuard.test.ts`.
+
+**Execução manual real de `Program.cs` neste sandbox** (smoke test, não susbtitui a execução
+completa no Windows real do usuário): rodei o executável de verdade a partir da raiz real do
+repositório clonado. Resultado real observado: detectou corretamente Python 3.10.12, Node
+v22.22.3, npm 10.9.8 e .NET 9.0.316 (caminhos absolutos reais resolvidos via `PathResolver`);
+detectou as portas 8000/5173 livres e decidiu iniciar novos processos (`StartupPlanner`); criou
+de verdade um `.venv` real em `apps/api/.venv` via `python3 -m venv`; iniciou de verdade
+`pip install -e .` (interrompido deliberadamente por mim antes de terminar, para não gastar
+tempo/rede desnecessariamente neste smoke test -- não é uma falha do launcher, é o próprio
+`pip install` real em andamento). O `.venv` de teste foi removido antes do commit (já ignorado
+globalmente por `.gitignore`: `.venv/`). **Não tentei** neste sandbox chegar até iniciar a API/
+frontend de verdade nem abrir o navegador -- isso depende do ambiente real do usuário (Windows,
+com todas as dependências já usadas no restante desta sessão) e é o próximo passo de evidência
+pendente, no mesmo padrão já usado para o E2E Playwright (Seções 9-11).
+
+**Cross-publish win-x64**: `dotnet publish -c Release -r win-x64 --self-contained false
+-p:PublishSingleFile=true` rodou de verdade neste sandbox (o pacote de runtime win-x64 foi
+restaurado da NuGet real) e produziu um binário genuíno:
+
+- Arquivo: `dist/windows-launcher/BioMatCAD-Nexus.exe`
+- Verificado via `file`: `PE32+ executable (console) x86-64, for MS Windows` (formato real de
+  executável Windows, não um artefato genérico)
+- SHA-256: `b6ae108ca7305b256d778403211cddb14d31d958cabb3f63b1132d99210070f6`
+- **Este binário foi apenas COMPILADO, nunca EXECUTADO** -- este sandbox é Linux e não roda
+  binários win-x64. A validação de execução real (duplo clique, os 16 comportamentos ponta a
+  ponta) depende do usuário rodar no Windows real -- ver `tools/windows-launcher/README.md` e
+  o comando de reprodução no fechamento desta resposta.
+- **Decisão documentada**: o `.exe` (e `dist/` em geral) **não é versionado no Git** --
+  `dist/` já está no `.gitignore` da raiz do repositório desde antes desta rodada. É um
+  artefato de build reproduzível a qualquer momento a partir do código-fonte versionado via
+  `scripts/Build-WindowsLauncher.ps1`.
+
 ## O que esta evidência explicitamente NÃO cobre
 
 - **Consistência STL-vs-manifesto via fluxo completo API→dispatcher→worker PicoGK real→
@@ -697,6 +783,10 @@ Um kit PowerShell para o usuário executar este gate real no Windows foi prepara
   job PRÉ-SEMEADO (worker fake rotulado); nenhum job NOVO foi submetido e processado através do
   fluxo de produção completo com o worker PicoGK real nesta sessão. Este é o gate final ainda
   pendente (Seção 12).
+- **Execução real do launcher Windows (`BioMatCAD-Nexus.exe`) no Windows do usuário** -- o
+  binário foi compilado e testado (54/54 xUnit) neste sandbox, mas nunca executado como `.exe`
+  win-x64 de verdade (Seção 13). Duplo clique real, os 16 comportamentos ponta a ponta, e
+  confirmação de que a API/frontend sobem e o navegador abre ainda dependem do usuário.
 - **Empacotamento final v2.2.1** — deliberadamente ainda não gerado.
 
 Estes itens são o que falta para declarar o Incremento 2.1.1 concluído.

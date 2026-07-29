@@ -1,0 +1,162 @@
+# BioMatCAD Nexus — Launcher Windows (Incremento 2.1.1)
+
+Iniciador executável de duplo clique que substitui a necessidade de abrir três PowerShells
+manuais para preparar e rodar o ambiente de desenvolvimento/teste do BioMatCAD Nexus (API +
+frontend). **É exclusivamente um utilitário de desenvolvimento/teste** — ver seção "Segurança".
+
+## O que ele faz (duplo clique único)
+
+1. Localiza a raiz do repositório a partir do diretório do próprio executável (funciona mesmo
+   se o `.exe` estiver em `dist/windows-launcher/`, ou tenha sido movido, ou o repositório
+   esteja em um caminho com espaços).
+2. Detecta Python, Node.js, npm e .NET no `PATH` real da máquina, resolvendo os caminhos
+   absolutos manualmente (ver "Segurança" — isso é também uma defesa contra command injection).
+3. Localiza ou cria `apps/api/.venv`.
+4. Instala a API em modo editável (`pip install -e .`) somente se ainda não estiver instalada.
+5. Verifica `node_modules`/`package-lock.json` do frontend e roda `npm ci`/`npm install`
+   somente se necessário.
+6. Gera um `API_SECRET_KEY` efêmero, criptograficamente seguro (256 bits, via
+   `RandomNumberGenerator` do .NET — nunca `System.Random`).
+7. Define `ENVIRONMENT=test` para o processo da API.
+8. Inicia a API em `http://localhost:8000`.
+9. Inicia o frontend em `http://localhost:5173`.
+10. Aguarda ambos os serviços ficarem disponíveis (poll de socket TCP real, com timeout).
+11. Abre `http://localhost:5173/login` no navegador padrão.
+12. Mostra status, PIDs e mantém os logs (stdout/stderr) dos processos filhos visíveis.
+13. Ao fechar a janela ou pressionar Ctrl+C, encerra **somente** os processos filhos que ele
+    mesmo iniciou (nunca um `taskkill` genérico por nome ou por porta).
+14. Detecta portas já ocupadas: se 8000 ou 5173 já estiverem em uso, **reaproveita** o serviço
+    existente em vez de tentar iniciar uma segunda instância.
+15. **Nunca** grava ou exibe o segredo gerado (nem no console, nem em disco, nem em log).
+16. Exibe permanentemente o banner: **"AMBIENTE DE TESTE — NÃO UTILIZAR DADOS CLÍNICOS REAIS"**.
+
+O launcher **não** roda seed de dados sintéticos automaticamente. (A opção explícita
+"Preparar dados sintéticos de demonstração" faz parte do roadmap deste mesmo incremento — ver
+`IMPLEMENTATION_STATUS.md` para o estado exato desse item específico nesta entrega.)
+
+## Como usar (Windows)
+
+```powershell
+# 1. Compilar (uma vez, ou sempre que o código do launcher mudar):
+pwsh -File .\scripts\Build-WindowsLauncher.ps1
+
+# 2. Rodar (duplo clique no Explorer, ou via linha de comando):
+.\Start-BioMatCAD.cmd
+```
+
+Para encerrar: feche a janela do console ou pressione `Ctrl+C`. Isso mata a API e o frontend
+(e toda a árvore de processos de cada um), mas nunca afeta outros programas na máquina.
+
+## Arquitetura do código
+
+```
+tools/windows-launcher/
+  BioMatCAD.Launcher.csproj      projeto .NET 9 (net9.0), OutputType=Exe
+  Program.cs                     orquestração dos 16 comportamentos (ponto de entrada)
+  src/
+    RepositoryLocator.cs         localiza a raiz do repo (sobe diretórios até achar marcadores)
+    PathResolver.cs              resolução manual de PATH/PATHEXT (defesa central contra
+                                  command injection — ver abaixo)
+    DependencyDetector.cs        detecta Python/Node/npm/.NET via "--version" real
+    PortChecker.cs                verifica/aguarda portas via sockets TCP reais
+    SecretGenerator.cs           gera API_SECRET_KEY efêmero via CSPRNG
+    StartupPlanner.cs            lógica PURA de decisão (reaproveitar serviço existente,
+                                  bloquear por dependência faltando) — sem I/O, 100% testável
+    ProcessSupervisor.cs         inicia/rastreia/mata processos filhos reais
+    EnvironmentSetup.cs          venv, pip install -e ., npm ci/install
+  tests/BioMatCAD.Launcher.Tests/
+    ... suíte xUnit real (ver "Testes" abaixo)
+```
+
+## Segurança
+
+- **Command injection**: toda invocação de processo usa
+  `ProcessStartInfo.ArgumentList` (cada argumento como elemento discreto de array), **nunca**
+  a propriedade `Arguments` (string única concatenada, que pode ser reinterpretada por um
+  shell em certas condições no Windows). Verificado por teste de guarda
+  (`SecurityReviewGuardTests`) que falha se alguém reintroduzir `.Arguments =` no código.
+- **`UseShellExecute=true`** é usado em **exatamente um lugar**: abrir o navegador em
+  `http://localhost:5173/login`, uma URL **fixa e interna**, nunca construída a partir de
+  input externo/do usuário — logo, não é um vetor de injeção.
+- **Resolução de comandos**: `PathResolver.WhichCommand` resolve manualmente o caminho
+  absoluto de `python`/`node`/`npm`/`dotnet` a partir do `PATH`/`PATHEXT` reais, e esse
+  caminho absoluto é sempre o que vira `ProcessStartInfo.FileName` — nunca um nome de comando
+  "nu" que dependeria da resolução implícita (às vezes inconsistente, ex.: `npm` vs
+  `npm.cmd`) do `CreateProcess` do Windows.
+- **Segredo (`API_SECRET_KEY`)**: gerado com `RandomNumberGenerator` (CSPRNG do SO, 256 bits),
+  passado **somente** como variável de ambiente do processo filho da API. Nunca impresso no
+  console, nunca gravado em arquivo, nunca incluído em nenhuma mensagem de log. Verificado por
+  teste de guarda que varre `Program.cs` em busca de qualquer `Console.Write*` que referencie
+  a variável.
+- **Encerramento de processos**: `ProcessSupervisor` rastreia cada processo filho por
+  **referência de objeto** (não por nome ou porta) e usa `Process.Kill(entireProcessTree:
+  true)` apenas sobre os processos que ele mesmo criou. Nunca usa `taskkill` (verificado por
+  teste de guarda).
+- **Sem Docker, sudo, ou elevação de administrador**: o launcher nunca invoca `docker`,
+  `sudo`, `runas`, nem solicita elevação de privilégios (verificado por teste de guarda).
+- **Sem segredos fixos no código**: nenhuma senha ou token literal aparece no código-fonte —
+  o único segredo (`API_SECRET_KEY`) é sempre gerado em tempo de execução.
+- **Ambiente sempre de teste**: `ENVIRONMENT` é sempre definido como `"test"` para o processo
+  da API — o launcher nunca define, sugere, nem oferece um valor diferente (verificado por
+  teste de guarda que varre todas as atribuições a essa chave).
+
+## Testes
+
+`tools/windows-launcher/tests/BioMatCAD.Launcher.Tests/` — 54 testes xUnit, **todos reais**
+(sem mocks/fakes de sistema operacional): usam diretórios temporários reais, sockets TCP
+reais, subprocessos reais (`python3`/`node`/`npm`/`dotnet` genuinamente instalados no ambiente
+de teste, e `sleep`/`cmd.exe timeout` como processos de longa duração descartáveis para os
+testes de supervisão). Cobrem explicitamente os 10 cenários pedidos:
+
+| # | Cenário pedido | Onde |
+|---|---|---|
+| 1 | Raiz do projeto | `RepositoryLocatorTests` |
+| 2 | Caminhos com espaços | `RepositoryLocatorTests.FindRepoRoot_ComEspacosNoCaminho_...` |
+| 3 | Detecção de dependências | `DependencyDetectorTests` (real, contra binários instalados) |
+| 4 | Segredo não exposto | `SecretGeneratorTests` (entropia/unicidade + guarda textual) |
+| 5 | Portas ocupadas | `PortCheckerTests` (sockets TCP reais) |
+| 6 | Início parcial | `StartupPlannerTests` + `ProcessSupervisorTests.ShutdownAll_ComInicioParcial_...` |
+| 7 | Encerramento dos filhos | `ProcessSupervisorTests.ShutdownAll_EncerraApenasOsProcessosRealmenteRastreados` |
+| 8 | Composição de comandos Windows | `PathResolverWindowsCompositionTests` (PATH/PATHEXT sintéticos, modo Windows) |
+| 9 | Python 3.14 | `DependencyDetectorTests.ParseVersion_Python314_...` (comparação numérica, não lexicográfica) |
+| 10 | API/frontend já ativos | `StartupPlannerTests.PlanService_ComPortaJaOcupada_...` |
+
+Rodar localmente:
+
+```bash
+dotnet test tools/windows-launcher/tests/BioMatCAD.Launcher.Tests/BioMatCAD.Launcher.Tests.csproj
+```
+
+**Resultado real obtido no sandbox de desenvolvimento (Linux) nesta rodada: 54/54 passaram.**
+`Program.cs` em si (orquestração/`Main`) não é compilado no projeto de testes por usar
+top-level statements — toda a lógica que ele orquestra vive nas classes acima, que são
+testadas diretamente. `Program.cs` foi validado por execução manual real neste sandbox
+(detecção de dependências reais, criação de venv real, início de `pip install`) — ver
+`IMPLEMENTATION_STATUS.md` para o relato exato do que foi exercido de ponta a ponta versus o
+que depende de validação no Windows real do usuário.
+
+## Build / publish para Windows
+
+```powershell
+pwsh -File .\scripts\Build-WindowsLauncher.ps1
+```
+
+Equivalente a:
+
+```powershell
+dotnet publish tools/windows-launcher/BioMatCAD.Launcher.csproj `
+  -c Release `
+  -r win-x64 `
+  --self-contained false `
+  -p:PublishSingleFile=true `
+  -o dist/windows-launcher
+```
+
+Gera `dist/windows-launcher/BioMatCAD-Nexus.exe` (framework-dependente: requer o .NET 9
+Runtime instalado, já um pré-requisito documentado do worker PicoGK) e
+`dist/windows-launcher/BioMatCAD-Nexus.exe.sha256` com o hash SHA-256 do binário.
+
+**Este `.exe` não é versionado no Git** (decisão documentada — ver `.gitignore` e
+`IMPLEMENTATION_STATUS.md`): é um artefato de build, reproduzível a qualquer momento a partir
+do código-fonte versionado, e o usuário deve gerá-lo localmente (ou usar o binário entregue
+fora do histórico Git, conforme instruções de entrega).
