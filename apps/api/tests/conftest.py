@@ -46,17 +46,21 @@ def db_session(engine):
 
 
 def load_golden_recipe(name: str) -> dict:
-    """Carrega uma golden recipe de schemas/biomatcem/golden-recipes/, removendo os campos de
-    metadado (_golden_recipe_id, _description) que não fazem parte do schema geometry-recipe-v1
-    -- ver schemas/biomatcem/golden-recipes/README.md."""
+    """Carrega uma golden recipe de schemas/biomatcem/golden-recipes/.
+
+    Desde o Incremento 2.1.1, os arquivos golden-recipes/*.json sao corpos JSON diretamente
+    validos contra geometry-recipe-v1.schema.json -- nao ha mais campos de metadado (_golden_recipe_id,
+    _description) misturados no corpo nem remocao de campos por esta funcao. Metadados descritivos
+    ficam em schemas/biomatcem/golden-recipes/METADATA.json (arquivo separado, fora do corpo validado).
+    """
     import json
     from pathlib import Path
 
     repo_root = Path(__file__).resolve().parents[3]
     path_json = repo_root / "schemas" / "biomatcem" / "golden-recipes" / f"{name}.json"
     with open(path_json, encoding="utf-8") as f:
-        data = json.load(f)
-    return {k: v for k, v in data.items() if not k.startswith("_")}
+        data: dict = json.load(f)
+    return data
 
 
 @pytest.fixture()

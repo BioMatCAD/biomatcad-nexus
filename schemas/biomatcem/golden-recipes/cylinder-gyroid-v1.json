@@ -1,18 +1,23 @@
 {
-  "_golden_recipe_id": "cylinder-gyroid-v1",
-  "_description": "Cilindro raio=5mm altura=12mm, gyroid final, caso principal de domínio cilíndrico.",
   "schema_version": "1.0.0",
   "domain": {
     "shape": "cylinder",
-    "dimensions_mm": { "kind": "cylinder", "radius_mm": 5, "height_mm": 12 }
+    "dimensions_mm": {
+      "kind": "cylinder",
+      "radius_mm": 5,
+      "height_mm": 12
+    }
   },
   "topology": {
     "kind": "gyroid",
     "cell_size_mm": 1.5,
+    "wall_thickness_mm": 0.45,
     "isovalue": 0.0,
     "target_porosity_pct": 55
   },
-  "resolution": { "voxel_size_mm": 0.15 },
+  "resolution": {
+    "voxel_size_mm": 0.15
+  },
   "mode": "final",
   "seed": 7,
   "compute_limits": {
@@ -20,5 +25,7 @@
     "max_memory_mb": 2048,
     "max_voxel_count": 5000000
   },
-  "output_formats": ["stl"]
+  "output_formats": [
+    "stl"
+  ]
 }

@@ -20,7 +20,13 @@ from tests.conftest import load_golden_recipe
 VALID_RECIPE = {
     "schema_version": "1.0.0",
     "domain": {"shape": "block", "dimensions_mm": {"kind": "block", "x_mm": 10, "y_mm": 10, "z_mm": 10}},
-    "topology": {"kind": "gyroid", "cell_size_mm": 2.0, "isovalue": 0.0, "target_porosity_pct": 60},
+    "topology": {
+        "kind": "gyroid",
+        "cell_size_mm": 2.0,
+        "wall_thickness_mm": 0.4,
+        "isovalue": 0.0,
+        "target_porosity_pct": 60,
+    },
     "resolution": {"voxel_size_mm": 0.2},
     "mode": "preview",
     "seed": 42,
@@ -163,3 +169,41 @@ def test_schema_version_helper_matches_recipe():
 def test_golden_recipes_all_validate(golden_name):
     recipe = load_golden_recipe(golden_name)
     assert validate_recipe(recipe) == [], f"{golden_name} deveria ser uma receita válida"
+
+
+def test_missing_wall_thickness_mm_is_rejected():
+    """Incremento 2.1.1 (item 2): wall_thickness_mm agora é obrigatório -- é o único campo que
+    controla a espessura da parede, não há mais ambiguidade com isovalue."""
+    recipe = copy.deepcopy(VALID_RECIPE)
+    del recipe["topology"]["wall_thickness_mm"]
+    errors = validate_recipe(recipe)
+    assert errors, "topology sem wall_thickness_mm deveria ser rejeitada (campo obrigatório)"
+
+
+def test_isovalue_is_optional_and_recipe_without_it_is_valid():
+    """isovalue agora é opcional (default 0.0, apenas desloca o centro da banda -- não controla
+    espessura)."""
+    recipe = copy.deepcopy(VALID_RECIPE)
+    del recipe["topology"]["isovalue"]
+    assert validate_recipe(recipe) == []
+
+
+def test_wall_thickness_at_least_half_cell_size_is_rejected_as_contradictory():
+    """Incremento 2.1.1 (item 2): wall_thickness_mm >= cell_size_mm/2 é fisicamente contraditório
+    (célula sem poro algum) -- rejeitado pela camada semântica (não pelo JSON Schema estrutural
+    puro, que não compara dois campos irmãos)."""
+    recipe = copy.deepcopy(VALID_RECIPE)
+    recipe["topology"]["cell_size_mm"] = 1.0
+    recipe["topology"]["wall_thickness_mm"] = 0.6  # 0.6 >= 1.0/2 = 0.5
+    errors = validate_recipe(recipe)
+    assert errors
+    assert any(
+        e["validator"] == "semantic:TOPOLOGY_PARAMETERS_INCONSISTENT" for e in errors
+    ), "deveria reportar o validador semântico específico"
+
+
+def test_wall_thickness_just_below_half_cell_size_is_accepted():
+    recipe = copy.deepcopy(VALID_RECIPE)
+    recipe["topology"]["cell_size_mm"] = 1.0
+    recipe["topology"]["wall_thickness_mm"] = 0.4  # 0.4 < 1.0/2 = 0.5
+    assert validate_recipe(recipe) == []

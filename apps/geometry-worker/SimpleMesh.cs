@@ -65,4 +65,46 @@ public sealed class SimpleMesh
         foreach (var f in faces) mesh.AddTriangleByIndex(f[0], f[1], f[2]);
         return mesh;
     }
+    /// <summary>Solda (deduplica) vértices por posição, com tolerância epsilon (Incremento 2.1.1,
+    /// item 2/11): a auditoria encontrou contagens de vértices divergentes entre STL e manifesto
+    /// porque a malha crua recebida do PicoGK (GetTriangle por posição) tinha 3 vértices por
+    /// triângulo sem nenhuma deduplicação -- "vértices únicos" nunca fora calculado de verdade.
+    /// Esta função reconstrói uma malha indexada onde vértices espacialmente idênticos (dentro de
+    /// epsilonMm) compartilham o mesmo índice, o que também é pré-requisito para o teste de
+    /// watertight (que depende de arestas compartilhadas por índice). O arquivo STL em si sempre
+    /// grava 3 vértices "soltos" por triângulo (limitação do próprio formato STL binário) -- a
+    /// contagem de vértices ÚNICOS reportada nas métricas/manifesto vem desta malha soldada, que é
+    /// o mesmo resultado que uma ferramenta externa obteria ao ler o STL e deduplicar por posição
+    /// com a mesma tolerância.</summary>
+    public SimpleMesh Weld(double epsilonMm = 1e-5)
+    {
+        var welded = new SimpleMesh();
+        var indexByKey = new Dictionary<(long, long, long), int>();
+        double inv = 1.0 / epsilonMm;
+
+        (long, long, long) KeyOf(Vec3 v) => (
+            (long)Math.Round(v.X * inv),
+            (long)Math.Round(v.Y * inv),
+            (long)Math.Round(v.Z * inv)
+        );
+
+        int Remap(int originalIndex)
+        {
+            var v = Vertices[originalIndex];
+            var key = KeyOf(v);
+            if (indexByKey.TryGetValue(key, out int existing)) return existing;
+            int newIndex = welded.AddVertex(v);
+            indexByKey[key] = newIndex;
+            return newIndex;
+        }
+
+        foreach (var (a, b, c) in Triangles)
+        {
+            int wa = Remap(a);
+            int wb = Remap(b);
+            int wc = Remap(c);
+            welded.AddTriangleByIndex(wa, wb, wc);
+        }
+        return welded;
+    }
 }
