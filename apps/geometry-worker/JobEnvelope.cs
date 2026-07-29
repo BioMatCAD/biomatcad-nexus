@@ -24,7 +24,9 @@ public sealed class RecipeTopology
 {
     [JsonPropertyName("kind")] public string Kind { get; set; } = "";
     [JsonPropertyName("cell_size_mm")] public double CellSizeMm { get; set; }
-    [JsonPropertyName("wall_thickness_mm")] public double? WallThicknessMm { get; set; }
+    // Incremento 2.1.1 (item 2): obrigatório no schema; único controlador de espessura.
+    [JsonPropertyName("wall_thickness_mm")] public double WallThicknessMm { get; set; }
+    // Opcional no schema (default 0.0 = centro de banda balanceado); NÃO controla espessura.
     [JsonPropertyName("isovalue")] public double Isovalue { get; set; }
     [JsonPropertyName("target_porosity_pct")] public double? TargetPorosityPct { get; set; }
 }
@@ -64,22 +66,47 @@ public sealed class GeometryMetrics
 {
     [JsonPropertyName("bounding_box_mm")] public double[][] BoundingBoxMm { get; set; } = Array.Empty<double[]>();
     [JsonPropertyName("volume_mm3")] public double VolumeMm3 { get; set; }
-    [JsonPropertyName("porosity_pct_estimated")] public double PorosityPctEstimated { get; set; }
+    [JsonPropertyName("porosity_pct_measured")] public double PorosityPctMeasured { get; set; }
     [JsonPropertyName("surface_area_mm2")] public double SurfaceAreaMm2 { get; set; }
-    [JsonPropertyName("vertex_count")] public int VertexCount { get; set; }
+    // Vértices ÚNICOS (após solda por posição, ver SimpleMesh.Weld) -- não 3 por triângulo
+    // (Incremento 2.1.1, item 2/11, corrige divergência da auditoria STL-vs-manifesto).
+    [JsonPropertyName("vertex_count_unique")] public int VertexCountUnique { get; set; }
     [JsonPropertyName("triangle_count")] public int TriangleCount { get; set; }
     [JsonPropertyName("is_watertight")] public bool IsWatertight { get; set; }
+    [JsonPropertyName("stl_reload_validation_passed")] public bool StlReloadValidationPassed { get; set; }
+}
+
+public sealed class EffectiveParameters
+{
+    [JsonPropertyName("wall_thickness_requested_mm")] public double WallThicknessRequestedMm { get; set; }
+    [JsonPropertyName("wall_thickness_effective_mm")] public double WallThicknessEffectiveMm { get; set; }
+    [JsonPropertyName("isovalue_center")] public double IsovalueCenter { get; set; }
+    [JsonPropertyName("target_porosity_pct_requested")] public double? TargetPorosityPctRequested { get; set; }
+    [JsonPropertyName("porosity_pct_calibration_estimate")] public double? PorosityPctCalibrationEstimate { get; set; }
+    [JsonPropertyName("porosity_calibration_iterations")] public int? PorosityCalibrationIterations { get; set; }
+    [JsonPropertyName("porosity_calibration_converged")] public bool? PorosityCalibrationConverged { get; set; }
+    [JsonPropertyName("porosity_residual_error_pct_vs_measured")] public double? PorosityResidualErrorPctVsMeasured { get; set; }
+    [JsonPropertyName("seed")] public long Seed { get; set; }
+    [JsonPropertyName("seed_phase_shift_rad")] public double SeedPhaseShiftRad { get; set; }
+    [JsonPropertyName("mode")] public string Mode { get; set; } = "";
+    [JsonPropertyName("voxel_size_requested_mm")] public double VoxelSizeRequestedMm { get; set; }
+    [JsonPropertyName("voxel_size_effective_mm")] public double VoxelSizeEffectiveMm { get; set; }
+    [JsonPropertyName("estimated_voxel_count")] public long EstimatedVoxelCount { get; set; }
+    [JsonPropertyName("estimated_memory_mb_upper_bound")] public double EstimatedMemoryMbUpperBound { get; set; }
 }
 
 public sealed class WorkerResultOutput
 {
     [JsonPropertyName("stl_path")] public string StlPath { get; set; } = "";
+    [JsonPropertyName("stl_sha256")] public string StlSha256 { get; set; } = "";
     [JsonPropertyName("thumbnail_path")] public string? ThumbnailPath { get; set; }
     [JsonPropertyName("vdb_path")] public string? VdbPath { get; set; }
     [JsonPropertyName("metrics")] public GeometryMetrics Metrics { get; set; } = new();
+    [JsonPropertyName("effective_parameters")] public EffectiveParameters EffectiveParameters { get; set; } = new();
     [JsonPropertyName("worker_version")] public string WorkerVersion { get; set; } = "";
     [JsonPropertyName("dotnet_version")] public string DotnetVersion { get; set; } = "";
     [JsonPropertyName("picogk_version")] public string PicogkVersion { get; set; } = "";
+    [JsonPropertyName("platform")] public string Platform { get; set; } = "";
     [JsonPropertyName("duration_seconds")] public double DurationSeconds { get; set; }
 }
 
@@ -87,4 +114,7 @@ public sealed class StructuredWorkerError
 {
     [JsonPropertyName("error_code")] public string ErrorCode { get; set; } = "";
     [JsonPropertyName("message")] public string Message { get; set; } = "";
+    // Detalhes adicionais sanitizados (nunca stack trace bruto de path do sistema de arquivos
+    // do usuário -- ver Program.cs Sanitize()) (Incremento 2.1.1, item 3).
+    [JsonPropertyName("details")] public Dictionary<string, string>? Details { get; set; }
 }

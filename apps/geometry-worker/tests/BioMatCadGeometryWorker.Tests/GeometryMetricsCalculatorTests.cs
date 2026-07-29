@@ -65,4 +65,22 @@ public class GeometryMetricsCalculatorTests
         mesh.AddTriangle(new Vec3(0, 0, 0), new Vec3(1, 0, 0), new Vec3(0, 1, 0));
         Assert.False(GeometryMetricsCalculator.IsWatertight(mesh));
     }
+    [Fact]
+    public void ComputeAll_WeldsBeforeReportingUniqueVertexCount()
+    {
+        // Reproduz o cenário exato da auditoria: malha crua vinda de GetTriangle (sem solda).
+        var raw = new SimpleMesh();
+        var a = new Vec3(0, 0, 0);
+        var b = new Vec3(1, 0, 0);
+        var c = new Vec3(0, 1, 0);
+        var d = new Vec3(1, 1, 0);
+        raw.AddTriangle(a, b, c);
+        raw.AddTriangle(b, d, c);
+
+        var domain = new RecipeDomain { Shape = "block", DimensionsMm = new RecipeDimensions { Kind = "block", XMm = 1, YMm = 1, ZMm = 1 } };
+        var metrics = GeometryMetricsCalculator.ComputeAll(raw, domain);
+
+        Assert.Equal(4, metrics.VertexCountUnique); // a,b,c,d únicos -- não 6 (2 triângulos * 3)
+        Assert.Equal(2, metrics.TriangleCount);
+    }
 }

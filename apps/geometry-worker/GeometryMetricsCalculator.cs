@@ -82,8 +82,14 @@ public static class GeometryMetricsCalculator
         return Math.Clamp(porosity, 0.0, 100.0);
     }
 
-    public static GeometryMetrics ComputeAll(SimpleMesh mesh, RecipeDomain domain)
+    /// <summary>Calcula todas as métricas sobre a malha REALMENTE gerada. Solda os vértices
+    /// primeiro (ver SimpleMesh.Weld) -- isto é o que corrige a divergência da auditoria entre
+    /// "vértices" do STL e do manifesto: ambos agora vêm da mesma malha soldada por posição
+    /// (Incremento 2.1.1, itens 2 e 11). A malha soldada também é a única sobre a qual o teste
+    /// de watertight faz sentido (arestas compartilhadas por índice).</summary>
+    public static GeometryMetrics ComputeAll(SimpleMesh rawMesh, RecipeDomain domain, double weldEpsilonMm = 1e-5)
     {
+        var mesh = rawMesh.Weld(weldEpsilonMm);
         var (min, max) = ComputeBoundingBox(mesh);
         double volume = ComputeVolumeMm3(mesh);
         double domainVolume = ComputeDomainVolumeMm3(domain);
@@ -92,10 +98,11 @@ public static class GeometryMetricsCalculator
             BoundingBoxMm = new[] { new[] { min.X, min.Y, min.Z }, new[] { max.X, max.Y, max.Z } },
             VolumeMm3 = volume,
             SurfaceAreaMm2 = ComputeSurfaceAreaMm2(mesh),
-            VertexCount = mesh.Vertices.Count,
+            VertexCountUnique = mesh.Vertices.Count,
             TriangleCount = mesh.Triangles.Count,
             IsWatertight = IsWatertight(mesh),
-            PorosityPctEstimated = EstimatePorosityPct(volume, domainVolume),
+            PorosityPctMeasured = EstimatePorosityPct(volume, domainVolume),
+            StlReloadValidationPassed = false, // preenchido por StlExporter.ValidateWrittenFile após a gravação
         };
     }
 }
