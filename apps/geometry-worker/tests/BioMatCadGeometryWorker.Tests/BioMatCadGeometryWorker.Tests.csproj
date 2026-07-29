@@ -16,6 +16,7 @@
     <Compile Include="../../GeometryMetricsCalculator.cs" Link="GeometryMetricsCalculator.cs" />
     <Compile Include="../../StlExporter.cs" Link="StlExporter.cs" />
     <Compile Include="../../GyroidMath.cs" Link="GyroidMath.cs" />
+    <Compile Include="../../OutputCleanup.cs" Link="OutputCleanup.cs" />
   </ItemGroup>
 
   <ItemGroup>

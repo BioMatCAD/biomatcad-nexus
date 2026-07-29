@@ -164,8 +164,33 @@ dotnet bin/Debug/net9.0/BioMatCadGeometryWorker.dll <caminho-para-job.json>
 
 cd tests/BioMatCadGeometryWorker.Tests
 dotnet test
-# esperado: 44/44 passando (não depende do runtime nativo)
+# esperado: 48/48 passando (não depende do runtime nativo)
 ```
+
+## 9.1 Bug real encontrado e corrigido nesta sessão (reexecução real do build+worker)
+
+Ao reexecutar de verdade o build e uma tentativa de execução do worker contra a golden recipe
+`block-gyroid-v1.json` nesta sessão (não apenas reler evidência anterior), a limpeza de
+artefatos parciais (`CleanupPartialOutputs`, chamada em qualquer falha, incluindo a
+`PICOGK_RUNTIME_UNAVAILABLE` esperada neste sandbox) apagava **todos** os arquivos de
+`output_dir` -- incluindo o próprio `job.json` de entrada, porque `worker_client.py` grava
+`output_dir / "job.json"` (o envelope de entrada vive dentro do mesmo diretório que a limpeza
+varre). Reproduzido de forma determinística: rodar o worker contra um `job.json` dentro do seu
+próprio `output_dir` e confirmar que ele desaparece após a falha.
+
+Efeito prático: depois de uma falha, o diretório de evidência da execução perdia a receita de
+entrada que efetivamente rodou -- prejudica auditoria pós-morte de falhas em produção (não é um
+problema de segurança, mas é um problema real de rastreabilidade, relevante para os itens 3 e 11
+do checklist de aceite).
+
+Corrigido: lógica extraída para `OutputCleanup.cs` (testável isoladamente, sem depender do
+PicoGK), preservando explicitamente `job.json` da limpeza. 4 novos testes xUnit
+(`OutputCleanupTests.cs`) cobrem: preserva `job.json` mas remove outros arquivos; diretório só
+com `job.json` não remove nada; diretório inexistente não lança exceção; diretório vazio não
+remove nada. Total agora: 48/48 testes xUnit passando. Reexecutado o cenário real depois da
+correção -- `job.json` agora sobrevive à falha esperada (`PICOGK_RUNTIME_UNAVAILABLE`,
+reproduzida de forma idêntica à evidência anterior, confirmando que o bloqueio em si não mudou,
+apenas o efeito colateral indevido da limpeza foi corrigido).
 
 ## 10. Caminho de fechamento (Incremento 2.1.1)
 

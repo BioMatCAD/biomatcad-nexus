@@ -67,7 +67,7 @@ o sistema recusava combinações sem sentido físico.
   usada pela calibração por bisseção, é documentada como válida apenas dentro da faixa de
   parâmetros aceita pelo schema — não foi provada como identidade matemática geral.
 - Esta correção foi validada apenas por testes unitários matemáticos (`GyroidMathTests.cs`,
-  parte dos 44 testes xUnit do Incremento 2.1.1), independentes do PicoGK. A conversão
+  parte dos 48 testes xUnit do Incremento 2.1.1), independentes do PicoGK. A conversão
   espessura-mm→banda-isovalor real, aplicada a uma malha voxelizada de verdade, ainda depende da
   execução real do worker no Windows do usuário (ver ADR-0007, atualização Incremento 2.1.1, e
   `docs/examples/WINDOWS_EXECUTION_KIT.md`) para ser confirmada como correta na prática, não

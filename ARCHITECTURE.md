@@ -170,7 +170,7 @@ receita BioMatCEM já validada e canonicalizada. Separa deliberadamente o códig
 runtime nativo do PicoGK (`GyroidScaffoldBuilder.cs`, `Program.cs`) do código independente e
 puramente matemático (`GyroidMath.cs`, novo no Incremento 2.1.1; `JobEnvelope.cs`,
 `SimpleMesh.cs`, `GeometryMetricsCalculator.cs`, `StlExporter.cs`), o que permite testar
-genuinamente essa segunda parte (44 testes xUnit) mesmo com a primeira bloqueada.
+genuinamente essa segunda parte (48 testes xUnit) mesmo com a primeira bloqueada.
 
 - `GyroidMath.cs` — TOTALMENTE independente do PicoGK (nenhuma referência a
   `PicoGK.Library`/`Voxels`/`Mesh`): avaliação do campo gyroid de Schoen (1970), SDF exata de
@@ -195,7 +195,7 @@ genuinamente essa segunda parte (44 testes xUnit) mesmo com a primeira bloqueada
 **Execução real continua bloqueada neste ambiente** — o pacote NuGet 2.2.0 não traz runtime
 nativo para linux-x64 (ver `apps/geometry-worker/WORKER_STATUS.md` e ADR-0007 para a evidência
 completa: inspeção do pacote + `DllNotFoundException` real reproduzida). Isso significa que
-todas as correções acima estão provadas matematicamente (44 testes xUnit) mas **não** foram
+todas as correções acima estão provadas matematicamente (48 testes xUnit) mas **não** foram
 provadas contra uma execução real do PicoGK nesta sessão — essa prova depende da execução no
 Windows do usuário (`docs/examples/WINDOWS_EXECUTION_KIT.md`).
 

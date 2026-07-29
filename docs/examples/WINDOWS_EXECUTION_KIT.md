@@ -76,7 +76,7 @@ tem, em tese, o que falta no Linux**. A prova real só vem da execução no pass
 
 Estes testes **não dependem do runtime nativo do PicoGK** (são a parte pura de matemática/STL/
 métricas extraída para `GyroidMath.cs`, `SimpleMesh.cs`, `StlExporter.cs` — ver
-`apps/geometry-worker/tests/`). Devem passar igual ao que já passou no Linux (44 testes):
+`apps/geometry-worker/tests/`). Devem passar igual ao que já passou no Linux (48 testes):
 
 ```powershell
 cd C:\biomatcad-nexus\apps\geometry-worker\tests\BioMatCadGeometryWorker.Tests

@@ -5,7 +5,9 @@
 //
 // Incremento 2.1.1 (itens 3 e 4) adiciona validações PRÉ-execução (voxel count, memória
 // estimada, formatos de saída suportados) que rodam ANTES de qualquer chamada ao PicoGK, e
-// limpeza de arquivos parciais em caso de falha.
+// limpeza de arquivos parciais em caso de falha (ver OutputCleanup.cs -- correção adicional
+// nesta sessão, depois que uma tentativa real de execução revelou que a limpeza original
+// apagava também o job.json de entrada, gravado pelo chamador dentro do mesmo output_dir).
 using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -29,20 +31,6 @@ static string Sanitize(string message)
     return message;
 }
 
-static void CleanupPartialOutputs(string outputDir)
-{
-    try
-    {
-        if (Directory.Exists(outputDir))
-        {
-            foreach (var file in Directory.GetFiles(outputDir))
-            {
-                try { File.Delete(file); } catch { /* melhor esforço -- não mascarar o erro original */ }
-            }
-        }
-    }
-    catch { /* melhor esforço */ }
-}
 
 if (args.Length < 1)
 {
@@ -143,7 +131,7 @@ try
     metrics.StlReloadValidationPassed = stlValidation.Passed;
     if (!stlValidation.Passed)
     {
-        CleanupPartialOutputs(job.OutputDir);
+        OutputCleanup.CleanupPartialOutputs(job.OutputDir);
         Console.Error.WriteLine(JsonSerializer.Serialize(MakeError(
             "STL_VALIDATION_FAILED_AFTER_WRITE",
             stlValidation.FailureReason ?? "Validação do STL após gravação falhou por motivo desconhecido.")));
@@ -208,7 +196,7 @@ catch (Exception ex)
         || ex.Message.Contains("Failed to load PicoGK library");
     string errorCode = isPicoGkRuntimeUnavailable ? "PICOGK_RUNTIME_UNAVAILABLE" : "WORKER_EXECUTION_FAILED";
 
-    if (outputDirForCleanup is not null) CleanupPartialOutputs(outputDirForCleanup);
+    if (outputDirForCleanup is not null) OutputCleanup.CleanupPartialOutputs(outputDirForCleanup);
 
     Console.Error.WriteLine(JsonSerializer.Serialize(MakeError(errorCode, ex.ToString())));
     return 1;

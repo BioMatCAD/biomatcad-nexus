@@ -285,8 +285,17 @@ Build succeeded. 0 Warning(s). 0 Error(s).
 
 $ cd tests/BioMatCadGeometryWorker.Tests
 $ dotnet test
-Passed!  - Failed: 0, Passed: 44, Skipped: 0, Total: 44
+Passed!  - Failed: 0, Passed: 48, Skipped: 0, Total: 48
 ```
+
+Atualização desta sessão (revisão pós-entrega v2.2.1, antes de qualquer execução real no
+Windows): uma reexecução real de `dotnet build` + `dotnet run` contra a golden recipe
+`block-gyroid-v1.json` neste sandbox revelou um bug real -- `CleanupPartialOutputs` apagava
+também o `job.json` de entrada (gravado por `worker_client.py` dentro do mesmo `output_dir`).
+Corrigido (`OutputCleanup.cs`, preserva `job.json` explicitamente), com 4 novos testes de
+regressão (`OutputCleanupTests.cs`). Reexecutado o cenário real após a correção: mesma falha
+esperada (`PICOGK_RUNTIME_UNAVAILABLE`, runtime nativo ausente em linux-x64), mas `job.json`
+agora sobrevive. Ver `apps/geometry-worker/WORKER_STATUS.md`, seção 9.1, para o relato completo.
 
 Novo nesta sessão: `GyroidMathTests.cs` (27 testes) cobrindo `GyroidMath.cs` — avaliação do campo
 gyroid, SDF de bloco/cilindro, interseção booleana, conversão espessura↔meia-largura de banda,
@@ -295,7 +304,7 @@ convergentes e casos de borda), piso de voxel size em preview, estimativas de vo
 `SimpleMeshWeldTests.cs` (5 testes) cobrindo a solda de vértices (`Weld()`) — cubo com vértices
 duplicados reduzido ao número correto de vértices únicos, preservação da topologia dos
 triângulos, casos de malha já soldada (idempotência). Ampliações em `StlExporterTests.cs` e
-`GeometryMetricsCalculatorTests.cs` para cobrir a malha pós-solda. Todos os 44 testes são
+`GeometryMetricsCalculatorTests.cs` para cobrir a malha pós-solda. Todos os 48 testes são
 independentes do runtime nativo do PicoGK — nenhum foi (nem poderia ser, neste sandbox) validado
 contra uma execução real de `Voxels`/`Mesh`.
 
@@ -355,7 +364,7 @@ Ver `docs/security/DEPENDENCY_AUDIT_2.1.1.md` para o detalhamento completo. Resu
 
 ## O que esta evidência explicitamente NÃO cobre
 
-- **Execução real do worker PicoGK** — continua bloqueada neste sandbox Linux (ADR-0007); os 44
+- **Execução real do worker PicoGK** — continua bloqueada neste sandbox Linux (ADR-0007); os 48
   testes xUnit acima são inteiramente sobre código matemático/contratual independente do PicoGK.
 - **E2E Playwright** — escrito (`apps/web/e2e/`), nunca executado neste sandbox (faltam
   bibliotecas nativas do Chromium, `sudo` desabilitado — ver `apps/web/e2e/README.md`).

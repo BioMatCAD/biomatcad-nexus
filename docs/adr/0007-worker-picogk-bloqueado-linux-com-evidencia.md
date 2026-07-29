@@ -92,7 +92,7 @@ foi fabricado. O que mudou neste incremento corretivo:
    espessura/isovalor com papéis ambíguos, seed sem efeito determinístico real, preview e final
    indistinguíveis na prática. Essas correções foram implementadas em `GyroidMath.cs` (núcleo
    matemático, novo, totalmente independente do PicoGK) e em `GyroidScaffoldBuilder.cs`
-   (`GyroidDomainImplicit`, dependente do PicoGK), e testadas com 44 testes xUnit — todos contra
+   (`GyroidDomainImplicit`, dependente do PicoGK), e testadas com 48 testes xUnit — todos contra
    o código independente, nenhum contra o PicoGK real, pelo mesmo motivo que originou esta ADR.
 2. **Caminho de desbloqueio escolhido**: em vez de investigar um build nativo do PicoGK para
    linux-x64 (caminho mais lento, levantado como opção não tentada na decisão original), o

@@ -16,7 +16,7 @@ produzia contagem de vértices divergente entre STL e manifesto), autorização 
 insuficiente, condição de corrida na fila de jobs e no cancelamento, manifesto com risco de
 circularidade de checksum, e validação de receita duplicada e divergente entre frontend e
 backend. Todas essas correções estão **implementadas e testadas** nesta sessão — backend (83
-testes pytest, 2 skips esperados sem `dotnet`/Windows), worker C# (44 testes xUnit, todos sobre
+testes pytest, 2 skips esperados sem `dotnet`/Windows), worker C# (48 testes xUnit, todos sobre
 código independente do PicoGK), frontend (27 testes Vitest, `tsc`/`eslint`/build limpos).
 
 **O que continua igual em relação ao Incremento 2.1**: a execução real do worker contra o PicoGK
@@ -53,7 +53,7 @@ O que existe de fato agora:
   SDF (cilindro deixa de ser recortado pela bounding box), espessura/isovalor/porosidade/seed
   efetivamente aplicados, diferença real preview-vs-final, solda de vértices (`SimpleMesh.Weld()`)
   corrigindo a divergência de contagem de vértices da auditoria, validação pós-gravação do STL,
-  limites computacionais pré-execução, timeout com kill de árvore de processos — 44 testes xUnit
+  limites computacionais pré-execução, timeout com kill de árvore de processos — 48 testes xUnit
   passando sobre o código matemático/contratual independente do PicoGK (`GyroidMath.cs`,
   `SimpleMesh`, `StlExporter`), nenhum contra PicoGK real.
 - `apps/web`: React/TypeScript/Vite real — landing, login, dashboard, catálogo de materiais,
@@ -195,7 +195,7 @@ dotnet bin/Debug/net9.0/BioMatCadGeometryWorker.dll <job.json>
 # incremento corretivo: o bloqueio de runtime nativo em linux-x64 continua o mesmo.
 
 cd tests/BioMatCadGeometryWorker.Tests
-dotnet test                                          # 44/44 esperado, independe do PicoGK
+dotnet test                                          # 48/48 esperado, independe do PicoGK
 ```
 
 **Execução real (Windows x64)**: para exercitar de verdade o PicoGK nativo — geração real do
