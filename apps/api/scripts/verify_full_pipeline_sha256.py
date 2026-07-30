@@ -270,6 +270,10 @@ def main() -> int:
         artifacts = artifacts_resp.json()
         stl_artifact = next((a for a in artifacts if a["kind"] == "stl"), None)
         step("artefato_stl_presente_via_api", stl_artifact is not None, f"kinds retornados: {[a['kind'] for a in artifacts]}")
+        # step() acima já é fatal (levanta GateFailure) se stl_artifact is None; o assert abaixo
+        # apenas torna essa garantia explícita para análise estática (mypy) e como rede de
+        # segurança redundante caso step() seja chamado no futuro com fatal=False.
+        assert stl_artifact is not None, "stl_artifact não pode ser None após o step() fatal acima"
 
         manifest_resp = client.get(f"/api/v1/jobs/{job_id}/manifest", headers=headers)
         step("manifest_endpoint_real", manifest_resp.status_code == 200, f"GET .../manifest -> {manifest_resp.status_code}")
@@ -296,6 +300,8 @@ def main() -> int:
                 .first()
             )
             step("artefato_stl_no_banco_direto", stl_artifact_row is not None, "registro Artifact(kind=stl) encontrado via DB direto")
+            # Mesma justificativa do assert acima: step() já é fatal se stl_artifact_row is None.
+            assert stl_artifact_row is not None, "stl_artifact_row não pode ser None após o step() fatal acima"
             physical_path = Path(settings.artifact_storage_dir) / stl_artifact_row.storage_key
             step("stl_fisico_existe_em_disco", physical_path.exists(), str(physical_path))
             physical_sha256 = _sha256_bytes(physical_path.read_bytes())
