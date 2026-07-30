@@ -71,7 +71,11 @@ $venvPython = Join-Path $apiDir ".venv\Scripts\python.exe"
 $runsDir = "C:\biomatcad-runs\research"
 $lockFile = Join-Path $runsDir "session.lock"
 $sessionFile = Join-Path $runsDir "session.json"
-$dispatcherStatusFile = Join-Path $runsDir "dispatcher-status.json"
+# Caminho do status file NAO customizado de proposito: usa o mesmo default que
+# geometry_dispatcher.py calcula sozinho (<artifact_storage_dir>/_dispatcher/status.json,
+# relativo ao working directory da API/dispatcher, ambos $apiDir) -- assim o endpoint de
+# observabilidade da API encontra o arquivo sem precisar de configuracao adicional.
+$dispatcherStatusFile = Join-Path $apiDir "data\artifacts\_dispatcher\status.json"
 $dispatcherStopFile = Join-Path $runsDir "dispatcher-stop.request"
 $apiLogFile = Join-Path $runsDir "api.log"
 $apiErrLogFile = Join-Path $runsDir "api.err.log"
@@ -189,7 +193,6 @@ Remove-Item $dispatcherStopFile -ErrorAction SilentlyContinue
 $dispatcherProcess = Start-Process -FilePath $venvPython `
     -ArgumentList @(
         "scripts\geometry_dispatcher.py",
-        "--status-file", $dispatcherStatusFile,
         "--stop-file", $dispatcherStopFile
     ) `
     -WorkingDirectory $apiDir `
