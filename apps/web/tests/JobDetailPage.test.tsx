@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { useEffect, type ReactNode } from "react";
@@ -99,6 +100,104 @@ function mockFetch() {
   });
 }
 
+const FAILED_JOB_ID = "job-failed-1";
+const RETRIED_JOB_ID = "job-retried-1";
+
+function mockFetchFailedJob() {
+  return vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+    if (url.endsWith("/api/v1/auth/login")) {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({ access_token: "fake-token", token_type: "bearer", expires_in: 3600 }),
+      });
+    }
+    if (url.endsWith("/api/v1/auth/me")) {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          id: "u1",
+          email: "e2e-playwright@biomatcad.example",
+          full_name: "Usuário E2E Playwright",
+          role: "researcher",
+          organization_id: "org1",
+        }),
+      });
+    }
+    if (url.endsWith(`/api/v1/jobs/${FAILED_JOB_ID}`)) {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          id: FAILED_JOB_ID,
+          design_run_id: "run-failed-1",
+          attempt_number: 1,
+          status: "failed",
+          progress_pct: 40,
+          created_at: "2026-01-01T00:00:00Z",
+          started_at: "2026-01-01T00:00:00Z",
+          finished_at: "2026-01-01T00:00:03Z",
+          error_code: "WORKER_TIMEOUT",
+          error_message: "Excedeu o tempo máximo de execução configurado.",
+          worker_version: null,
+          dotnet_version: null,
+          picogk_version: null,
+          duration_seconds: 3,
+          metrics: null,
+        }),
+      });
+    }
+    if (url.endsWith(`/api/v1/design-runs/run-failed-1/retry`) && init?.method === "POST") {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          id: RETRIED_JOB_ID,
+          design_run_id: "run-failed-1",
+          attempt_number: 2,
+          status: "queued",
+          progress_pct: 0,
+          created_at: "2026-01-01T00:05:00Z",
+          started_at: null,
+          finished_at: null,
+          error_code: null,
+          error_message: null,
+          worker_version: null,
+          dotnet_version: null,
+          picogk_version: null,
+          duration_seconds: null,
+          metrics: null,
+        }),
+      });
+    }
+    if (url.endsWith(`/api/v1/jobs/${RETRIED_JOB_ID}`)) {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          id: RETRIED_JOB_ID,
+          design_run_id: "run-failed-1",
+          attempt_number: 2,
+          status: "queued",
+          progress_pct: 0,
+          created_at: "2026-01-01T00:05:00Z",
+          started_at: null,
+          finished_at: null,
+          error_code: null,
+          error_message: null,
+          worker_version: null,
+          dotnet_version: null,
+          picogk_version: null,
+          duration_seconds: null,
+          metrics: null,
+        }),
+      });
+    }
+    return Promise.reject(new Error(`fetch não mockado neste teste (retry) para: ${url}`));
+  });
+}
+
 describe("JobDetailPage (smoke test) -- status/métricas/download realmente renderizados para um job succeeded", () => {
   it("mostra o status localizado ('Concluído'), a tabela de métricas e o link de download do STL", async () => {
     vi.stubGlobal("fetch", mockFetch());
@@ -122,6 +221,12 @@ describe("JobDetailPage (smoke test) -- status/métricas/download realmente rend
     expect(status).toHaveTextContent(/Conclu[íi]do/i);
     expect(status.textContent).not.toContain("succeeded");
 
+    // Nota de proveniência obrigatória: um resultado geométrico calculado nunca pode ser
+    // confundido com validação experimental (Prompt Mestre §3.1 -- honestidade técnica).
+    const provenance = screen.getByTestId("metrics-provenance-note");
+    expect(provenance).toHaveTextContent(/calculado/i);
+    expect(provenance).toHaveTextContent(/não constitui validação experimental/i);
+
     const metrics = screen.getByTestId("job-metrics");
     expect(metrics).toHaveTextContent("400"); // volume_mm3
     expect(metrics).toHaveTextContent("60"); // porosity_pct_measured
@@ -134,6 +239,49 @@ describe("JobDetailPage (smoke test) -- status/métricas/download realmente rend
     expect(stlLinks).toHaveLength(1);
     expect(stlLinks[0]).toHaveAttribute("download");
     expect(stlLinks[0].textContent).toMatch(/^stl /);
+
+    vi.unstubAllGlobals();
+  });
+});
+
+// Regressão direta pedida no escopo (Seção 2/7): "retry controlado" precisa existir de verdade
+// na GUI, não só no backend -- um job failed deve oferecer "Tentar novamente", que chama
+// POST /design-runs/{id}/retry (nunca reenvia silenciosamente) e navega para o job resultante.
+describe("JobDetailPage -- retry controlado de um job failed", () => {
+  it("mostra 'Tentar novamente' para um job failed e chama o endpoint real de retry ao clicar", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", mockFetchFailedJob());
+
+    render(
+      <MemoryRouter initialEntries={[`/app/jobs/${FAILED_JOB_ID}`]}>
+        <ThemeProvider>
+          <AuthProvider>
+            <AutoLogin>
+              <Routes>
+                <Route path="/app/jobs/:jobId" element={<JobDetailPage />} />
+              </Routes>
+            </AutoLogin>
+          </AuthProvider>
+        </ThemeProvider>
+      </MemoryRouter>
+    );
+
+    const status = await screen.findByTestId("job-status");
+    expect(status).toHaveTextContent(/Falhou/i);
+
+    // Um job failed não tem métricas -- a nota de proveniência só aparece quando há métricas
+    // reais para explicar (nunca deve aparecer "calculado" sobre um resultado inexistente).
+    expect(screen.queryByTestId("metrics-provenance-note")).not.toBeInTheDocument();
+
+    const retryButton = screen.getByTestId("job-retry-button");
+    expect(retryButton).toHaveTextContent(/Tentar novamente/i);
+
+    await user.click(retryButton);
+
+    // Após o retry bem-sucedido, a página navega para o novo job (attempt 2) e mostra seu
+    // status real ("Na fila"), nunca reaproveitando silenciosamente o status do job antigo.
+    const newStatus = await screen.findByTestId("job-status");
+    expect(newStatus).toHaveTextContent(/Na fila/i);
 
     vi.unstubAllGlobals();
   });

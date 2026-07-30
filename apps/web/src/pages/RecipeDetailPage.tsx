@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { apiClient } from "../api/client";
 import { demoApiClient } from "../api/demoClient";
-import type { RecipeResponse } from "../api/types";
+import type { MaterialSummary, RecipeResponse } from "../api/types";
 import { AuthenticatedLayout } from "../components/layout/AuthenticatedLayout";
 import { ErrorState } from "../components/feedback/ErrorState";
 import { Loading } from "../components/feedback/Loading";
@@ -16,6 +16,8 @@ export function RecipeDetailPage() {
   const navigate = useNavigate();
   const { token } = useAuth();
   const [recipe, setRecipe] = useState<RecipeResponse | null>(null);
+  const [materials, setMaterials] = useState<MaterialSummary[]>([]);
+  const [materialId, setMaterialId] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -27,6 +29,16 @@ export function RecipeDetailPage() {
       .catch((err) => setError(err instanceof Error ? err.message : "Falha ao carregar receita."));
   }, [token, recipeId]);
 
+  useEffect(() => {
+    // Seleção de material é opcional -- a ausência do catálogo (ou falha ao carregá-lo) nunca
+    // deve impedir o envio do job, apenas deixa a associação material x job de fora.
+    if (!token) return;
+    client
+      .listMaterials(token)
+      .then(setMaterials)
+      .catch(() => setMaterials([]));
+  }, [token]);
+
   const handleSubmitJob = async () => {
     if (!token || !recipe) return;
     setSubmitting(true);
@@ -34,6 +46,7 @@ export function RecipeDetailPage() {
       const designRun = await client.createDesignRun(token, {
         project_id: recipe.project_id,
         recipe_id: recipe.id,
+        material_id: materialId || null,
         idempotency_key: `ui-${recipe.id}-${Date.now()}`,
       });
       navigate(`/app/jobs/${designRun.latest_job.id}`);
@@ -64,7 +77,24 @@ export function RecipeDetailPage() {
         </tbody>
       </table>
 
-      <button type="button" onClick={handleSubmitJob} disabled={submitting} style={{ marginTop: "var(--space-4)" }}>
+      <label htmlFor="job-material-select" style={{ display: "block", marginTop: "var(--space-4)" }}>
+        Material associado ao job (opcional)
+        <select
+          id="job-material-select"
+          value={materialId}
+          onChange={(e) => setMaterialId(e.target.value)}
+          style={{ display: "block", marginTop: "var(--space-1)" }}
+        >
+          <option value="">Nenhum material específico</option>
+          {materials.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.name} ({m.source_type === "synthetic" ? "sintético" : "literatura"})
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <button type="button" onClick={handleSubmitJob} disabled={submitting} style={{ marginTop: "var(--space-3)" }}>
         {submitting ? "Enviando…" : "Enviar job geométrico"}
       </button>
     </AuthenticatedLayout>

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { apiClient } from "../api/client";
 import { demoApiClient } from "../api/demoClient";
 import type { ArtifactResponse, GeometryJobResponse, ManifestResponse } from "../api/types";
@@ -28,12 +28,14 @@ const TERMINAL_STATUSES = new Set(["succeeded", "failed", "cancelled"]);
 // artefato STL especificamente, entre os artefatos listados).
 export function JobDetailPage() {
   const { jobId } = useParams<{ jobId: string }>();
+  const navigate = useNavigate();
   const { token } = useAuth();
   const [job, setJob] = useState<GeometryJobResponse | null>(null);
   const [artifacts, setArtifacts] = useState<ArtifactResponse[]>([]);
   const [manifest, setManifest] = useState<ManifestResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  const [retrying, setRetrying] = useState(false);
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -92,6 +94,22 @@ export function JobDetailPage() {
     }
   };
 
+  const handleRetry = async () => {
+    if (!token || !job) return;
+    setRetrying(true);
+    try {
+      // Retry controlado (Seção 2 do escopo): não reenvia silenciosamente -- cria uma nova
+      // tentativa explícita via /design-runs/{id}/retry (mesma receita, novo attempt_number,
+      // ver services/geometry_job_service.retry_job) e navega para o novo job resultante.
+      const newJob = await client.retryDesignRun(token, job.design_run_id);
+      navigate(`/app/jobs/${newJob.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Falha ao tentar novamente.");
+    } finally {
+      setRetrying(false);
+    }
+  };
+
   if (error) return <AuthenticatedLayout><ErrorState message={error} /></AuthenticatedLayout>;
   if (!job) return <AuthenticatedLayout><Loading label="Carregando job…" /></AuthenticatedLayout>;
 
@@ -115,9 +133,19 @@ export function JobDetailPage() {
         </button>
       )}
 
+      {(job.status === "failed" || job.status === "cancelled") && (
+        <button type="button" data-testid="job-retry-button" onClick={handleRetry} disabled={retrying}>
+          {retrying ? "Reenviando…" : "Tentar novamente"}
+        </button>
+      )}
+
       {job.status === "succeeded" && job.metrics && (
         <>
           <h2>Métricas geométricas</h2>
+          <p style={{ color: "var(--color-text-secondary)", fontSize: "0.9em" }} data-testid="metrics-provenance-note">
+            Resultado <strong>calculado</strong> pelo worker geométrico (PicoGK) a partir da receita enviada -- não
+            constitui validação experimental. Nenhum ensaio físico foi realizado sobre esta geometria.
+          </p>
           <table data-testid="job-metrics" style={{ borderCollapse: "collapse" }}>
             <tbody>
               <tr><td style={styles.td}><strong>Volume (mm³)</strong></td><td style={styles.td}>{job.metrics.volume_mm3}</td></tr>

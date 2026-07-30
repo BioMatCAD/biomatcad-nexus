@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { apiClient } from "../api/client";
 import { demoApiClient } from "../api/demoClient";
 import type { DesignRunResponse, ProjectResponse, RecipeResponse } from "../api/types";
@@ -21,11 +21,13 @@ const STATUS_LABEL: Record<string, string> = {
 
 export function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
+  const navigate = useNavigate();
   const { token } = useAuth();
   const [project, setProject] = useState<ProjectResponse | null>(null);
   const [recipes, setRecipes] = useState<RecipeResponse[]>([]);
   const [designRuns, setDesignRuns] = useState<DesignRunResponse[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [retryingRunId, setRetryingRunId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!token || !projectId) return;
@@ -48,6 +50,19 @@ export function ProjectDetailPage() {
       cancelled = true;
     };
   }, [token, projectId]);
+
+  const handleRetry = async (designRunId: string) => {
+    if (!token) return;
+    setRetryingRunId(designRunId);
+    try {
+      const newJob = await client.retryDesignRun(token, designRunId);
+      navigate(`/app/jobs/${newJob.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Falha ao tentar novamente.");
+    } finally {
+      setRetryingRunId(null);
+    }
+  };
 
   if (error) return <AuthenticatedLayout><ErrorState message={error} /></AuthenticatedLayout>;
   if (!project) return <AuthenticatedLayout><Loading label="Carregando projeto…" /></AuthenticatedLayout>;
@@ -98,6 +113,19 @@ export function ProjectDetailPage() {
                 <td style={styles.td}>{run.latest_job.attempt_number}</td>
                 <td style={styles.td}>
                   <Link to={`/app/jobs/${run.latest_job.id}`}>Ver job</Link>
+                  {(run.latest_job.status === "failed" || run.latest_job.status === "cancelled") && (
+                    <>
+                      {" · "}
+                      <button
+                        type="button"
+                        onClick={() => handleRetry(run.id)}
+                        disabled={retryingRunId === run.id}
+                        style={{ fontSize: "0.85em" }}
+                      >
+                        {retryingRunId === run.id ? "Reenviando…" : "Repetir"}
+                      </button>
+                    </>
+                  )}
                 </td>
               </tr>
             ))}

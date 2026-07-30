@@ -11,6 +11,14 @@ import { useAuth } from "../context/AuthContext";
 const isDemoMode = Boolean(__BIOMATCAD_DEMO_MODE__);
 const client = isDemoMode ? demoApiClient : apiClient;
 
+// Rótulos de proveniência -- nunca deixar o usuário sem saber se um dado é sintético,
+// documentado ou ainda não revisado (Prompt Mestre §3.1: honestidade técnica).
+const REVIEW_STATUS_LABEL: Record<string, string> = {
+  draft: "não revisado (rascunho)",
+  reviewed: "revisado",
+  deprecated: "obsoleto",
+};
+
 export function MaterialDetailPage() {
   const { materialId } = useParams<{ materialId: string }>();
   const { token } = useAuth();
@@ -40,8 +48,14 @@ export function MaterialDetailPage() {
     <AuthenticatedLayout>
       <h1>{material.name}</h1>
       <p style={{ color: "var(--color-text-secondary)" }}>
-        {material.category} — origem: {material.source_type === "synthetic" ? "sintética" : "literatura"}
+        {material.category} — origem: {material.source_type === "synthetic" ? "sintética" : "literatura"} —{" "}
+        <span data-testid="material-review-status">{REVIEW_STATUS_LABEL[material.review_status] ?? material.review_status}</span>
       </p>
+      {material.source_type === "synthetic" && (
+        <p style={{ color: "var(--color-warning, #9a6700)", fontSize: "0.9em" }}>
+          Dado sintético: gerado para fins de desenvolvimento/demonstração, não extraído de uma fonte documentada.
+        </p>
+      )}
       {material.description && <p>{material.description}</p>}
 
       <h2>Propriedades</h2>
