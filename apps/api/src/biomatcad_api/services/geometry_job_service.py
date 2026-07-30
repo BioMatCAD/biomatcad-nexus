@@ -31,6 +31,7 @@ from biomatcad_api.models.material import MaterialRecord
 from biomatcad_api.models.project import BioMatProject
 from biomatcad_api.services.manifest_service import build_and_store_manifest
 from biomatcad_api.services.storage import StorageAdapter, sha256_of_file
+from biomatcad_api.services.topology_providers import UnknownTopologyProviderError, get_topology_provider
 from biomatcad_api.services.worker_client import GeometryWorkerClient, WorkerExecutionError
 
 HEARTBEAT_MIN_INTERVAL_SECONDS = 2.0
@@ -107,6 +108,20 @@ def _authorize_design_run_inputs(
         _deny("RECIPE_PROJECT_MISMATCH", f"Receita {recipe_id} não pertence ao projeto {project_id}.")
     if recipe.status != RecipeStatus.VALIDATED:
         _deny("RECIPE_NOT_VALIDATED", f"Receita {recipe_id} não está validada (status={recipe.status.value}).")
+
+    # Seção 4 (Incremento 2.2): segunda camada de defesa contra topologia desconhecida/ainda não
+    # implementada -- o JSON Schema já restringe topology.kind, mas este registro é a fonte
+    # única de verdade também consultada pelo manifesto (build_and_store_manifest), então uma
+    # receita cujo kind não esteja registrado (ou esteja apenas "planned", ex.: voronoi) nunca
+    # chega a virar um job, mesmo que algum caminho futuro contorne a validação de schema.
+    topology_kind = recipe.canonical_json.get("topology", {}).get("kind")
+    try:
+        get_topology_provider(topology_kind)
+    except UnknownTopologyProviderError:
+        _deny(
+            "TOPOLOGY_PROVIDER_UNKNOWN",
+            f"Receita {recipe_id} usa topology.kind='{topology_kind}', que não é um provider registrado e implementado.",
+        )
 
     if material_id is not None:
         material = db.get(MaterialRecord, material_id)

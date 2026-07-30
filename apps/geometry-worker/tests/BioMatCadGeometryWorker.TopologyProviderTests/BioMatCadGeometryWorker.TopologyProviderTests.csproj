@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <!--
+    Diferente de BioMatCadGeometryWorker.Tests (que evita deliberadamente qualquer dependencia
+    de PicoGK), este projeto referencia o projeto principal inteiro via ProjectReference,
+    necessario porque ITopologyProvider.BuildAndExport expoe GyroidScaffoldBuilder.BuildResult
+    na assinatura. Isto e seguro: os testes aqui NUNCA chamam BuildAndExport (que exigiria o
+    runtime nativo do PicoGK, indisponivel em linux-x64; ver WORKER_STATUS.md e ADR-0007).
+    Testam apenas TryGet/Kind/ProviderVersion/KnownKinds, que nao tocam nenhum codigo PicoGK;
+    confirmado empiricamente que o carregamento do assembly principal e a chamada a estes
+    membros funcionam neste sandbox sem o runtime nativo, porque o CLR resolve/JITa tipos e
+    metodos sob demanda (o metodo BuildAndExport nunca e JITado se nunca e chamado).
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../BioMatCadGeometryWorker.csproj" />
+  </ItemGroup>
+
+</Project>

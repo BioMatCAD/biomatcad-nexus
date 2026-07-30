@@ -27,6 +27,7 @@ from biomatcad_api.models.geometry_recipe import GeometryRecipe
 from biomatcad_api.models.user import User
 from biomatcad_api.services.recipe_service import canonicalize_recipe
 from biomatcad_api.services.storage import StorageAdapter, sha256_of_bytes
+from biomatcad_api.services.topology_providers import UnknownTopologyProviderError, get_topology_provider
 
 
 def _current_git_commit(repo_root: Path) -> str | None:
@@ -72,6 +73,22 @@ def build_and_store_manifest(
 
     metrics = job.metrics or {}
 
+    # Seção 4 (Incremento 2.2): rastreabilidade explícita de QUAL provider de topologia
+    # efetivamente gerou esta geometria -- nunca assumido implicitamente pelo nome da receita.
+    # Se por algum motivo o kind não estiver mais registrado (nunca deveria acontecer, pois
+    # create_design_run_and_job já rejeita antes de criar o job), registra o kind bruto sem
+    # provider_class/version em vez de quebrar a montagem do manifesto de um job já concluído.
+    topology_kind = recipe.canonical_json.get("topology", {}).get("kind")
+    try:
+        provider_info = get_topology_provider(topology_kind)
+        topology_provider_summary = {
+            "kind": provider_info.kind,
+            "provider_class": provider_info.provider_class,
+            "version": provider_info.version,
+        }
+    except UnknownTopologyProviderError:
+        topology_provider_summary = {"kind": topology_kind, "provider_class": None, "version": None}
+
     manifest_dict = {
         "job_id": job.id,
         "design_run_id": design_run.id,
@@ -82,6 +99,7 @@ def build_and_store_manifest(
         "created_by_user_id": design_run.created_by_user_id,
         "created_by_user_email": created_by_user.email if created_by_user is not None else None,
         "recipe_canonical": recipe.canonical_json,
+        "topology_provider": topology_provider_summary,
         "schema_version": recipe.schema_version,
         "recipe_checksum_sha256": recipe.checksum_sha256,
         "git_commit": _current_git_commit(repo_root),

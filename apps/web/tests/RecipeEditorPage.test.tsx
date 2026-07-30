@@ -33,4 +33,38 @@ describe("RecipeEditorPage (smoke test)", () => {
 
     vi.unstubAllGlobals();
   });
+
+  // Regressão direta pedida no escopo (Seção 4, contrato TopologyProvider): a GUI precisa
+  // mostrar quais topologias existem e quais estão realmente implementadas -- nunca uma opção
+  // selecionável que não tenha execução real por trás (Prompt Mestre §3.1).
+  it("lista os providers de topologia e mantém Voronoi desabilitado (ainda não implementado)", () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ valid: true, errors: [], checksum_sha256: "abc123", schema_version: "1.0.0" }),
+      }),
+    );
+
+    render(
+      <BrowserRouter>
+        <ThemeProvider>
+        <AuthProvider>
+          <RecipeEditorPage />
+        </AuthProvider>
+        </ThemeProvider>
+      </BrowserRouter>,
+    );
+
+    const select = screen.getByLabelText(/^topologia$/i) as HTMLSelectElement;
+    const gyroidOption = screen.getByRole("option", { name: /gyroid \(tpms\) -- implementado/i }) as HTMLOptionElement;
+    const voronoiOption = screen.getByRole("option", { name: /voronoi -- em preparação/i }) as HTMLOptionElement;
+
+    expect(select.value).toBe("gyroid");
+    expect(gyroidOption.disabled).toBe(false);
+    expect(voronoiOption.disabled).toBe(true);
+
+    vi.unstubAllGlobals();
+  });
 });

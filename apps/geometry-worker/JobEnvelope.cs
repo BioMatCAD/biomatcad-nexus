@@ -113,6 +113,11 @@ public sealed class WorkerResultOutput
     [JsonPropertyName("vdb_path")] public string? VdbPath { get; set; }
     [JsonPropertyName("metrics")] public GeometryMetrics Metrics { get; set; } = new();
     [JsonPropertyName("effective_parameters")] public EffectiveParameters EffectiveParameters { get; set; } = new();
+    // Incremento 2.2 (Seção 4): qual provider de topologia efetivamente gerou esta geometria --
+    // nunca assumido implicitamente a partir do nome da receita, sempre o valor real reportado
+    // pelo próprio ITopologyProvider que rodou (ver TopologyProviderRegistry em Program.cs).
+    [JsonPropertyName("topology_provider_kind")] public string TopologyProviderKind { get; set; } = "";
+    [JsonPropertyName("topology_provider_version")] public string TopologyProviderVersion { get; set; } = "";
     [JsonPropertyName("worker_version")] public string WorkerVersion { get; set; } = "";
     [JsonPropertyName("dotnet_version")] public string DotnetVersion { get; set; } = "";
     [JsonPropertyName("picogk_version")] public string PicogkVersion { get; set; } = "";

@@ -23,6 +23,16 @@ const DEFAULT_RECIPE: GeometryRecipeBody = {
 
 const EMPTY_VALIDATION: RecipeValidateResponse = { valid: false, errors: [], checksum_sha256: null, schema_version: "1.0.0" };
 
+// Espelha o registro real de providers de topologia (Incremento 2.2, Seção 4 -- ver
+// apps/api/src/biomatcad_api/services/topology_providers.py e
+// apps/geometry-worker/TopologyProviderRegistry.cs). Nunca invente um provider "implementado"
+// aqui que não exista de verdade nos dois lados -- Voronoi aparece listado (para deixar o
+// contrato futuro visível) mas permanece desabilitado até ter uma implementação real.
+const TOPOLOGY_PROVIDERS: Array<{ kind: string; label: string; implemented: boolean }> = [
+  { kind: "gyroid", label: "Gyroid (TPMS) -- implementado", implemented: true },
+  { kind: "voronoi", label: "Voronoi -- em preparação, ainda não implementado", implemented: false },
+];
+
 export function RecipeEditorPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
@@ -177,6 +187,25 @@ export function RecipeEditorPage() {
               </label>
             </div>
           )}
+        </fieldset>
+
+        <fieldset>
+          <legend>Provider de topologia</legend>
+          <label htmlFor="topology-provider-select">
+            Topologia
+            <select id="topology-provider-select" value="gyroid" disabled>
+              {TOPOLOGY_PROVIDERS.map((p) => (
+                <option key={p.kind} value={p.kind} disabled={!p.implemented}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p style={{ fontSize: "0.85em", color: "var(--color-text-secondary)" }}>
+            Apenas Gyroid está implementado e testado nesta versão. Outras topologias (Voronoi,
+            outras TPMS, híbridas) exigem um novo provider registrado antes de ficarem
+            selecionáveis -- nunca uma opção decorativa sem execução real por trás.
+          </p>
         </fieldset>
 
         <fieldset>

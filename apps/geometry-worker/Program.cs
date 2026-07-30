@@ -49,8 +49,23 @@ try
 
     outputDirForCleanup = job.OutputDir;
 
-    if (job.Recipe.Topology.Kind != "gyroid")
-        throw new NotSupportedException($"Topologia não suportada nesta versão: {job.Recipe.Topology.Kind}");
+    // Incremento 2.2 (Seção 4): despacho por registro explícito de ITopologyProvider, em vez
+    // de um if/else fixo -- rejeita ANTES de qualquer execução, com erro estruturado (mesmo
+    // padrão dos demais rejeitos pré-execução abaixo), qualquer topology.kind desconhecido ou
+    // ainda não implementado (ex.: "voronoi", que já existe como preparação documentada mas
+    // nunca é aceito aqui -- ver docs/architecture/voronoi-topology-preparation.md).
+    if (!TopologyProviderRegistry.TryGet(job.Recipe.Topology.Kind, out var topologyProvider) || topologyProvider is null)
+    {
+        Console.Error.WriteLine(JsonSerializer.Serialize(MakeError(
+            "TOPOLOGY_PROVIDER_UNKNOWN",
+            $"Provider de topologia desconhecido ou não implementado: '{job.Recipe.Topology.Kind}'.",
+            new Dictionary<string, string>
+            {
+                ["requested_kind"] = job.Recipe.Topology.Kind,
+                ["known_kinds"] = string.Join(",", TopologyProviderRegistry.KnownKinds),
+            })));
+        return 1;
+    }
 
     // --- Item 4: honrar output_formats, rejeitar ANTES da execução se não suportado ---
     var unsupported = job.Recipe.OutputFormats.Where(f => !SupportedOutputFormats.Contains(f)).ToList();
@@ -123,7 +138,7 @@ try
     Directory.CreateDirectory(job.OutputDir);
     string stlPath = Path.Combine(job.OutputDir, "scaffold.stl");
 
-    var buildResult = GyroidScaffoldBuilder.BuildAndExport(job, stlPath);
+    var buildResult = topologyProvider.BuildAndExport(job, stlPath);
     var metrics = GeometryMetricsCalculator.ComputeAll(buildResult.Mesh, job.Recipe.Domain);
 
     // --- Item 2: validar o STL após a gravação (não apenas confiar na malha em memória) ---
@@ -186,6 +201,8 @@ try
             EstimatedVoxelCount = estimatedVoxelCount,
             EstimatedMemoryMbUpperBound = estimatedMemoryMb,
         },
+        TopologyProviderKind = topologyProvider.Kind,
+        TopologyProviderVersion = topologyProvider.ProviderVersion,
         WorkerVersion = WorkerVersion,
         DotnetVersion = Environment.Version.ToString(),
         PicogkVersion = picogkVersion ?? "unknown",
