@@ -12,5 +12,7 @@ describe("LandingPage", () => {
     );
     expect(screen.getByRole("heading", { name: /biomatcad nexus/i })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /entrar/i })).toBeInTheDocument();
+    expect(screen.getByAltText("BioMatCAD Nexus")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /sobre o projeto/i })).toBeInTheDocument();
   });
 });

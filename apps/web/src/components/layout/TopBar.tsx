@@ -1,3 +1,4 @@
+import { BrandLogo } from "../brand/BrandLogo";
 import { useAuth } from "../../context/AuthContext";
 import { useTheme } from "../../theme/ThemeProvider";
 
@@ -7,7 +8,10 @@ export function TopBar() {
 
   return (
     <header style={styles.header}>
-      <span style={styles.title}>BioMatCAD Nexus</span>
+      <span style={styles.titleGroup}>
+        <BrandLogo variant="symbol" size="small" />
+        <span style={styles.title}>BioMatCAD Nexus</span>
+      </span>
       <div style={styles.actions}>
         <button type="button" onClick={toggleTheme} aria-label="Alternar tema claro/escuro">
           {theme === "light" ? "Modo escuro" : "Modo claro"}
@@ -34,6 +38,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderBottom: "1px solid var(--color-border)",
     background: "var(--color-surface)",
   },
+  titleGroup: { display: "flex", alignItems: "center", gap: "var(--space-2)" },
   title: { fontWeight: 700 },
   actions: { display: "flex", gap: "var(--space-3)", alignItems: "center" },
 };

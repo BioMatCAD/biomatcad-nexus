@@ -1,5 +1,6 @@
 import { type FormEvent, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
+import { BrandLogo } from "../components/brand/BrandLogo";
 import { DemoBanner } from "../components/DemoBanner";
 import { ClinicalSuiteIndicator } from "../components/layout/ClinicalSuiteIndicator";
 import { useAuth } from "../context/AuthContext";
@@ -30,6 +31,7 @@ export function LoginPage() {
     <div style={styles.page}>
       <DemoBanner />
       <div style={styles.card}>
+        <BrandLogo variant="horizontal" size="small" style={{ marginBottom: "var(--space-3)" }} />
         <h1 style={{ marginTop: 0 }}>Entrar</h1>
         <ClinicalSuiteIndicator />
 

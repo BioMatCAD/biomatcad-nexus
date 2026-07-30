@@ -1,4 +1,5 @@
 import { NavLink } from "react-router-dom";
+import { BrandLogo } from "../brand/BrandLogo";
 
 // Espaços de trabalho iniciais (Prompt Mestre §8.1). Apenas "Início" tem rota real neste
 // incremento; os demais aparecem desabilitados e rotulados como planejados, para não simular
@@ -34,6 +35,9 @@ const PLANNED_WORKSPACES = [
 export function Sidebar() {
   return (
     <nav aria-label="Navegação principal" style={styles.nav}>
+      <div style={styles.brandRow}>
+        <BrandLogo variant="symbol" size="small" />
+      </div>
       <ul style={styles.list}>
         <li>
           <NavLink to="/app" end style={({ isActive }) => ({ ...styles.link, ...(isActive ? styles.linkActive : {}) })}>
@@ -56,16 +60,24 @@ export function Sidebar() {
           </li>
         ))}
       </ul>
+      <div style={styles.aboutRow}>
+        <NavLink to="/about" style={styles.aboutLink}>
+          Sobre o BioMatCAD Nexus
+        </NavLink>
+      </div>
     </nav>
   );
 }
 
 const styles: Record<string, React.CSSProperties> = {
+  brandRow: { marginBottom: "var(--space-4)", display: "flex", justifyContent: "center" },
   nav: {
     width: 240,
     borderRight: "1px solid var(--color-border)",
     padding: "var(--space-4)",
     flexShrink: 0,
+    display: "flex",
+    flexDirection: "column",
   },
   list: { listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 4 },
   link: {
@@ -86,6 +98,15 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "var(--space-2) var(--space-3)",
     color: "var(--color-text-secondary)",
     cursor: "not-allowed",
+  },
+  aboutRow: { marginTop: "auto", paddingTop: "var(--space-4)", borderTop: "1px solid var(--color-border)" },
+  aboutLink: {
+    display: "block",
+    padding: "var(--space-2) var(--space-3)",
+    borderRadius: "var(--radius-sm)",
+    color: "var(--color-text-secondary)",
+    textDecoration: "none",
+    fontSize: "0.875rem",
   },
   badge: {
     fontSize: "0.625rem",

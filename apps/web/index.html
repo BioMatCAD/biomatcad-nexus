@@ -9,6 +9,16 @@
       name="description"
       content="Plataforma integrada de engenharia computacional de biomateriais — CAD, FEM, materiais e otimização (Incremento 1: fundação)."
     />
+    <!-- Identidade visual (Incremento 2.2): %BASE_URL% é substituído pelo Vite pelo valor real
+         de `base` (vite.config.ts) -- "/" no build normal, "/biomatcad-nexus/" no build de
+         demonstração do GitHub Pages (build:pages). Isto garante que favicon/manifest resolvam
+         corretamente nos dois modos, sem caminho absoluto hardcoded. -->
+    <link rel="icon" type="image/png" sizes="16x16" href="%BASE_URL%brand/favicon-16.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="%BASE_URL%brand/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="48x48" href="%BASE_URL%brand/favicon-48.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="%BASE_URL%brand/apple-touch-icon-180.png" />
+    <link rel="manifest" href="%BASE_URL%manifest.json" />
+    <meta name="theme-color" content="#10181a" />
   </head>
   <body>
     <div id="root"></div>

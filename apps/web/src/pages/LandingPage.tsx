@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { BrandLogo } from "../components/brand/BrandLogo";
 import { DemoBanner } from "../components/DemoBanner";
 
 export function LandingPage() {
@@ -6,6 +7,7 @@ export function LandingPage() {
     <div>
       <DemoBanner />
       <header style={styles.hero}>
+        <BrandLogo variant="horizontal" size="large" style={{ margin: "0 auto var(--space-4)" }} />
         <p style={styles.eyebrow}>Incremento 1 — fundação executável</p>
         <h1 style={styles.h1}>BioMatCAD Nexus</h1>
         <p style={styles.lead}>
@@ -18,6 +20,9 @@ export function LandingPage() {
             Entrar
           </Link>
         </div>
+        <p style={{ marginTop: "var(--space-4)" }}>
+          <Link to="/about">Sobre o projeto</Link>
+        </p>
       </header>
 
       <section style={styles.status}>
