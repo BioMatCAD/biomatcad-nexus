@@ -218,6 +218,43 @@ export const demoApiClient: ApiClient = {
         { kind: "clinical_production" as const, enabled: false },
       ],
     }),
+  // Dados SINTÉTICOS fixos -- o modo demo (GitHub Pages) não tem backend real, então não há
+  // nenhuma verificação real a fazer. Nunca deve ser confundido com o painel real (que só
+  // aparece quando VITE_API_BASE_URL aponta para uma API de verdade).
+  observabilityStatus: () =>
+    delay({
+      generated_at: new Date().toISOString(),
+      api: {
+        state: "healthy" as const,
+        detail: "Demonstração estática (GitHub Pages) -- sem backend real.",
+        version: "0.1.0-demo",
+        environment: "github-pages-demo",
+      },
+      database: { state: "healthy" as const, detail: "Simulado -- modo demonstração." },
+      dispatcher: {
+        state: "healthy" as const,
+        detail: "Simulado -- modo demonstração.",
+        dispatcher_id: "demo-dispatcher",
+        pid: null,
+        phase: "idle",
+        last_poll_at: new Date().toISOString(),
+        jobs_processed_total: 3,
+        current_poll_interval_seconds: 3,
+      },
+      worker: {
+        state: "unavailable" as const,
+        detail: "Worker PicoGK real não roda no modo demonstração estática.",
+        binary_found: false,
+        worker_version: null,
+        dotnet_version: null,
+        picogk_version: null,
+      },
+      queue: { state: "healthy" as const, detail: "Simulado -- modo demonstração.", queued_count: 0, processing_count: 0 },
+      storage: { state: "healthy" as const, detail: "Simulado -- modo demonstração.", path: "demo://artifacts", writable: false },
+      versions: { api: "0.1.0-demo", schema_geometry_recipe: "1.0.0" },
+      jobs_active: [],
+      jobs_failed_recent: [],
+    }),
   login: async ({ email, password }) => {
     if (email === "demo@biomatcad.example" && password === "demo-synthetic-password-123") {
       return delay({ access_token: "demo-simulated-token-not-a-real-jwt", token_type: "bearer", expires_in: 1800 });

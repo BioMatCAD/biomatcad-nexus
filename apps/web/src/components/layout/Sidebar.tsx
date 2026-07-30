@@ -8,6 +8,7 @@ import { NavLink } from "react-router-dom";
 const REAL_WORKSPACES = [
   { label: "Materiais", to: "/app/materials" },
   { label: "Projetos BioMatCAD", to: "/app/projects" },
+  { label: "Observabilidade", to: "/app/observability" },
 ];
 
 const PLANNED_WORKSPACES = [

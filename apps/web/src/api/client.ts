@@ -13,6 +13,7 @@ import {
   type MaterialCreateRequest,
   type MaterialDetail,
   type MaterialSummary,
+  type ObservabilityStatusResponse,
   type ProjectCreateRequest,
   type ProjectResponse,
   type ReadyResponse,
@@ -52,6 +53,8 @@ export const apiClient = {
   ready: () => request<ReadyResponse>("/ready"),
   version: () => request<VersionResponse>("/version"),
   systemStatus: () => request<SystemStatusResponse>("/api/v1/system/status"),
+  observabilityStatus: (token: string) =>
+    request<ObservabilityStatusResponse>("/api/v1/observability/status", {}, token),
   login: (payload: LoginRequest) =>
     request<LoginResponse>("/api/v1/auth/login", { method: "POST", body: JSON.stringify(payload) }),
   me: (token: string) => request<UserResponse>("/api/v1/auth/me", {}, token),

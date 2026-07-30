@@ -10,6 +10,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { MaterialDetailPage } from "./pages/MaterialDetailPage";
 import { MaterialsPage } from "./pages/MaterialsPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
+import { ObservabilityPage } from "./pages/ObservabilityPage";
 import { ProjectDetailPage } from "./pages/ProjectDetailPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { RecipeDetailPage } from "./pages/RecipeDetailPage";
@@ -84,6 +85,14 @@ export function App() {
               element={
                 <ProtectedRoute>
                   <JobDetailPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/app/observability"
+              element={
+                <ProtectedRoute>
+                  <ObservabilityPage />
                 </ProtectedRoute>
               }
             />

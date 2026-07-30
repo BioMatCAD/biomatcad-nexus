@@ -291,3 +291,81 @@ export interface ManifestResponse {
   manifest_sha256: string;
   created_at: string;
 }
+
+
+// ---- Observabilidade real (Incremento 2.2, Seção 7) ----
+// Espelha apps/api/src/biomatcad_api/schemas/observability.py -- cada campo vem de uma
+// verificação real feita pelo backend no momento da requisição, nunca um estado inventado.
+export type ComponentState = "healthy" | "degraded" | "unavailable" | "stale" | "stopped" | "unknown";
+
+export interface ComponentStatus {
+  state: ComponentState;
+  detail: string;
+}
+
+export interface ApiComponentStatus extends ComponentStatus {
+  version: string;
+  environment: string;
+}
+
+export interface DispatcherComponentStatus extends ComponentStatus {
+  dispatcher_id: string | null;
+  pid: number | null;
+  phase: string | null;
+  last_poll_at: string | null;
+  jobs_processed_total: number | null;
+  current_poll_interval_seconds: number | null;
+}
+
+export interface WorkerComponentStatus extends ComponentStatus {
+  binary_found: boolean;
+  worker_version: string | null;
+  dotnet_version: string | null;
+  picogk_version: string | null;
+}
+
+export interface QueueComponentStatus extends ComponentStatus {
+  queued_count: number;
+  processing_count: number;
+}
+
+export interface StorageComponentStatus extends ComponentStatus {
+  path: string;
+  writable: boolean;
+}
+
+export interface ActiveJobSummary {
+  job_id: string;
+  design_run_id: string;
+  status: string;
+  progress_pct: number;
+  started_at: string | null;
+  heartbeat_at: string | null;
+  heartbeat_stale: boolean;
+}
+
+export interface FailedJobSummary {
+  job_id: string;
+  design_run_id: string;
+  error_code: string | null;
+  error_message: string | null;
+  finished_at: string | null;
+}
+
+export interface VersionsInfo {
+  api: string;
+  schema_geometry_recipe: string;
+}
+
+export interface ObservabilityStatusResponse {
+  generated_at: string;
+  api: ApiComponentStatus;
+  database: ComponentStatus;
+  dispatcher: DispatcherComponentStatus;
+  worker: WorkerComponentStatus;
+  queue: QueueComponentStatus;
+  storage: StorageComponentStatus;
+  versions: VersionsInfo;
+  jobs_active: ActiveJobSummary[];
+  jobs_failed_recent: FailedJobSummary[];
+}
