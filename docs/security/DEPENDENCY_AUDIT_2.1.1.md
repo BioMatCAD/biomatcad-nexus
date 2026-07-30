@@ -16,6 +16,18 @@ psycopg2-binary 2.9.12, passlib 1.7.4, bcrypt 4.0.1, pyjwt 2.13.0, python-multip
 jsonschema 4.26.0, **psutil 7.2.2 — dependência nova deste incremento**, pytest 9.1.1, ruff
 0.16.0, mypy 2.3.0, pgserver 0.1.4, entre outros). Nenhuma ação necessária.
 
+**Atualização (2026-07-29, correção do contrato de driver Postgres)**: `psycopg[binary]>=3.1`
+foi adicionado como dependência real (bug corrigido: a URL `postgresql+psycopg://` usada no gate
+final do Windows exige o driver psycopg 3, que não estava declarado — só `psycopg2-binary`
+estava). `pip-audit` rodado isoladamente (venv novo, só `psycopg[binary]` + `pip-audit`) contra a
+versão resolvida `psycopg 3.3.4` / `psycopg-binary 3.3.4`: **nenhuma vulnerabilidade conhecida
+encontrada** no pacote em si (as 7 entradas reportadas nesse venv isolado são todas do
+`setuptools` pré-instalado pelo próprio `venv`, não uma dependência declarada do projeto).
+`psycopg2-binary` foi mantido (não removido) porque `.github/workflows/ci-api.yml` e
+`.env.example` usam `postgresql://` sem driver explícito, que o SQLAlchemy resolve por padrão
+para `psycopg2` — há uso real de ambos os dialetos no repositório, então ambos os drivers
+precisam permanecer instalados.
+
 ## NuGet (`apps/geometry-worker`)
 
 Comando: `dotnet list package --vulnerable --include-transitive` nos dois projetos

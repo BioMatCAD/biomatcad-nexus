@@ -179,6 +179,13 @@ python -m alembic upgrade head
 python -m pytest -v | Tee-Object -FilePath C:\biomatcad-runs\pytest-windows-output.txt
 ```
 
+> **Nota (bug real corrigido em 2026-07-29)**: a connection string acima usa o dialeto
+> `postgresql+psycopg` (psycopg 3). `pip install -e ".[dev]"` já instala o driver correto
+> (`psycopg[binary]`, adicionado a `pyproject.toml` nesta correção) -- antes desta correção, só
+> `psycopg2-binary` estava declarado, e rodar o passo acima (ou o gate final da Seção 9) falhava
+> com `ModuleNotFoundError: No module named 'psycopg'`. Se você já tinha um `.venv` criado ANTES
+> desta correção, rode `pip install -e ".[dev]"` de novo dentro dele para pegar o driver novo.
+
 Um teste em particular (relacionado ao worker real) hoje está marcado `skip` no Linux porque o
 `dotnet`/PicoGK não está disponível ali. No Windows, com o worker compilado, esse teste deve
 rodar de verdade. **Se esse teste passar com sucesso real (job chega a `SUCCEEDED` via PicoGK

@@ -822,6 +822,94 @@ abre -> login disponível -> encerramento limpo), sem nenhum problema relatado. 
 18 do `IMPLEMENTATION_STATUS.md` como aprovado por execução real, distinto do cross-build da
 Seção 13.
 
+## 15. Bug real corrigido: contrato de driver Postgres (psycopg vs psycopg2) ao tentar rodar o gate final no Windows (2026-07-29)
+
+**Relato real do usuário**: o gate final (`scripts/Run-FinalGate.ps1`) rodou de verdade no
+Windows e parou ANTES das migrações, com `DATABASE_URL =
+postgresql+psycopg://biomatcad:biomatcad@localhost:5432/biomatcad` e o erro:
+
+```
+ModuleNotFoundError: No module named 'psycopg'
+```
+
+**Causa raiz confirmada**: `apps/api/pyproject.toml` só declarava `psycopg2-binary`. A URL
+`postgresql+psycopg://` (dialeto psycopg 3) é usada de verdade em
+`docs/examples/WINDOWS_EXECUTION_KIT.md` e no default de `scripts/Run-FinalGate.ps1` -- mas o
+driver `psycopg` (v3) nunca foi declarado como dependência.
+
+**Auditoria de todos os usos reais de `DATABASE_URL` no repositório** (grep completo, não
+suposição):
+
+- `postgresql://` (sem driver explícito -- SQLAlchemy resolve para `psycopg2` por padrão):
+  `.github/workflows/ci-api.yml`, `.env.example`.
+- `postgresql+psycopg://` (psycopg 3, explícito): `docs/examples/WINDOWS_EXECUTION_KIT.md`,
+  `delivery/v2.2.1/WINDOWS_EXECUTION_KIT_v2.2.1.md`, `scripts/Run-FinalGate.ps1`.
+- `postgresql+psycopg2://` (explícito): aparece apenas como exemplo ilustrativo no docstring
+  de `apps/api/scripts/seed_e2e_user.py` (nunca executado com esse valor literal em nenhum
+  lugar do código/CI).
+
+**Conclusão**: os dois drivers (`psycopg2` e `psycopg` v3) têm uso real confirmado em
+contextos diferentes do mesmo repositório -- `psycopg2-binary` foi **mantido** (não removido),
+e `psycopg[binary]>=3.1` foi **adicionado**.
+
+**Correção aplicada**:
+- `apps/api/pyproject.toml`: adiciona `"psycopg[binary]>=3.1"` às dependências de produção,
+  com um comentário extenso documentando por que ambos os drivers precisam coexistir.
+- `docs/security/DEPENDENCY_AUDIT_2.1.1.md`: `pip-audit` rodado de verdade (venv isolado, só
+  `psycopg[binary]` + `pip-audit`) contra a versão resolvida `psycopg 3.3.4` /
+  `psycopg-binary 3.3.4` -- **nenhuma vulnerabilidade conhecida** no pacote em si.
+
+**Teste novo, real, que teria pego este bug antes do usuário** (`apps/api/tests/
+test_database_driver_contract.py`, 4 testes): cria um `sqlalchemy.create_engine(...)` para
+cada dialeto Postgres genuinamente usado no repositório (`postgresql://` e
+`postgresql+psycopg://`) contra um host fictício (nunca conecta de verdade -- SQLAlchemy
+importa o módulo do driver DBAPI no momento de `create_engine`, mesmo sem abrir conexão de
+rede, o que basta para detectar driver ausente sem precisar de infraestrutura). **Verificado
+genuinamente**: antes da correção (ambiente real deste sandbox, que já tinha `psycopg2` mas
+não `psycopg`), rodei a suíte e ela falhou exatamente nos 2 testes do dialeto `psycopg` v3,
+com a mesma mensagem `ModuleNotFoundError: No module named 'psycopg'` relatada pelo usuário
+(2 failed, 2 passed); depois de instalar `psycopg[binary]`, os 4 passaram.
+
+**Validação em instalação limpa** (não apenas no ambiente que já tinha alguns pacotes):
+criado um `venv` totalmente novo, sem nenhum `psycopg`/`psycopg2` pré-instalado, rodando
+apenas `pip install -e ".[dev]"` (o comando real que qualquer novo clone usaria). Resultado:
+os dois drivers foram instalados corretamente a partir de `pyproject.toml`, os 4 testes de
+contrato passaram, e a suíte completa do backend rodou com sucesso a partir desse venv limpo
+contra um PostgreSQL efêmero real (via `pgserver`): **88 passed, 1 skipped** (o skip esperado
+é `test_dispatch_job_real_worker_fails_in_blocked_environment`, sem PicoGK linux-x64), `ruff
+check .` e `mypy src` limpos.
+
+**Preflight real adicionado a `scripts/Run-FinalGate.ps1`** (novo script
+`apps/api/scripts/gate_preflight_check.py`, chamado ANTES de `alembic upgrade head`):
+verifica, em ordem, (1) que `DATABASE_URL` não é SQLite (recusa explícita -- SQLite nunca é
+aceito como substituto do gate real), (2) que o módulo do driver DBAPI exigido pelo dialeto da
+URL é importável, (3) que a porta do Postgres realmente aceita conexão TCP, e (4) que a
+conexão E autenticação reais funcionam (`SELECT 1` via SQLAlchemy). Grava sempre um relatório
+JSON estruturado em stdout (mesmo formato de `GATE_FULL_PIPELINE_REPORT.json`, com
+`"stage": "preflight"`), e `Run-FinalGate.ps1` sempre copia esse conteúdo para
+`gate-final-report.json` em caso de falha -- o usuário nunca mais fica sem relatório, mesmo
+que o script morra antes do Alembic.
+
+**Os 4 cenários do preflight foram validados de verdade**, não apenas lidos no código: subi um
+PostgreSQL real (binários do próprio `pgserver`, `initdb`/`pg_ctl` reais) escutando via TCP em
+`127.0.0.1` (não apenas socket unix, para reproduzir fielmente o cenário real do Windows), com
+um usuário/banco `biomatcad` reais.
+
+1. **Driver ausente** (venv com só `psycopg2`, sem `psycopg`): preflight reproduziu o erro
+   original **exatamente**, `ModuleNotFoundError: No module named 'psycopg'`, `FAILED`, exit
+   code 1.
+2. **Porta inacessível** (porta fechada de propósito): `Connection refused` real, `FAILED`.
+3. **Senha incorreta** (usuário real, senha errada): primeira tentativa acidentalmente deu
+   `APPROVED` porque o `pg_hba.conf` gerado por `initdb --auth=trust` tinha uma regra `trust`
+   que cobria a conexão ANTES da minha regra `md5` -- bug do meu próprio arranjo de teste,
+   não do preflight. Corrigido reinicializando o Postgres de teste com
+   `initdb --auth-host=md5 --auth-local=trust`; depois disso, a senha errada produziu
+   corretamente `FATAL: password authentication failed`, `FAILED`.
+4. **Conexão e autenticação reais bem-sucedidas**: `APPROVED`, todos os 4 passos `ok: true`.
+
+Também confirmado que o dialeto `postgresql://` (psycopg2, usado pelo CI) funciona igual
+contra o mesmo Postgres real.
+
 ## O que esta evidência explicitamente NÃO cobre
 
 - **Consistência STL-vs-manifesto via fluxo completo API→dispatcher→worker PicoGK real→

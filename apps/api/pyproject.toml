@@ -11,7 +11,21 @@ dependencies = [
     "pydantic-settings>=2.3",
     "sqlalchemy>=2.0",
     "alembic>=1.13",
+    # Dois dialetos Postgres são realmente usados no projeto, em contextos diferentes -- ambos
+    # os drivers precisam estar instalados (bug real corrigido em 2026-07-29: o kit de execução
+    # Windows e scripts/Run-FinalGate.ps1 usam "postgresql+psycopg://" (psycopg 3), mas só
+    # psycopg2-binary estava declarado, causando "ModuleNotFoundError: No module named
+    # 'psycopg'" ao rodar o gate final no Windows do usuário):
+    #   - "postgresql://" (sem driver explícito, resolve para psycopg2 por padrão no
+    #     SQLAlchemy) -- usado em .github/workflows/ci-api.yml e .env.example.
+    #   - "postgresql+psycopg://" (psycopg 3, driver explícito) -- usado em
+    #     docs/examples/WINDOWS_EXECUTION_KIT.md, delivery/v2.2.1/WINDOWS_EXECUTION_KIT_v2.2.1.md
+    #     e scripts/Run-FinalGate.ps1 (o gate final real do worker PicoGK).
+    # Não remova nenhum dos dois sem primeiro confirmar (grep) que nenhuma DATABASE_URL real no
+    # repositório ainda depende dele -- ver teste
+    # tests/test_database_driver_contract.py::test_engine_creation_with_standard_postgres_url_dialect.
     "psycopg2-binary>=2.9",
+    "psycopg[binary]>=3.1",
     "passlib[bcrypt]>=1.7",
     "bcrypt>=4.0,<4.1",
     "pyjwt>=2.8",
