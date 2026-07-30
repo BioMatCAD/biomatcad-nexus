@@ -81,8 +81,8 @@ export function parseBinaryStl(buffer: ArrayBuffer): ParsedStl {
 }
 
 const ASCII_FACET_RE =
-  /facet\s+normal\s+([\-0-9.eE]+)\s+([\-0-9.eE]+)\s+([\-0-9.eE]+)[\s\S]*?outer\s+loop([\s\S]*?)endloop/gi;
-const ASCII_VERTEX_RE = /vertex\s+([\-0-9.eE]+)\s+([\-0-9.eE]+)\s+([\-0-9.eE]+)/gi;
+  /facet\s+normal\s+([0-9.eE-]+)\s+([0-9.eE-]+)\s+([0-9.eE-]+)[\s\S]*?outer\s+loop([\s\S]*?)endloop/gi;
+const ASCII_VERTEX_RE = /vertex\s+([0-9.eE-]+)\s+([0-9.eE-]+)\s+([0-9.eE-]+)/gi;
 
 export function parseAsciiStl(buffer: ArrayBuffer): ParsedStl {
   const text = new TextDecoder("utf-8").decode(buffer);

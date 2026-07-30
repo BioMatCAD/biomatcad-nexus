@@ -4,7 +4,7 @@ import { StlViewer } from "../src/components/viewer/StlViewer";
 
 describe("StlViewer (smoke test)", () => {
   it("mostra o estado vazio quando não há stlUrl (sem depender de WebGL/jsdom)", () => {
-    render(<StlViewer stlUrl={null} />);
+    render(<StlViewer artifactUrl={null} />);
     expect(screen.getByText(/nenhum artefato disponível/i)).toBeInTheDocument();
   });
 });

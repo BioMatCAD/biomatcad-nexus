@@ -8,6 +8,7 @@ import { StlViewer } from "../components/viewer/StlViewer";
 import { ErrorState } from "../components/feedback/ErrorState";
 import { Loading } from "../components/feedback/Loading";
 import { useAuth } from "../context/AuthContext";
+import { downloadArtifactAsFile, sanitizeFilename } from "../lib/artifactDownload";
 
 const isDemoMode = Boolean(__BIOMATCAD_DEMO_MODE__);
 const client = isDemoMode ? demoApiClient : apiClient;
@@ -22,9 +23,29 @@ const STATUS_LABEL: Record<string, string> = {
 
 const TERMINAL_STATUSES = new Set(["succeeded", "failed", "cancelled"]);
 
+/** Compara duas árvores de métricas numéricas rasas e retorna as chaves cujos valores
+ * divergem -- usado para nunca escolher silenciosamente entre a métrica da API (job.metrics)
+ * e a do manifesto (manifest.manifest_json.metrics), que deveriam sempre ser idênticas (o
+ * manifesto é montado a partir do mesmo job.metrics no momento da conclusão do job). Uma
+ * divergência real indicaria um bug de sincronização e deve ser mostrada, não escondida. */
+function findMetricsDivergence(
+  apiMetrics: Record<string, unknown> | null | undefined,
+  manifestMetrics: unknown,
+): string[] {
+  if (!apiMetrics || typeof manifestMetrics !== "object" || manifestMetrics === null) return [];
+  const divergent: string[] = [];
+  const manifestObj = manifestMetrics as Record<string, unknown>;
+  for (const key of Object.keys(apiMetrics)) {
+    if (key in manifestObj && JSON.stringify(manifestObj[key]) !== JSON.stringify(apiMetrics[key])) {
+      divergent.push(key);
+    }
+  }
+  return divergent;
+}
+
 // data-testid documentados (usados pelo E2E Playwright em e2e/vertical.spec.ts, ver
 // e2e/README.md): "job-status" (texto do status localizado, ex.: "Concluído"), "job-metrics"
-// (tabela de métricas geométricas quando succeeded) e "stl-download-link" (link de download do
+// (tabela de métricas geométricas quando succeeded) e "stl-download-link" (botão de download do
 // artefato STL especificamente, entre os artefatos listados).
 export function JobDetailPage() {
   const { jobId } = useParams<{ jobId: string }>();
@@ -36,6 +57,8 @@ export function JobDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  const [downloadingArtifactId, setDownloadingArtifactId] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -110,10 +133,42 @@ export function JobDetailPage() {
     }
   };
 
+  const handleDownloadArtifact = async (artifact: ArtifactResponse) => {
+    setDownloadError(null);
+    setDownloadingArtifactId(artifact.id);
+    try {
+      // Download autenticado real (Blob/ObjectURL) -- corrige o achado da auditoria (ver
+      // docs/architecture/viewer-3d-audit.md): antes disto, o link de download era um <a href>
+      // estático sem nenhum header de autenticação, que retornaria 401 contra um backend real.
+      await downloadArtifactAsFile(
+        client.artifactDownloadUrl(artifact.id),
+        sanitizeFilename(`biomatcad-${artifact.kind}-${artifact.id.slice(0, 8)}.bin`),
+        { token: isDemoMode ? undefined : (token ?? undefined), expectedSha256: artifact.sha256 },
+      );
+    } catch (err) {
+      setDownloadError(err instanceof Error ? err.message : "Falha ao baixar artefato.");
+    } finally {
+      setDownloadingArtifactId(null);
+    }
+  };
+
   if (error) return <AuthenticatedLayout><ErrorState message={error} /></AuthenticatedLayout>;
   if (!job) return <AuthenticatedLayout><Loading label="Carregando job…" /></AuthenticatedLayout>;
 
   const stlArtifact = artifacts.find((a) => a.kind === "stl");
+  const manifestJson = manifest?.manifest_json as Record<string, unknown> | undefined;
+  const manifestMetrics = manifestJson?.metrics;
+  const topologyProvider = manifestJson?.topology_provider as
+    | { kind?: string; provider_class?: string | null; version?: string | null }
+    | undefined;
+  const recipeCanonical = manifestJson?.recipe_canonical as Record<string, unknown> | undefined;
+  const seed = recipeCanonical?.seed;
+  const mode = recipeCanonical?.mode;
+  const voxelSize = (recipeCanonical?.resolution as Record<string, unknown> | undefined)?.voxel_size_mm;
+  const metricsDivergence = findMetricsDivergence(
+    job.metrics as unknown as Record<string, unknown> | null,
+    manifestMetrics,
+  );
 
   return (
     <AuthenticatedLayout>
@@ -151,33 +206,72 @@ export function JobDetailPage() {
               <tr><td style={styles.td}><strong>Volume (mm³)</strong></td><td style={styles.td}>{job.metrics.volume_mm3}</td></tr>
               <tr><td style={styles.td}><strong>Porosidade medida (%)</strong></td><td style={styles.td}>{job.metrics.porosity_pct_measured}</td></tr>
               <tr><td style={styles.td}><strong>Área de superfície (mm²)</strong></td><td style={styles.td}>{job.metrics.surface_area_mm2}</td></tr>
-              <tr><td style={styles.td}><strong>Vértices únicos</strong></td><td style={styles.td}>{job.metrics.vertex_count_unique}</td></tr>
-              <tr><td style={styles.td}><strong>Triângulos</strong></td><td style={styles.td}>{job.metrics.triangle_count}</td></tr>
+              <tr><td style={styles.td}><strong>Vértices únicos (worker)</strong></td><td style={styles.td}>{job.metrics.vertex_count_unique}</td></tr>
+              <tr><td style={styles.td}><strong>Triângulos (worker)</strong></td><td style={styles.td}>{job.metrics.triangle_count}</td></tr>
               <tr><td style={styles.td}><strong>Watertight</strong></td><td style={styles.td}>{job.metrics.is_watertight ? "sim" : "não"}</td></tr>
+              <tr><td style={styles.td}><strong>Bounding box (mm)</strong></td><td style={styles.td}>{JSON.stringify(job.metrics.bounding_box_mm)}</td></tr>
             </tbody>
           </table>
 
+          {manifest && (
+            <>
+              <h2>Proveniência (manifesto de reprodutibilidade)</h2>
+              {metricsDivergence.length > 0 ? (
+                <p role="alert" data-testid="metrics-divergence-warning" style={styles.divergence}>
+                  Inconsistência detectada entre as métricas da API e do manifesto nos campos:{" "}
+                  {metricsDivergence.join(", ")}. Nenhum valor foi escolhido automaticamente -- verifique
+                  manualmente antes de confiar nesta execução.
+                </p>
+              ) : (
+                <p data-testid="metrics-consistency-ok" style={{ fontSize: "0.8rem", color: "var(--color-text-secondary)" }}>
+                  Métricas da API e do manifesto conferem.
+                </p>
+              )}
+              <table data-testid="job-provenance" style={{ borderCollapse: "collapse" }}>
+                <tbody>
+                  <tr><td style={styles.td}><strong>Provider de topologia</strong></td><td style={styles.td} data-testid="provenance-topology-provider">{topologyProvider?.kind ?? "?"} ({topologyProvider?.provider_class ?? "-"} v{topologyProvider?.version ?? "?"})</td></tr>
+                  <tr><td style={styles.td}><strong>Seed</strong></td><td style={styles.td} data-testid="provenance-seed">{String(seed ?? "?")}</td></tr>
+                  <tr><td style={styles.td}><strong>Modo</strong></td><td style={styles.td}>{String(mode ?? "?")}</td></tr>
+                  <tr><td style={styles.td}><strong>Resolução (voxel, mm)</strong></td><td style={styles.td}>{String(voxelSize ?? "?")}</td></tr>
+                  <tr><td style={styles.td}><strong>Versão do worker</strong></td><td style={styles.td}>{job.worker_version ?? "?"}</td></tr>
+                  <tr><td style={styles.td}><strong>Versão do .NET</strong></td><td style={styles.td}>{job.dotnet_version ?? "?"}</td></tr>
+                  <tr><td style={styles.td}><strong>Versão do PicoGK</strong></td><td style={styles.td}>{job.picogk_version ?? "?"}</td></tr>
+                  <tr><td style={styles.td}><strong>SHA-256 do STL</strong></td><td style={styles.td}>{String(manifestJson?.stl_sha256 ?? "?")}</td></tr>
+                  <tr><td style={styles.td}><strong>Status de revisão</strong></td><td style={styles.td}>não revisado (protótipo de pesquisa)</td></tr>
+                </tbody>
+              </table>
+            </>
+          )}
+
           <h2>Visualização 3D</h2>
-          <StlViewer stlUrl={stlArtifact ? client.artifactDownloadUrl(stlArtifact.id) : null} />
+          <StlViewer
+            artifactUrl={stlArtifact ? client.artifactDownloadUrl(stlArtifact.id) : null}
+            token={isDemoMode ? undefined : token}
+            expectedSha256={stlArtifact?.sha256}
+            declaredSizeBytes={stlArtifact?.size_bytes}
+            demoLabel={isDemoMode ? "Demonstração sintética -- não é o resultado de uma execução real" : undefined}
+          />
 
           <h2>Artefatos</h2>
+          {downloadError && <ErrorState message={downloadError} />}
           <ul>
             {artifacts.map((a) => (
               <li key={a.id}>
-                <a
-                  href={client.artifactDownloadUrl(a.id)}
-                  download
+                <button
+                  type="button"
                   data-testid={a.kind === "stl" ? "stl-download-link" : undefined}
+                  onClick={() => handleDownloadArtifact(a)}
+                  disabled={downloadingArtifactId === a.id}
                 >
-                  {a.kind} ({a.size_bytes} bytes, sha256: {a.sha256.slice(0, 12)}…)
-                </a>
+                  {downloadingArtifactId === a.id ? "Baixando…" : `${a.kind} (${a.size_bytes} bytes, sha256: ${a.sha256.slice(0, 12)}…)`}
+                </button>
               </li>
             ))}
           </ul>
 
           {manifest && (
             <details>
-              <summary>Manifesto de reprodutibilidade</summary>
+              <summary>Manifesto de reprodutibilidade (completo)</summary>
               <pre style={{ whiteSpace: "pre-wrap", fontSize: "0.75rem" }}>{JSON.stringify(manifest.manifest_json, null, 2)}</pre>
             </details>
           )}
@@ -189,4 +283,11 @@ export function JobDetailPage() {
 
 const styles: Record<string, React.CSSProperties> = {
   td: { padding: "var(--space-2)", borderBottom: "1px solid var(--color-border)" },
+  divergence: {
+    color: "var(--color-error)",
+    border: "1px solid var(--color-error)",
+    borderRadius: "var(--radius-sm)",
+    padding: "var(--space-2)",
+    fontSize: "0.85rem",
+  },
 };

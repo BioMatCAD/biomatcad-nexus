@@ -127,5 +127,6 @@ export async function downloadArtifactAsFile(
  * caracteres de controle -- nunca usa o nome bruto de um campo vindo da API diretamente no DOM
  * como atributo `download` sem passar por aqui. */
 export function sanitizeFilename(name: string): string {
+  // eslint-disable-next-line no-control-regex -- remoção intencional de caracteres de controle do nome de arquivo
   return name.replace(/[/\\]/g, "_").replace(/[\x00-\x1f]/g, "").slice(0, 200) || "artefato";
 }
