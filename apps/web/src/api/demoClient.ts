@@ -164,7 +164,12 @@ function simulateJobProgress(jobId: string): void {
       id: `demo-artifact-stl-${jobId}`,
       geometry_job_id: jobId,
       kind: "stl",
-      sha256: "0".repeat(64), // não é o SHA-256 real do arquivo -- apenas placeholder de demo
+      // SHA-256 REAL de public/demo-assets/sample-scaffold-block-gyroid.stl (verificado via
+      // sha256sum -- não é um placeholder). Precisa bater com o arquivo de verdade porque o
+      // StlViewer agora verifica o checksum do lado do cliente (Seção 2/6 da auditoria do
+      // visualizador); um placeholder aqui faria a demonstração do GitHub Pages falhar sempre
+      // com "checksum divergente", em vez de carregar a malha sintética.
+      sha256: "a1dffcd02a49df8dc514b63781ebed3028db7797a4d61cdb92c4f083d460fafc",
       size_bytes: 16884,
       created_at: new Date().toISOString(),
     };
@@ -172,8 +177,12 @@ function simulateJobProgress(jobId: string): void {
       id: `demo-artifact-manifest-${jobId}`,
       geometry_job_id: jobId,
       kind: "manifest",
-      sha256: "0".repeat(64),
-      size_bytes: 512,
+      // O endpoint de download de demonstração serve o MESMO arquivo estático para stl e
+      // manifest (ver artifactDownloadUrl abaixo) -- por isso o checksum aqui também precisa
+      // ser o do arquivo real servido, não um placeholder, senão o botão de download do
+      // manifesto falharia a verificação de checksum do lado do cliente.
+      sha256: "a1dffcd02a49df8dc514b63781ebed3028db7797a4d61cdb92c4f083d460fafc",
+      size_bytes: 16884,
       created_at: new Date().toISOString(),
     };
     demoStore.artifacts.push(stlArtifact, manifestArtifact);
