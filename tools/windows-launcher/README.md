@@ -1,5 +1,30 @@
 # BioMatCAD Nexus — Launcher Windows (Incremento 2.1.1)
 
+> **STATUS: PROTÓTIPO TÉCNICO — DESENVOLVIMENTO E VALIDAÇÃO WINDOWS DEFERIDOS**
+>
+> Decisão de escopo registrada no Incremento 2.2 Alpha Pesquisa: o desenvolvimento e a
+> validação adicional deste launcher/executável estão **suspensos**. O launcher **não é
+> requisito** do Alpha Pesquisa nem da qualificação de doutorado — API, PostgreSQL,
+> dispatcher, worker PicoGK e frontend já funcionam quando iniciados via PowerShell (ver
+> `scripts/Start-BioMatCAD-Research.ps1` na raiz do repositório, que é o caminho suportado
+> para pesquisa a partir de agora). O executável definitivo será retomado somente na fase de
+> distribuição comercial/clínica, quando deverá ser **redesenhado** considerando segurança,
+> serviços do Windows, atualização, assinatura digital, backups, rollback e proteção de dados
+> — não como uma evolução incremental deste protótipo.
+>
+> Fatos honestos a registrar:
+> - o launcher **não bloqueia** o núcleo científico do Incremento 2.2;
+> - o `.exe` publicado até aqui (SHA-256 `B6AE108C...`) **não deve ser distribuído**;
+> - o commit `f246507` permanece como **candidato não aprovado no Windows** (ver seção "Status
+>   de validação" abaixo para o histórico completo, incluindo as duas rodadas de flakiness
+>   real encontradas e corrigidas);
+> - a retomada do trabalho ocorrerá **antes** dos pilotos clínicos ou da distribuição
+>   comercial, nunca depois;
+> - **nenhuma validação clínica foi realizada** sobre este componente.
+>
+> Nenhum commit, teste ou evidência deste protótipo foi apagado ou reescrito — todo o
+> histórico abaixo permanece como registro técnico do trabalho já realizado.
+
 Iniciador executável de duplo clique que substitui a necessidade de abrir três PowerShells
 manuais para preparar e rodar o ambiente de desenvolvimento/teste do BioMatCAD Nexus (API +
 frontend). **É exclusivamente um utilitário de desenvolvimento/teste** — ver seção "Segurança".
