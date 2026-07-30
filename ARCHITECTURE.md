@@ -258,6 +258,56 @@ Correções concentradas em `apps/api/src/biomatcad_api/services/geometry_job_se
   (`apps/web/e2e/`), mas bloqueado neste sandbox Linux (faltam bibliotecas nativas do Chromium e
   `sudo` está desabilitado) — ver `apps/web/e2e/README.md`.
 
+## Incremento 2.2 Alpha Pesquisa — o que foi adicionado (branch `incremento-2.2-alpha-pesquisa`)
+
+Este incremento **não tenta desbloquear o PicoGK** (continua bloqueado neste sandbox Linux,
+ADR-0007) nem retoma o launcher Windows (classificado como protótipo técnico deferido — ver
+`docs/DEFERRED_WINDOWS_LAUNCHER.md` ou documento equivalente). O foco é a GUI de pesquisa, a
+observabilidade real, e três preparações arquiteturais auditáveis:
+
+- **Observabilidade real**: contrato de 6 estados operacionais (`healthy/degraded/unavailable/
+  stale/stopped/unknown`) derivado de checks reais (binário do worker compilado, heartbeat de
+  job `running`, tamanho da fila), nunca um estado "saudável" inventado — integrado à GUI
+  (`ObservabilityPage.tsx`, painel autenticado).
+- **GUI completa de pesquisa**: fluxo login → catálogo → projeto → receita → job → métricas →
+  visualizador 3D → download, com 3 lacunas reais fechadas nesta rodada: reenvio (retry) de
+  jobs falhos/cancelados, seleção de material antes do envio do job, e um aviso de proveniência
+  obrigatório acima da tabela de métricas (nunca deixar implícito que um resultado calculado é
+  validação experimental).
+- **Contrato `TopologyProvider` (ADR-0009)**: abstração versionada e explícita, espelhada em
+  Python (`apps/api/src/biomatcad_api/services/topology_providers.py`) e C#
+  (`apps/geometry-worker/ITopologyProvider.cs` +  `TopologyProviderRegistry.cs`), com
+  `GyroidTopologyProvider` como única implementação real (delega 1:1 para o
+  `GyroidScaffoldBuilder` já existente, sem alterar nenhum resultado das 3 golden recipes
+  aprovadas) e `voronoi` registrado como `status="planned"` — rejeitado explicitamente em
+  ambos os lados até ter implementação real. Nenhum carregamento dinâmico/reflection/eval é
+  usado; toda topologia suportada é uma classe estaticamente compilada. O provider
+  efetivamente usado é registrado no manifesto (`manifest_json["topology_provider"]`).
+- **Preparação técnica para Voronoi** (`docs/architecture/voronoi-topology-preparation.md`):
+  documento de arquitetura (sem código) cobrindo geração de sítios, distribuição determinística
+  por seed, diagrama de Voronoi, extração de grafo, geração de struts, suavização de nós
+  (comparação técnica evenhanded entre Catmull–Clark e cápsulas implícitas/smooth-union do
+  PicoGK, sem preferência estética), recorte pelo domínio anatômico, calibração de porosidade,
+  conectividade, métricas, manifold/watertight e limites computacionais. Nenhuma dessas etapas
+  foi implementada em código nesta rodada.
+- **Módulo de inteligência computacional** (`apps/api/src/biomatcad_api/services/
+  computational_intelligence.py`): apenas contratos de dados (`DesignConstraints`,
+  `DesignProposal`, `ObjectiveComparison`, `DesignIterationRecord`) e um `Protocol`
+  (`DesignAdvisor`) sem nenhuma implementação concreta, mais 3 funções reais e determinísticas
+  (listagem de providers compatíveis via o registro real do TopologyProvider, comparação
+  aritmética de métricas contra objetivos, montagem de um registro de decisão manual completo
+  com `algorithm_name` sempre `"manual-researcher-decision"`). Nenhuma alegação de equivalência
+  a softwares de IA autônoma proprietários é feita.
+- **Identidade visual oficial**: logomarca original preservada byte a byte
+  (`apps/web/public/brand/biomatcad-nexus-logo-original.png`), derivados gerados por operações
+  não-destrutivas (remoção de fundo por conectividade de borda, recorte, redimensionamento) —
+  componente `BrandLogo` (`apps/web/src/components/brand/BrandLogo.tsx`) integrado em
+  landing/login/cabeçalho/sidebar/página "Sobre" (`/about`, nova), favicon e manifesto PWA
+  usando o placeholder `%BASE_URL%` do Vite para funcionar tanto no build normal quanto no de
+  demonstração do GitHub Pages. Origem, autoria, situação de licença e uma limitação real de
+  contraste no tema escuro (medida, não corrigida por redesenho) estão em
+  `docs/brand/ASSETS_NOTICE.md`.
+
 ## Próximo incremento sugerido
 
 Ver `REQUIREMENTS_MATRIX.md`, `ROADMAP.md` e `docs/adr/` para prioridades. O Prompt Mestre

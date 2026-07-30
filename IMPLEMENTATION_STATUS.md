@@ -1,17 +1,56 @@
 # Status de Implementação — BioMatCAD Nexus
 
-Última atualização: 2026-07-29 (Incremento 2.1.1 da Fase 2 — corretivo sobre defeitos
-encontrados em auditoria do Incremento 2.1). **Bloqueio de runtime nativo do PicoGK em
-linux-x64 (ADR-0007/ADR-0008) permanece verdadeiro apenas para ESTE sandbox de desenvolvimento
-Linux** — o worker PicoGK real foi executado com sucesso no Windows do usuário, incluindo o
-gate final de produção completo (fila real -> dispatcher real -> worker PicoGK real -> STL ->
-Artifact -> Manifest -> download, `TEST_EVIDENCE.md` §16). A vertical completa do Incremento
-2.1.1 está aprovada; falta apenas o empacotamento final v2.2.1 (ver seção dedicada). Este
-documento existe para que ninguém — incluindo IAs de desenvolvimento futuras — precise
-adivinhar o que é real. Regra do Prompt Mestre §3.1: nada aqui é descrito como "completo" sem
-ter sido executado e testado nesta sessão. As seções sobre o Incremento 1.1 e o Incremento 2.1
-abaixo são mantidas como registro histórico; a seção "Incremento 2.1.1", logo em seguida, é a
-mais atual e deve ser lida primeiro.
+Última atualização: 2026-07-30 (Incremento 2.2 Alpha Pesquisa, branch
+`incremento-2.2-alpha-pesquisa` — pesquisa apenas; launcher Windows formalmente DEFERIDO, não
+retomado; nenhum dado clínico/paciente real neste incremento). A seção "Incremento 2.2 Alpha
+Pesquisa", logo abaixo, é a mais atual e deve ser lida primeiro. **Bloqueio de runtime nativo do
+PicoGK em linux-x64 (ADR-0007/ADR-0008) permanece verdadeiro apenas para ESTE sandbox de
+desenvolvimento Linux** — o worker PicoGK real foi executado com sucesso no Windows do usuário
+em incrementos anteriores. Este documento existe para que ninguém — incluindo IAs de
+desenvolvimento futuras — precise adivinhar o que é real. Regra do Prompt Mestre §3.1: nada aqui
+é descrito como "completo" sem ter sido executado e testado nesta sessão. As seções sobre os
+Incrementos 1.1, 2.1 e 2.1.1 abaixo são mantidas como registro histórico.
+
+## Incremento 2.2 Alpha Pesquisa — resumo (branch `incremento-2.2-alpha-pesquisa`)
+
+Escopo desta rodada: observabilidade real + integração à GUI, GUI completa de pesquisa (retry,
+seleção de material, aviso de proveniência), contrato `TopologyProvider` versionado (ADR-0009),
+documentação de preparação técnica para Voronoi (sem código), módulo de inteligência
+computacional (apenas contratos/registro de decisão, sem IA autônoma real), e integração da
+identidade visual oficial (logo). Fora de escopo, explicitamente: prontuário, telemedicina,
+dados clínicos reais, integração hospitalar, DICOM, prescrição, diagnóstico, produção clínica,
+instalador clínico, launcher definitivo, dados pessoais de pacientes.
+
+| Item | Status | Evidência |
+|---|---|---|
+| Observabilidade real (6 estados, checks reais) | **Real** | `apps/api/tests/test_observability.py`; painel `ObservabilityPage.tsx` |
+| GUI completa de pesquisa (retry, material, proveniência) | **Real** | `apps/web/tests/JobDetailPage.test.tsx`, `ProjectDetailPage.test.tsx`, `RecipeDetailPage.test.tsx`, `MaterialDetailPage.test.tsx` |
+| Contrato `TopologyProvider` (Gyroid real, Voronoi `planned`) | **Real** | ADR-0009; `apps/api/tests/test_topology_providers.py` (7 testes); `BioMatCadGeometryWorker.TopologyProviderTests` (5 testes) |
+| Preparação técnica para Voronoi | **Documentação apenas, sem código** | `docs/architecture/voronoi-topology-preparation.md` |
+| Módulo de inteligência computacional | **Contratos + registro de decisão real; nenhuma IA autônoma concreta** | `apps/api/tests/test_computational_intelligence.py` (7 testes, incluindo regressão que barra implementação concreta de `DesignAdvisor`) |
+| Identidade visual oficial (logo) | **Real** | `apps/web/tests/brandAssets.test.ts`, `BrandLogo.test.tsx`, `AboutPage.test.tsx`; `docs/brand/ASSETS_NOTICE.md` |
+| Visualizador 3D consolidado (checklist completo) | **Pendente** | Já usa STL real (`StlViewer.tsx`); auditoria completa do checklist de recursos ainda não fechada nesta rodada |
+| E2E Playwright ponta a ponta neste sandbox | **Bloqueado** (mesma limitação de incrementos anteriores) | `apps/web/e2e/README.md`, `playwright.config.ts` — falta biblioteca nativa do Chromium, sem `sudo` |
+
+### Achado real de ambiente de teste (não uma regressão de código) — registrado com transparência
+
+Ao rodar a suíte backend completa nesta rodada, dois testes falharam de forma reprodutível
+(`test_two_concurrent_dispatchers_never_claim_the_same_job` reivindicando mais jobs do que os 24
+criados pelo próprio teste; `test_clinical_suite_expiration_is_respected` com
+`TypeError: can't compare offset-naive and offset-aware datetimes`). Investigação (não
+descartada como "flake" sem prova): o `DATABASE_URL` usado apontava para uma instância Postgres
+efêmera (`pgserver`) cujo diretório de dados físico (`/tmp/pgserver-inc22` e variantes)
+**persiste em disco entre invocações separadas do sandbox**, sem estar mais garantido que
+`Base.metadata.drop_all()` (teardown da fixture `engine`) sempre executa até o fim se uma
+invocação anterior foi interrompida — deixando linhas `QUEUED` órfãs e ao menos uma linha de
+`clinical_suite` com datetime naive de uma execução anterior. **Prova**: subindo uma instância
+`pgserver` nova, com diretório de dados vazio, dentro da MESMA chamada, a suíte completa passou
+**135 aprovados, 2 pulados, 0 falhas** — confirmando que o mecanismo de exclusão mútua
+(`SELECT ... FOR UPDATE SKIP LOCKED`) e a lógica de expiração da suíte clínica estão corretos;
+o problema é higiene de dados de teste entre invocações do sandbox, não um defeito de código
+introduzido nesta ou em rodadas anteriores. Recomendação registrada para um próximo incremento:
+a fixture `engine` deveria fazer `TRUNCATE`/`DROP SCHEMA CASCADE` no **início** da sessão de
+testes (não só no fim), para não depender de um teardown limpo da execução anterior.
 
 ## Legenda
 

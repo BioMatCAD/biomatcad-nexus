@@ -28,6 +28,14 @@ decisões que o sustentam.
   Ajv contra o schema real, fingerprint de demonstração corrigido. **Mesmo bloqueio de execução
   real do PicoGK** desta sessão continua valendo — nenhuma dessas correções foi provada contra
   uma malha PicoGK real ainda (ver `IMPLEMENTATION_STATUS.md`).
+- **Fase 2 (Incremento 2.2 Alpha Pesquisa, em andamento)**: observabilidade real integrada à
+  GUI; GUI completa de pesquisa (retry, seleção de material, aviso de proveniência); contrato
+  `TopologyProvider` versionado (Gyroid real, Voronoi registrado como `planned`, ADR-0009);
+  documentação de preparação técnica para Voronoi (sem código); módulo de inteligência
+  computacional (apenas contratos + registro de decisão manual, sem IA autônoma real);
+  identidade visual oficial integrada (logo, favicon, PWA, página Sobre). Launcher Windows
+  permanece formalmente **deferido** (não retomado). Ainda **não concluído**: visualizador 3D
+  (checklist completo), Voronoi como implementação real, empacotamento final v2.2.
 
 ## Próximo (prioridade, nesta ordem)
 
@@ -60,6 +68,28 @@ decisões que o sustentam.
    acumular funcionalidade não verificável.
 5. **FEM (Fase 2, continuação)** — explicitamente fora de escopo do Incremento 2.1/2.1.1; só
    deve começar depois que a vertical geométrica estiver realmente executável.
+
+## Pendências para fechar o Incremento 2.2 Alpha Pesquisa
+
+Registradas aqui para não perder o fio entre sessões — nenhuma delas foi decidida como "próxima"
+sem confirmação do usuário, apenas listadas como o que falta para poder declarar este
+incremento concluído:
+
+1. **Visualizador 3D consolidado** — já usa STL real (não substituto), mas o checklist completo
+   de recursos (órbita/pan/zoom, wireframe, transparência, eixos, escala, plano de corte,
+   screenshot, bounding box, métricas sobrepostas, LOD, estados de carregamento/erro/artefato
+   indisponível) ainda não foi auditado item a item nesta rodada.
+2. **`VoronoiTopologyProvider` real** — a preparação técnica (`docs/architecture/
+   voronoi-topology-preparation.md`) está pronta; a implementação real (geração de sítios,
+   diagrama, grafo, struts, suavização) é trabalho de um incremento futuro, condicionado a
+   resolver antes a proveniência/licença das bibliotecas de referência citadas no documento
+   (`trimesh`, `manifold3d`, `rtree` — não auditadas nesta rodada).
+3. **`DesignAdvisor` concreto** — hoje é só um `Protocol` sem implementação; qualquer
+   implementação futura precisa registrar-se explicitamente (mesmo princípio de
+   não-descoberta-automática do `TopologyProviderRegistry`) e nunca decidir sozinha sem revisão
+   humana registrada.
+4. **Empacotamento final v2.2** — explicitamente NÃO feito nesta rodada, por instrução: nenhum
+   pacote final foi gerado, e o incremento não foi declarado concluído.
 
 ## Dependências deferidas (Incremento 2.1.1)
 

@@ -144,6 +144,20 @@ sandbox Linux**, onde o PicoGK nunca esteve disponível (ADR-0007). **Atualizaç
 evidência literal. O bloqueio permanece verdadeiro apenas como uma limitação estrutural DESTE
 ambiente de desenvolvimento Linux, não do produto entregue.
 
+## G. Incremento 2.2 Alpha Pesquisa (branch `incremento-2.2-alpha-pesquisa`)
+
+Escopo: pesquisa apenas (launcher Windows deferido, sem dados clínicos/pacientes). Ver
+`IMPLEMENTATION_STATUS.md` (seção dedicada) e `docs/adr/0009-topology-provider-contract.md`
+para detalhamento.
+
+| ID | Requisito relacionado | O que foi implementado nesta sessão | Status |
+|---|---|---|---|
+| AP-08 (extensão) | Arquiteturas TPMS: Gyroid, Schwarz-P, IWP; preparação para Voronoi | Contrato `TopologyProvider` versionado (Python + C#, ADR-0009): `GyroidTopologyProvider` real (delega para o `GyroidScaffoldBuilder` já aprovado, sem alterar as 3 golden recipes); `voronoi` registrado como `status="planned"`, rejeitado por ambos os lados. Documentação de arquitetura completa para Voronoi (`docs/architecture/voronoi-topology-preparation.md`) — sítios, distribuição por seed, diagrama, grafo, struts, suavização de nós (Catmull–Clark × cápsulas implícitas/smooth-union, comparação evenhanded), recorte anatômico, calibração de porosidade, conectividade, métricas, manifold, limites computacionais | **TopologyProvider real e testado (12 testes novos); Voronoi apenas documentado, sem código** |
+| PM-ONLY (novo) | Inteligência computacional auditável (não "IA autônoma") | Contratos de dados + `Protocol` `DesignAdvisor` sem implementação concreta; 3 funções reais (listagem de providers compatíveis, comparação de métricas a objetivos, montagem de registro de decisão manual) — nenhuma alegação de equivalência a softwares proprietários de design autônomo | **Contratos e registro de decisão reais; nenhuma automação de design real** |
+| Identidade visual (novo) | Logomarca oficial integrada à GUI/Pages | Arquivo original preservado byte a byte; derivados (horizontal, símbolo, favicon, PWA) gerados sem redesenho; integrada em landing/login/cabeçalho/sidebar/página Sobre; favicon/manifest com caminho-base correto (`%BASE_URL%`) verificado nos dois builds (normal e GitHub Pages) | **Implementado e verificado em ambos os builds** |
+| GUI de pesquisa (extensão) | Fluxo completo pesquisador | Retry de job falho/cancelado, seleção de material antes do envio, aviso obrigatório de proveniência acima das métricas | **Implementado, testado** |
+| Observabilidade (extensão) | Estados operacionais reais | Painel integrado (`ObservabilityPage.tsx`), 6 estados nunca fabricados | **Implementado, testado** |
+
 ## Resumo de bloqueios remanescentes antes da Fase 1
 
 1. **`ARCH-DIVERGE-01`:** resolvido definitivamente pelo ADR-0002 (atualizado 2026-07-27):

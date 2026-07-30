@@ -1003,6 +1003,99 @@ Com os três provados independentemente (interface real, geometria real, e agora
 produção completo real), a **vertical completa do Incremento 2.1.1 está aprovada no Windows do
 usuário**.
 
+## 17. Incremento 2.2 Alpha Pesquisa -- verificação final da rodada (TopologyProvider, Voronoi doc, inteligência computacional, identidade visual) (2026-07-30)
+
+### Backend (`apps/api`) -- pytest
+
+Primeira tentativa (contra o `DATABASE_URL` de instância pgserver já em uso no sandbox nesta
+sessão): `2 failed, 133 passed, 2 skipped` --
+`test_two_concurrent_dispatchers_never_claim_the_same_job` (reivindicou 37 jobs em vez dos 24
+criados pelo próprio teste) e `test_clinical_suite_expiration_is_respected`
+(`TypeError: can't compare offset-naive and offset-aware datetimes`).
+
+Investigação (ver `IMPLEMENTATION_STATUS.md`, seção "Achado real de ambiente de teste"):
+confirmado que o diretório de dados físico do Postgres efêmero usado (`/tmp/pgserver-inc22` e
+variantes, achados via `find /tmp -iname "*pgserver*"`) persiste em disco entre invocações
+separadas do sandbox, e a fixture `engine` (session-scoped, `Base.metadata.drop_all()` no
+teardown) não protege contra dados órfãos de uma invocação anterior que não chegou a terminar
+normalmente.
+
+**Prova real, não suposição**: subindo uma instância `pgserver` nova com diretório de dados
+vazio (`/tmp/pg-clean-verify-inc22`, criado e destruído nesta mesma verificação), dentro da
+MESMA chamada de shell (para não perder o processo entre invocações), a suíte completa rodou:
+
+```text
+135 passed, 2 skipped, 2 warnings in 30.98s
+```
+
+Confirma que a lógica de exclusão mútua da fila (`SELECT ... FOR UPDATE SKIP LOCKED`) e a
+expiração da suíte clínica estão corretas -- as duas falhas iniciais eram dados de teste
+órfãos, não uma regressão introduzida nesta ou em rodadas anteriores. Diretórios temporários de
+verificação removidos ao final (`rm -rf /tmp/pg-clean-verify-inc22*`).
+
+### Worker C# (`apps/geometry-worker`) -- dotnet build/test
+
+```text
+dotnet build BioMatCadGeometryWorker.csproj
+  Build succeeded. 0 Warning(s), 0 Error(s)
+
+dotnet test tests/BioMatCadGeometryWorker.Tests/BioMatCadGeometryWorker.Tests.csproj
+  Passed! - Failed: 0, Passed: 62, Skipped: 0, Total: 62
+
+dotnet test tests/BioMatCadGeometryWorker.TopologyProviderTests/BioMatCadGeometryWorker.TopologyProviderTests.csproj
+  Passed! - Failed: 0, Passed: 5, Skipped: 0, Total: 5
+```
+
+`bin/`/`obj/` (gitignorados) removidos após a verificação, conforme lição operacional já
+documentada no commit do `TopologyProvider` (evita falso-negativo em
+`test_worker_unavailable_quando_binario_nao_compilado`).
+
+### Frontend (`apps/web`) -- tsc, eslint, vitest, build normal e de demonstração
+
+```text
+npx tsc --noEmit         -> sem erros
+npx eslint . --max-warnings=0  -> sem erros/avisos
+npx vitest run           -> Test Files 20 passed (20); Tests 69 passed (69)
+```
+
+Build duplo, inspecionado literalmente (não apenas testado por unidade):
+
+```text
+npm run build        -> dist/index.html usa /brand/favicon-*.png e /manifest.json (base "/")
+npm run build:pages   -> dist/index.html usa /biomatcad-nexus/brand/favicon-*.png e
+                         /biomatcad-nexus/manifest.json (base "/biomatcad-nexus/")
+```
+
+`dist/brand/` contém os 11 arquivos esperados em ambos os builds; `dist/manifest.json` presente
+com os caminhos de ícone relativos (`brand/pwa-icon-192.png`, sem barra inicial).
+
+### Validação de schema
+
+`test_recipe_schema.py::test_golden_recipes_all_validate` (dentro da suíte de 135 acima) --
+as 3 golden recipes continuam válidas contra `geometry-recipe-v1.schema.json`, intocado nesta
+rodada (o `TopologyProvider` é uma segunda camada de defesa além do schema, não uma substituição
+dele).
+
+### E2E Playwright
+
+Não executado nesta rodada -- mesma limitação já documentada em `apps/web/e2e/README.md` e
+`playwright.config.ts` (bibliotecas nativas do Chromium ausentes neste sandbox Linux, sem
+`sudo` para instalar). Os binários do Chromium existem em cache
+(`~/.cache/ms-playwright`), mas isso não substitui as bibliotecas de sistema necessárias --
+não tentado novamente nesta rodada por já estar exaustivamente investigado e documentado em
+sessões anteriores.
+
+### Resumo desta seção
+
+| Suíte | Resultado |
+|---|---|
+| Backend pytest (ambiente limpo) | 135 passed, 2 skipped, 0 failed |
+| Worker C# (dois projetos de teste) | 67 passed (62 + 5), 0 failed |
+| Frontend vitest | 69 passed, 0 failed |
+| Frontend tsc/eslint | sem erros |
+| Build normal + build:pages | ambos verificados literalmente (caminho-base correto) |
+| E2E Playwright | não executável neste sandbox (limitação já documentada, não nova) |
+
 ## O que esta evidência explicitamente NÃO cobre
 
 - **Consistência STL-vs-manifesto via fluxo completo API→dispatcher→worker PicoGK real→
