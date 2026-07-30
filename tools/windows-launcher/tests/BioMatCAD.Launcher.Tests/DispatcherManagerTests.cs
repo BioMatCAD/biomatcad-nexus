@@ -129,11 +129,6 @@ public class DispatcherStatusReaderTests
 
 public class DispatcherManagerTests
 {
-    private static (string FileName, string[] Args) LongRunningCommand(int seconds) =>
-        OperatingSystem.IsWindows()
-            ? ("cmd.exe", new[] { "/c", "timeout", "/t", seconds.ToString() })
-            : ("sleep", new[] { seconds.ToString() });
-
     [Fact]
     public void CanStartNewInstance_SemStatusFile_PermiteIniciar()
     {
@@ -141,7 +136,7 @@ public class DispatcherManagerTests
         var tmpDir = Directory.CreateTempSubdirectory("biomatcad-dispatcher-test-");
         try
         {
-            var manager = new DispatcherManager(supervisor, tmpDir.FullName, "python3",
+            var manager = new DispatcherManager(supervisor, tmpDir.FullName, "não-invocado-neste-teste",
                 Path.Combine(tmpDir.FullName, "status.json"), Path.Combine(tmpDir.FullName, "stop"));
 
             var (canStart, reason) = manager.CanStartNewInstance();
@@ -167,7 +162,7 @@ public class DispatcherManagerTests
                  "jobs_processed_total":0,"current_poll_interval_seconds":3.0,"last_job_id":null}
                 """);
 
-            var manager = new DispatcherManager(supervisor, tmpDir.FullName, "python3", statusFile, Path.Combine(tmpDir.FullName, "stop"));
+            var manager = new DispatcherManager(supervisor, tmpDir.FullName, "não-invocado-neste-teste", statusFile, Path.Combine(tmpDir.FullName, "stop"));
             var (canStart, reason) = manager.CanStartNewInstance();
 
             Assert.False(canStart);
@@ -191,7 +186,7 @@ public class DispatcherManagerTests
                  "jobs_processed_total":0,"current_poll_interval_seconds":3.0,"last_job_id":null}
                 """);
 
-            var manager = new DispatcherManager(supervisor, tmpDir.FullName, "python3", statusFile, Path.Combine(tmpDir.FullName, "stop"));
+            var manager = new DispatcherManager(supervisor, tmpDir.FullName, "não-invocado-neste-teste", statusFile, Path.Combine(tmpDir.FullName, "stop"));
             var (canStart, _) = manager.CanStartNewInstance();
 
             Assert.True(canStart, "um status 'running' com PID morto (órfão de execução anterior) não deve bloquear um novo dispatcher");
@@ -202,31 +197,22 @@ public class DispatcherManagerTests
     [Fact]
     public void RequestGracefulStopAndWait_ProcessoRespondeAoStopFile_RetornaTrueDentroDoTimeout()
     {
-        // Processo real que simula o comportamento do dispatcher: fica vivo até o stop_file
-        // aparecer, então escreve state=stopped no status file e sai -- prova o mecanismo real
-        // de arquivo sentinela ponta a ponta (não apenas em memória), com um processo do SO de
-        // verdade, sem precisar do dispatcher Python completo.
+        // Processo real (TestHelperProcess, multiplataforma) que simula o comportamento do
+        // dispatcher: fica vivo até o stop_file aparecer, então escreve state=stopped no status
+        // file e sai -- prova o mecanismo real de arquivo sentinela ponta a ponta (não apenas
+        // em memória), com um processo do SO de verdade. Bug real corrigido nesta rodada: este
+        // teste invocava "python3" diretamente, que não existe no Windows -- substituído pelo
+        // processo auxiliar multiplataforma controlado (ver TestHelperProcessLocator).
         using var supervisor = new ProcessSupervisor();
         var tmpDir = Directory.CreateTempSubdirectory("biomatcad-dispatcher-test-");
         try
         {
             var statusFile = Path.Combine(tmpDir.FullName, "status.json");
             var stopFile = Path.Combine(tmpDir.FullName, "stop");
-            var manager = new DispatcherManager(supervisor, tmpDir.FullName, "python3", statusFile, stopFile);
+            var manager = new DispatcherManager(supervisor, tmpDir.FullName, "não-invocado-neste-teste", statusFile, stopFile);
 
-            var fakeDispatcherScript =
-                "import time, json, os, sys\n" +
-                $"stop_file = r'{stopFile}'\n" +
-                $"status_file = r'{statusFile}'\n" +
-                "for _ in range(200):\n" +
-                "    if os.path.exists(stop_file):\n" +
-                "        break\n" +
-                "    time.sleep(0.05)\n" +
-                "with open(status_file, 'w') as f:\n" +
-                "    json.dump({'dispatcher_id':'fake','pid':os.getpid(),'state':'stopped','phase':'idle'," +
-                "'started_at':'x','last_poll_at':'x','jobs_processed_total':0,'current_poll_interval_seconds':3.0,'last_job_id':None}, f)\n";
-
-            var handle = supervisor.StartTracked("dispatcher", "python3", ["-c", fakeDispatcherScript], tmpDir.FullName);
+            var (fileName, args) = TestHelperProcessLocator.Command("watch-stopfile", stopFile, statusFile);
+            var handle = supervisor.StartTracked("dispatcher", fileName, args, tmpDir.FullName);
             Assert.True(handle.ProcessId > 0);
 
             var stoppedGracefully = manager.RequestGracefulStopAndWait(TimeSpan.FromSeconds(10));
@@ -261,12 +247,14 @@ public class DispatcherManagerTests
                 """);
             Assert.True(File.Exists(statusFile));
 
-            var manager = new DispatcherManager(supervisor, tmpDir.FullName, "python3", statusFile, stopFile);
+            var manager = new DispatcherManager(supervisor, tmpDir.FullName, TestHelperProcessLocator.DotnetPath, statusFile, stopFile);
 
-            // Start() aponta para scripts/geometry_dispatcher.py dentro de tmpDir, que nao existe
-            // -- o processo python provavelmente falhara ao iniciar, mas isso e irrelevante aqui:
-            // testamos apenas o efeito colateral sincrono (remocao do status.json obsoleto), que
-            // deve acontecer antes de qualquer tentativa de spawnar o processo.
+            // Start() aponta para scripts/geometry_dispatcher.py dentro de tmpDir, que nao existe -- o
+            // processo real (dotnet, resolvido via TestHelperProcessLocator -- um executavel que
+            // SEMPRE existe, evitando o Win32Exception que "python3" causaria no Windows)
+            // provavelmente falhara ao rodar esse argumento sem sentido, mas isso e irrelevante
+            // aqui: testamos apenas o efeito colateral sincrono (remocao do status.json obsoleto),
+            // que deve acontecer antes de qualquer tentativa de spawnar o processo.
             manager.Start(basePollIntervalSeconds: 3.0);
 
             Assert.False(File.Exists(statusFile));
@@ -286,9 +274,9 @@ public class DispatcherManagerTests
         {
             var statusFile = Path.Combine(tmpDir.FullName, "status.json");
             var stopFile = Path.Combine(tmpDir.FullName, "stop");
-            var manager = new DispatcherManager(supervisor, tmpDir.FullName, "python3", statusFile, stopFile);
+            var manager = new DispatcherManager(supervisor, tmpDir.FullName, "não-invocado-neste-teste", statusFile, stopFile);
 
-            var (fileName, args) = LongRunningCommand(30); // nunca olha para o stop_file
+            var (fileName, args) = TestHelperProcessLocator.Command("sleep", "30"); // nunca olha para o stop_file
             supervisor.StartTracked("dispatcher", fileName, args, tmpDir.FullName);
 
             var stoppedGracefully = manager.RequestGracefulStopAndWait(TimeSpan.FromMilliseconds(500));

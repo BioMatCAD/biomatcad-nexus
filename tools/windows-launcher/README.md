@@ -102,11 +102,17 @@ tools/windows-launcher/
 
 ## Testes
 
-`tools/windows-launcher/tests/BioMatCAD.Launcher.Tests/` — 54 testes xUnit, **todos reais**
+`tools/windows-launcher/tests/BioMatCAD.Launcher.Tests/` — 101 testes xUnit, **todos reais**
 (sem mocks/fakes de sistema operacional): usam diretórios temporários reais, sockets TCP
-reais, subprocessos reais (`python3`/`node`/`npm`/`dotnet` genuinamente instalados no ambiente
-de teste, e `sleep`/`cmd.exe timeout` como processos de longa duração descartáveis para os
-testes de supervisão). Cobrem explicitamente os 10 cenários pedidos:
+reais, subprocessos reais. Onde é preciso um "processo real de longa duração ou controlado"
+para testes de supervisão (em vez de `node`/`npm`/`dotnet` genuinamente instalados, usados
+para os cenários de detecção de dependências em si), os testes usam
+`tests/TestHelperProcess` — um executável .NET puro, genuinamente multiplataforma, sem
+nenhuma dependência de `sh`/`sleep`/`python3`/`cmd.exe timeout` do sistema operacional (ver
+"Incremento 2.2, Seção 2 — commit 774b5ae" acima para o porquê desta mudança: a versão
+anterior desses testes dependia de binários específicos do SO e falhou de verdade na
+validação no Windows). Cobrem explicitamente os 10 cenários pedidos originalmente, mais os
+casos de regressão adicionados desde então:
 
 | # | Cenário pedido | Onde |
 |---|---|---|
@@ -127,7 +133,8 @@ Rodar localmente:
 dotnet test tools/windows-launcher/tests/BioMatCAD.Launcher.Tests/BioMatCAD.Launcher.Tests.csproj
 ```
 
-**Resultado real obtido no sandbox de desenvolvimento (Linux) nesta rodada: 54/54 passaram.**
+**Resultado real obtido no sandbox de desenvolvimento (Linux) nesta rodada: 101/101 passaram.**
+Isso NÃO substitui a validação real no Windows -- ver a seção "Status de validação" acima.
 `Program.cs` em si (orquestração/`Main`) não é compilado no projeto de testes por usar
 top-level statements — toda a lógica que ele orquestra vive nas classes acima, que são
 testadas diretamente. `Program.cs` foi validado por execução manual real neste sandbox
@@ -178,3 +185,46 @@ fora do histórico Git, conforme instruções de entrega).
   porta já ocupada, não foram confirmados individualmente porque o relato não entrou nesse
   nível de detalhe — isso não invalida a aprovação do caminho principal, apenas não é afirmado
   aqui como confirmado).
+
+### Incremento 2.2, Seção 2 — commit 774b5ae: FALHOU no Windows real (14 testes)
+
+Registro honesto, como manda a regra deste projeto de nunca declarar sucesso sem prova real:
+o commit `774b5ae` (integração do launcher com banco/API/dispatcher/frontend) foi validado
+apenas no sandbox Linux (`dotnet build` aprovado, 97 testes C# passando) antes de ser entregue
+ao usuário. Quando o usuário rodou `dotnet build` + `dotnet test` de verdade no Windows,
+**14 dos 97 testes falharam**. Nenhum problema de geometria, API ou frontend foi encontrado —
+todas as falhas eram de portabilidade Windows do próprio launcher e da sua suíte de testes:
+
+1. `DependencyDetector`/`PathResolver`: quatro testes de detecção de dependências tinham
+   `isWindows: false` **hardcoded**, mas liam o `PATH` real da máquina que roda os testes. No
+   Windows real isso fazia a resolução de `npm` encontrar o script POSIX sem extensão (que o
+   instalador do Node também deixa ao lado de `npm.cmd`) em vez de `npm.cmd`, e tentar executá-lo
+   diretamente — falha real com "not a valid Win32 application".
+2. `DispatcherManagerTests`: dois testes invocavam `"python3"` diretamente como nome de
+   processo — inexistente no Windows (que usa `python.exe`/`py.exe`).
+3. `PathResolverWindowsCompositionTests`: três testes comparavam caminhos resolvidos com
+   `Assert.Equal`/`Assert.EndsWith` sensíveis a maiúsculas/minúsculas; em Windows real
+   (filesystem case-insensitive), o sufixo do `PATHEXT` (`.EXE`, maiúsculo) é preservado na
+   resolução e não bate literalmente com a extensão em minúsculas do teste (`.exe`) — a
+   resolução em si estava correta, a asserção do teste é que era frágil.
+4. `ProcessSupervisorTests`: seis testes usavam `cmd.exe /c timeout /t N` (falha real e
+   intermitente no Windows quando executado sem console interativo real) e uma composição de
+   string via `cmd.exe`/`sh` para propagação de variável de ambiente (frágil por depender da
+   sintaxe exata de expansão/redirecionamento de cada shell).
+5. `StartTracked_ComLogFilePath...`: o `StreamWriter` do arquivo de log não era fechado antes
+   de o teste tentar apagar seu diretório temporário — no Windows (ao contrário do Linux), um
+   arquivo com handle aberto não pode ser apagado, causando falha real de limpeza.
+
+**Correção aplicada nesta rodada** (commit seguinte a `774b5ae`, ver `git log`): as quatro
+detecções agora usam `OperatingSystem.IsWindows()` de verdade; foi criado um processo auxiliar
+de testes genuinamente multiplataforma (`tests/TestHelperProcess`, um executável .NET puro,
+sem shell/sh/sleep/python3/cmd.exe) usado por todos os testes que antes dependiam de binários
+específicos do SO; as asserções de caminho passaram a comparar com
+`StringComparison.OrdinalIgnoreCase`; `ProcessSupervisor.Dispose()` foi reforçado para esperar
+a saída do processo e fechar (`Flush`+`Dispose`) o `LogWriter` antes de retornar. Quatro novos
+testes de regressão foram adicionados (prioridade de `npm.cmd`, case-insensitividade de
+PATH/PATHEXT, dispose do arquivo de log, isolamento entre instâncias de `ProcessSupervisor`).
+`dotnet test` no sandbox Linux agora passa 101/101 — **mas, como o próprio bug desta seção
+prova, sucesso no sandbox Linux não é prova suficiente de sucesso no Windows real**. A
+aprovação final desta seção continua condicionada à nova execução real do usuário no Windows,
+relatando 0 falhas.

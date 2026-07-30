@@ -273,13 +273,40 @@ public sealed class ProcessSupervisor : IDisposable
         }
     }
 
+    /// <summary>
+    /// Encerra todos os processos rastreados e libera de verdade seus recursos: espera
+    /// (com timeout curto e limitado) cada processo terminar de fato, e só então descarta o
+    /// StreamWriter do arquivo de log (se houver) e o próprio objeto Process. A ordem importa
+    /// no Windows -- ao contrário do Linux, um arquivo com um handle ainda aberto não pode ser
+    /// apagado nem movido; sem esperar a saída do processo e sem descartar explicitamente o
+    /// LogWriter aqui, um chamador que tentasse limpar um diretório temporário logo após
+    /// Dispose() (ex.: um teste apagando sua pasta de trabalho) falharia no Windows com "o
+    /// processo não pode acessar o arquivo porque ele está sendo usado por outro processo" --
+    /// bug real relatado pelo usuário na validação do commit 774b5ae.
+    /// </summary>
     public void Dispose()
     {
-        ShutdownAll();
         lock (_lock)
         {
-            foreach (var child in _children)
+            for (var i = _children.Count - 1; i >= 0; i--)
             {
+                var child = _children[i];
+                TryKillTree(child.Process);
+                try
+                {
+                    // Espera limitada: o processo já recebeu Kill() acima, então isto é só para
+                    // dar ao SO a chance de terminar a entrega de I/O pendente antes de
+                    // fecharmos nosso próprio lado do pipe/arquivo -- nunca deveria demorar de
+                    // verdade, mas nunca bloqueia indefinidamente caso algo muito incomum
+                    // aconteça.
+                    child.Process.WaitForExit(2000);
+                }
+                catch
+                {
+                    // Processo pode já ter sido descartado/coletado entre o Kill() e aqui --
+                    // não é um erro fatal para o propósito de Dispose (liberar recursos).
+                }
+                child.LogWriter?.Flush();
                 child.LogWriter?.Dispose();
                 child.Process.Dispose();
             }

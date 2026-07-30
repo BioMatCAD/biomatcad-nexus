@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Processo auxiliar de testes, multiplataforma por construção (código gerenciado .NET, sem
+    nenhuma dependência de shell/sh/cmd.exe, sem "sleep"/"timeout"/"python3" do sistema
+    operacional). Existe exclusivamente para os testes de BioMatCAD.Launcher.Tests terem um
+    executável real, de longa duração ou com comportamento controlado, para exercitar
+    ProcessSupervisor/DispatcherManager contra um PROCESSO DE VERDADE do SO, sem depender de
+    quais interpretadores/binários específicos (python3, sh, sleep, cmd timeout) por acaso
+    estejam instalados e resolvíveis no PATH da máquina que roda os testes (Linux sandbox de
+    desenvolvimento OU Windows real do usuário).
+
+    Nunca é usado em código de produção (Program.cs), apenas nos testes, via
+    TestHelperProcessLocator, que resolve um "dotnet" real (mesma lógica já testada de
+    DependencyDetector.DetectDotnet) e o invoca como "dotnet TestHelperProcess.dll <modo> args...".
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>BioMatCAD.Launcher.TestHelperProcess</RootNamespace>
+    <AssemblyName>TestHelperProcess</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+</Project>

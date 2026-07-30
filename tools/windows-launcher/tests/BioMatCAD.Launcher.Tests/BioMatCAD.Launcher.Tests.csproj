@@ -26,6 +26,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- TestHelperProcess: processo auxiliar multiplataforma usado pelos testes (ver seu
+         .csproj). ProjectReference garante que TestHelperProcess.dll seja compilado e
+         copiado automaticamente para o diretório de saída destes testes. -->
+    <ProjectReference Include="../TestHelperProcess/TestHelperProcess.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
