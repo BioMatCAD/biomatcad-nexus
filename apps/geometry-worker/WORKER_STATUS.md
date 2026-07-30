@@ -505,16 +505,29 @@ PicoGK real, não apenas testadas matematicamente.
 
 A seção 10.4 fechou, com prova real contra o PicoGK: calibração de porosidade fechada (bloco,
 cilindro, preview), auditoria independente (3/3), determinismo pós-correção (3/3), e contenção
-cilíndrica (zero violações). O que ainda falta:
+cilíndrica (zero violações).
 
-- Validação da interface integrada (frontend) contra o worker corrigido.
-- E2E Playwright real (nunca executado em nenhum ambiente até agora -- ver
-  `apps/web/e2e/README.md` para o bloqueio conhecido neste sandbox Linux).
-- Consistência STL-vs-manifesto via fluxo completo API→dispatcher→manifesto (as execuções reais
-  desta sessão continuam sendo invocações diretas do worker via CLI, não pelo fluxo de produção
-  completo).
-- Empacotamento final v2.2.1 (zip/bundle/checksums/evidência consolidada) -- deliberadamente
-  ainda não gerado.
+**Atualização final (2026-07-29)**: os critérios que faltavam nesta seção foram todos fechados
+com execução real no Windows do usuário, na mesma sessão:
 
-**O Incremento 2.1.1 continua NÃO concluído.** Só poderá ser declarado concluído depois que a
-interface E2E e os demais critérios pendentes acima forem realmente aprovados.
+- **Validação da interface integrada + E2E Playwright real**: aprovado (`2 passed`,
+  `PlaywrightExitCode=0`, commit `f7a9614` -- ver `apps/web/e2e/README.md` e
+  `TEST_EVIDENCE.md` §11). O bloqueio permanece verdadeiro apenas neste sandbox Linux
+  (bibliotecas nativas do Chromium ausentes, `sudo` desabilitado).
+- **Consistência STL-vs-manifesto via fluxo completo API→dispatcher→worker PicoGK
+  real→Artifact→Manifest→download**: aprovado. Gate final
+  (`apps/api/scripts/verify_full_pipeline_sha256.py`, automatizado por
+  `scripts/Run-FinalGate.ps1`) executado com um job NOVO via HTTP real (nunca invocação direta
+  do worker via CLI, nunca pré-semeado, nenhuma simulação): transição real
+  `queued→running→succeeded`, SHA-256
+  `cd97e3c2be2029fe54bb4743217254a7ecb769ba24b81bf737d76e73bbc1565d` idêntico em 5 fontes
+  (STL físico, Artifact via API, Artifact via DB, Manifest, download via API), métricas
+  (`porosity_pct_measured=58.6698791858207`, `vertex_count_unique=102338`, `is_watertight=true`)
+  e auditoria (`geometry_job_created`, `geometry_job_succeeded`) confirmadas -- ver
+  `TEST_EVIDENCE.md` §16 para a transcrição literal completa.
+- **Empacotamento final v2.2.1**: único item ainda pendente no momento em que esta seção foi
+  escrita, gerado nesta mesma rodada de trabalho (ver `TEST_EVIDENCE.md`/`IMPLEMENTATION_STATUS.md`
+  para o estado mais atual).
+
+**Com geometria real, interface real (E2E) e fluxo de produção completo real (gate final)
+todos provados independentemente, a vertical completa do Incremento 2.1.1 está aprovada.**

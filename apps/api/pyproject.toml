@@ -23,9 +23,9 @@ dependencies = [
     #     e scripts/Run-FinalGate.ps1 (o gate final real do worker PicoGK).
     # Não remova nenhum dos dois sem primeiro confirmar (grep) que nenhuma DATABASE_URL real no
     # repositório ainda depende dele -- ver teste
-    # tests/test_database_driver_contract.py::test_engine_creation_with_standard_postgres_url_dialect.
-    "psycopg2-binary>=2.9",
-    "psycopg[binary]>=3.1",
+    # tests/test_database_driver_contract.py e tests/test_dependency_contract_constraints.py.
+    "psycopg2-binary>=2.9,<3.0",
+    "psycopg[binary]>=3.1,<4.0",
     "passlib[bcrypt]>=1.7",
     "bcrypt>=4.0,<4.1",
     "pyjwt>=2.8",
@@ -35,6 +35,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# "dev": ambiente completo de desenvolvimento (lint, tipagem, testes, banco efêmero local).
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
@@ -42,9 +43,30 @@ dev = [
     "ruff>=0.5",
     "mypy>=1.10",
     "types-passlib>=1.7",
-    "pgserver>=0.1.4",
+    # pgserver (Postgres efêmero embutido, sem Docker) só publica wheels para CPython 3.9-3.12
+    # (confirmado em 2026-07-29 via `pip download` contra manylinux2014_x86_64, win_amd64 e
+    # macosx_11_0_arm64: nenhuma dessas plataformas tem wheel para 3.13+, e não há sdist capaz
+    # de compilar do zero em CI/dev normal). Sem o marcador de versão abaixo, `pip install -e
+    # ".[dev]"` FALHARIA POR INTEIRO em qualquer Python 3.13+ (ex.: Python 3.14, já usado como
+    # cenário de teste real no launcher Windows) só por causa deste pacote de conveniência --
+    # que não é usado por nenhum código de produção nem pelo CI real (ci-api.yml usa um serviço
+    # Postgres do GitHub Actions, não pgserver; ver apps/api/tests/conftest.py, que só lê
+    # TEST_DATABASE_URL do ambiente e nunca importa pgserver diretamente). Em Python 3.13+, a
+    # pessoa que quiser um Postgres efêmero local precisa fornecer o seu próprio (ou usar
+    # `TEST_DATABASE_URL` apontando para uma instância real já em execução, como o kit de
+    # execução Windows já faz). Ver
+    # tests/test_dependency_contract_constraints.py::test_pgserver_has_python_version_marker.
+    "pgserver>=0.1.4; python_version < '3.13'",
     "types-jsonschema>=4.20",
     "types-psutil>=5.9",
+]
+# "gate": subconjunto mínimo para rodar apenas o gate final real
+# (scripts/verify_full_pipeline_sha256.py via scripts/Run-FinalGate.ps1), sem precisar instalar
+# ruff/mypy/pytest/pgserver. httpx é o único pacote que o gate usa e que não já está nas
+# dependências de produção (SQLAlchemy/psycopg já estão lá). Duplicado aqui (em vez de referenciar
+# o extra "dev") de propósito, para manter "gate" instalável sozinho sem trazer nada mais.
+gate = [
+    "httpx>=0.27",
 ]
 
 [tool.ruff]

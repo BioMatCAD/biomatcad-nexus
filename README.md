@@ -4,7 +4,7 @@ Plataforma integrada de engenharia computacional de biomateriais, laboratório, 
 e saúde digital — projeto derivado do doutorado de Adler Lima Botelho de Azevedo
 (PPGBiotec/UFBA) e do `Prompt_Mestre_BioMatCAD_Nexus.md`.
 
-## Status real deste repositório (2026-07-29 — Incremento 2.1.1 da Fase 2, CORRETIVO, PARCIALMENTE BLOQUEADO)
+## Status real deste repositório (2026-07-29 — Incremento 2.1.1 da Fase 2, CORRETIVO, VERTICAL COMPLETA APROVADA)
 
 O **Incremento 2.1.1** é uma correção de defeitos encontrados numa auditoria do Incremento 2.1
 ("Se o PicoGK não puder ser executado no sandbox, declare o incremento parcialmente bloqueado.
@@ -51,13 +51,26 @@ segundo bug operacional anterior (viewer do PicoGK exigindo fechamento manual) t
 sido corrigido com `bEndAppWithTask: true` (confirmado por reflexão contra o `PicoGK.dll` 2.2.0
 real).
 
-**O que ainda falta**: validação da interface integrada (frontend) contra o worker corrigido,
-consistência STL-vs-manifesto via fluxo completo API→dispatcher (as execuções reais desta e da
-rodada anterior foram invocações diretas do worker via CLI), e a execução E2E (Playwright)
-permanecem pendentes. O Incremento 2.1.1 **continua NÃO concluído** até que esses critérios
-também sejam realmente aprovados. Ver
-`IMPLEMENTATION_STATUS.md` para o inventário completo, critério de aceite por critério de
-aceite, do que está fechado vs. pendente.
+**Atualização final (2026-07-29)**: os três critérios que faltavam foram todos aprovados com
+execução real no Windows do usuário, nesta mesma sessão:
+
+1. **E2E Playwright real** (interface): login, criação de projeto/receita e navegação real
+   contra a API/Postgres reais -- `2 passed`, `PlaywrightExitCode=0` (commit `f7a9614`).
+2. **Consistência STL-vs-manifesto via fluxo completo API→dispatcher→worker PicoGK
+   real→Artifact→Manifest→download**: gate final (`apps/api/scripts/
+   verify_full_pipeline_sha256.py`, automatizado por `scripts/Run-FinalGate.ps1`) executado com
+   um job **novo** (nunca pré-semeado, nenhuma simulação) -- transição real
+   `queued→running→succeeded`, SHA-256
+   `cd97e3c2be2029fe54bb4743217254a7ecb769ba24b81bf737d76e73bbc1565d` idêntico em 5 fontes
+   independentes (STL físico, Artifact via API, Artifact via DB, Manifest, download),
+   `result=APPROVED`.
+3. Um bug real de contrato de dependência (driver Postgres `psycopg` vs `psycopg2`) foi
+   encontrado e corrigido no caminho até essa aprovação -- ver `TEST_EVIDENCE.md` §15.
+
+Com geometria real (3 golden recipes), interface real (E2E) e fluxo de produção completo real
+(gate final) todos provados independentemente, **a vertical completa do Incremento 2.1.1 está
+aprovada**. Ver `IMPLEMENTATION_STATUS.md` e `TEST_EVIDENCE.md` §16 para o relato literal
+completo. Único item restante: o empacotamento final v2.2.1 (em andamento nesta mesma rodada).
 
 O que existe de fato agora:
 
@@ -89,9 +102,10 @@ O que existe de fato agora:
   Three.js. **Incremento 2.1.1**: validação de receita unificada com Ajv contra uma cópia local
   sincronizada do schema real (com teste de sincronia byte-a-byte), fingerprint de demonstração
   corrigido (canonicalização recursiva real, documentado como NÃO sendo SHA-256 real) — 27 testes
-  Vitest passando, `tsc`/`eslint`/build limpos. E2E Playwright escrito (`apps/web/e2e/`), mas
-  **bloqueado neste sandbox** (faltam bibliotecas nativas do Chromium e `sudo` está desabilitado)
-  — ver `apps/web/e2e/README.md`.
+  Vitest passando, `tsc`/`eslint`/build limpos. E2E Playwright escrito (`apps/web/e2e/`) --
+  **bloqueado apenas neste sandbox** (faltam bibliotecas nativas do Chromium e `sudo` está
+  desabilitado), mas **APROVADO de verdade no Windows do usuário** (`2 passed`, commit
+  `f7a9614`) — ver `apps/web/e2e/README.md` e `TEST_EVIDENCE.md` §11.
 - `ARCHITECTURE.md`, `IMPLEMENTATION_STATUS.md` e `ROADMAP.md` — detalhamento técnico, evidências
   e priorização dos próximos passos (execução real do worker no Windows antes da Fase 3).
 - `docs/examples/WINDOWS_EXECUTION_KIT.md` — guia passo a passo para o usuário compilar e
@@ -273,8 +287,8 @@ npm run build:pages   # build estático para GitHub Pages (dados sintéticos ape
   Linux) e ADR-0008, novo neste incremento (semântica espessura/isovalor do gyroid).
 - `ARCHITECTURE.md` — arquitetura detalhada e o que dela está implementado.
 - `IMPLEMENTATION_STATUS.md` — inventário real vs. demonstrativo vs. planejado, com evidências,
-  incluindo o checklist dos 17 itens de aceite do Incremento 2.1.1 (o que está fechado vs.
-  pendente de execução real no Windows).
+  incluindo o checklist dos itens de aceite do Incremento 2.1.1 (vertical completa aprovada com
+  execução real no Windows: geometria, E2E, e gate final de produção).
 - `docs/examples/WINDOWS_EXECUTION_KIT.md` — guia para o usuário executar o worker real em
   Windows x64 e devolver os resultados.
 - `docs/security/DEPENDENCY_AUDIT_2.1.1.md` — auditoria de dependências e decisões registradas.

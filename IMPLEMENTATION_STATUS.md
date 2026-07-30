@@ -1,13 +1,17 @@
 # Status de Implementação — BioMatCAD Nexus
 
 Última atualização: 2026-07-29 (Incremento 2.1.1 da Fase 2 — corretivo sobre defeitos
-encontrados em auditoria do Incremento 2.1, entregue **parcialmente bloqueado no mesmo ponto**
-por ausência de runtime nativo do PicoGK em linux-x64; ver seção dedicada abaixo, ADR-0007 e
-ADR-0008). Este documento existe para que ninguém — incluindo IAs de desenvolvimento futuras —
-precise adivinhar o que é real. Regra do Prompt Mestre §3.1: nada aqui é descrito como
-"completo" sem ter sido executado e testado nesta sessão. As seções sobre o Incremento 1.1 e o
-Incremento 2.1 abaixo são mantidas como registro histórico; a seção "Incremento 2.1.1", logo em
-seguida, é a mais atual e deve ser lida primeiro.
+encontrados em auditoria do Incremento 2.1). **Bloqueio de runtime nativo do PicoGK em
+linux-x64 (ADR-0007/ADR-0008) permanece verdadeiro apenas para ESTE sandbox de desenvolvimento
+Linux** — o worker PicoGK real foi executado com sucesso no Windows do usuário, incluindo o
+gate final de produção completo (fila real -> dispatcher real -> worker PicoGK real -> STL ->
+Artifact -> Manifest -> download, `TEST_EVIDENCE.md` §16). A vertical completa do Incremento
+2.1.1 está aprovada; falta apenas o empacotamento final v2.2.1 (ver seção dedicada). Este
+documento existe para que ninguém — incluindo IAs de desenvolvimento futuras — precise
+adivinhar o que é real. Regra do Prompt Mestre §3.1: nada aqui é descrito como "completo" sem
+ter sido executado e testado nesta sessão. As seções sobre o Incremento 1.1 e o Incremento 2.1
+abaixo são mantidas como registro histórico; a seção "Incremento 2.1.1", logo em seguida, é a
+mais atual e deve ser lida primeiro.
 
 ## Legenda
 
@@ -49,10 +53,10 @@ só (a) foi alcançado nesta sessão.
 | 8 | Cancelamento real | **PROVADO de verdade** | Teste de corrida contra o fluxo real de `dispatch_job`, kill de árvore de processos via `psutil` (cross-platform), idempotência de recancelamento (`test_geometry_job_cancellation.py`). |
 | 9 | Isolamento organizacional | **PROVADO de verdade** | Testes de ataque dedicados (projeto/receita/material de outra organização, receita não pertencente ao projeto, receita não validada) — todos recusados e auditados (`test_geometry_job_security.py`). |
 | 10 | Métricas coerentes com o STL | **PROVADO de verdade para as 3 receitas, pré e pós-correção** | Auditoria independente (`scripts/audit_stl_vs_worker_output.py`, ferramenta corrigida nesta sessão para UTF-8/UTF-16 e logs misturados) rodou de verdade contra os 3 STLs reais pós-correção: nenhuma divergência, `AuditExitCode=0` nas três, watertight confirmado nas três. Item fechado. |
-| 11 | Manifesto coerente com os artefatos | Código corrigido (a); gate automatizado criado e validado por dry-run real (b); **bug real de contrato de dependência encontrado e corrigido ao tentar rodar no Windows do usuário (c)**; execução real com PicoGK ainda pendente (d) | Manifesto reestruturado, verificado por testes de unidade/integração do backend. Gate `apps/api/scripts/verify_full_pipeline_sha256.py` criado: submete job NOVO via HTTP real (nunca pré-semeado), invoca o dispatcher real, compara SHA-256 em 5 fontes, confirma métricas/auditoria/associação. Dry-run real neste sandbox confirmou a mecânica HTTP e a transição queued→running; o job falhou honestamente com `WORKER_RUNTIME_UNAVAILABLE` (esperado, sem PicoGK linux-x64). **Ao tentar rodar de verdade no Windows do usuário, o gate morreu ANTES do Alembic** com `ModuleNotFoundError: No module named 'psycopg'`: `pyproject.toml` só declarava `psycopg2-binary`, mas a DATABASE_URL real do kit Windows usa o dialeto `postgresql+psycopg` (psycopg 3). Corrigido adicionando `psycopg[binary]>=3.1` a `pyproject.toml` (mantendo `psycopg2-binary`, que o CI e `.env.example` também usam de verdade via `postgresql://` sem driver explícito); validado por teste real (`tests/test_database_driver_contract.py`, 4/4 passou) E por instalação limpa em venv novo (sem nenhum pacote psycopg pré-existente), confirmando 88 passed/1 skipped no pytest completo, ruff e mypy limpos. `scripts/Run-FinalGate.ps1` agora roda um preflight real (`apps/api/scripts/gate_preflight_check.py`) ANTES do Alembic, validado com um Postgres TCP real neste sandbox contra 4 cenários genuínos: driver ausente (reproduz o bug original), porta inacessível, senha incorreta, e conexão bem-sucedida — todos os 4 comportaram-se corretamente, e qualquer falha agora grava `gate-final-report.json` estruturado, nunca termina sem relatório. SQLite explicitamente recusado como alternativa para aprovar o gate. Falta a execução real no Windows do usuário (kit em `docs/examples/WINDOWS_EXECUTION_KIT.md` §9) para fechar este item de fato. |
+| 11 | Manifesto coerente com os artefatos | **APROVADO -- gate final real de produção completo, executado no Windows do usuário** | Gate `apps/api/scripts/verify_full_pipeline_sha256.py` executado de verdade no Windows do usuário via `scripts/Run-FinalGate.ps1`, contra o worker PicoGK real, com um job NOVO (nunca pré-semeado, nenhuma simulação): job `3bf6587d-a9f6-40a1-91bb-f41d385db05d`, idempotency_key `gate-real-e7010eb3d7004294a172a543547ea0da`. Transição observada de verdade `queued -> running -> succeeded`. SHA-256 `cd97e3c2be2029fe54bb4743217254a7ecb769ba24b81bf737d76e73bbc1565d` idêntico nas 5 fontes independentes (STL físico, Artifact via API, Artifact via DB, Manifest, download via API). Métricas reais persistidas (`volume_mm3=413.30...`, `porosity_pct_measured=58.67...`, `vertex_count_unique=102338`, `triangle_count=208560`, `is_watertight=true`). Auditoria (`geometry_job_created`, `geometry_job_succeeded`) e associação usuário/organização/projeto/receita confirmadas. Relatório final: `result=APPROVED`, `overall_ok=true`. Ver TEST_EVIDENCE.md §16 para a transcrição literal completa. **Bug real de contrato de dependência encontrado e corrigido no caminho até aqui**: `pyproject.toml` só declarava `psycopg2-binary`, mas a `DATABASE_URL` real usa `postgresql+psycopg` (psycopg 3) -- corrigido adicionando `psycopg[binary]`, com preflight real adicionado a `scripts/Run-FinalGate.ps1` para detectar esse tipo de problema mais cedo no futuro (ver commit `d972471`). Item fechado. |
 | 12 | Determinismo geométrico provado | **PROVADO para as 3 receitas, pós-correção** | Usuário confirmou: segunda execução real das três golden recipes (mesma receita+seed+worker+plataforma) produziu hashes IDÊNTICOS aos da primeira execução pós-correção nas três receitas (`DeterminismoGlobal=True`). Determinismo binário genuíno, com o código de calibração corrigido. Item fechado. |
 | 13 | Visualização e download | Inalterado do Incremento 2.1, fora do núcleo de correções deste incremento | `StlViewer.tsx` (Three.js, orbit/pan/zoom/wireframe/corte/screenshot) e `JobDetailPage.tsx` continuam como estavam — nenhum defeito relacionado foi relatado na auditoria que motivou o 2.1.1, então nenhuma mudança foi feita aqui. |
-| 14 | E2E real | **APROVADO no Windows do usuário (commit `f7a9614`) -- com ressalva de escopo** | `npm run test:e2e` real: API em localhost:8000, frontend em localhost:5173, Chromium real, seed `already_seeded`, 2 testes rodados, `2 passed (8.9s)`, `PlaywrightExitCode=0` (ver TEST_EVIDENCE.md §11 para a transcrição literal). **Ressalva explícita**: o 2º cenário verifica a UI real sobre um job succeeded PRÉ-SEMEADO (`_FakeWorkerClientForE2ESeed`, nunca PicoGK real) -- prova a interface (frontend+API+Postgres+navegação real) ponta-a-ponta, mas NÃO prova a execução do worker PicoGK real através da fila de produção. Essa prova é o gate separado do item 11 (Manifesto/consistência via fluxo completo), ainda pendente -- kit preparado, ver linha 11. |
+| 14 | E2E real | **APROVADO no Windows do usuário (commit `f7a9614`) -- com ressalva de escopo, já fechada pelo item 11** | `npm run test:e2e` real: API em localhost:8000, frontend em localhost:5173, Chromium real, seed `already_seeded`, 2 testes rodados, `2 passed (8.9s)`, `PlaywrightExitCode=0` (ver TEST_EVIDENCE.md §11 para a transcrição literal). **Ressalva original**: o 2º cenário verifica a UI real sobre um job succeeded PRÉ-SEMEADO (`_FakeWorkerClientForE2ESeed`, nunca PicoGK real) -- prova a interface, mas por si só não provava a execução do worker PicoGK real através da fila de produção. **Essa prova complementar foi obtida separadamente no item 11** (gate completo, job novo, PicoGK real, aprovado no Windows) -- os dois juntos fecham a vertical completa (interface real + geometria real + fluxo de produção completo real). |
 | 15 | Todos os testes/builds aprovados | **SIM** | Backend: 83 testes pytest (2 skips esperados sem `dotnet`/Windows) contra PostgreSQL real via `pgserver`, 0 falhas; ruff e mypy limpos. Worker C#: 62/62 xUnit neste sandbox E build Release real aprovado no Windows do usuário. Frontend: 42/42 Vitest (`tsc --noEmit` e `eslint` limpos, `npm run build` com sucesso). E2E Playwright: 2/2 aprovados de verdade no Windows do usuário (item 14). |
 | 16 | Histórico preservado | **SIM, verificado** | Base (tag/commit do v2.2) intacta; apenas novos commits acrescentados nesta sessão (nenhum `git commit --amend`, `rebase` ou `push --force` usado); `git log` mostra a sequência completa desde o Incremento 1. |
 | 17 | Checksums verificados na extração/restauração | **SIM para o bundle base v2.2** (início da sessão); **AINDA NÃO** para o pacote final v2.2.1 | O pacote v2.2.1 (zip/bundle/SHA256SUMS) ainda não foi gerado — é uma tarefa de empacotamento separada, posterior a esta documentação. |
@@ -110,6 +114,19 @@ real -- calibração, auditoria independente, determinismo e contenção -- est�
 as três golden recipes. Faltam: validação da interface integrada, E2E Playwright real,
 consistência STL-vs-manifesto via fluxo completo, e o empacotamento final v2.2.1. Só será
 declarado concluído depois que esses critérios também forem realmente aprovados.
+
+> **ATUALIZAÇÃO FINAL (2026-07-29) -- este parágrafo e a lista "Simplesmente não feitos ainda"
+> logo acima ficaram desatualizados ao longo da sessão e são preservados aqui apenas como
+> registro histórico do estado do incremento NAQUELE ponto.** Desde então, nesta mesma sessão:
+> E2E Playwright real foi aprovado no Windows (commit `f7a9614`, item 14, `TEST_EVIDENCE.md`
+> §11); e o gate final de produção completo (API -> dispatcher -> worker PicoGK real -> STL ->
+> Artifact -> Manifest -> download -> SHA-256 em 5 fontes) foi executado com um job NOVO e
+> aprovado no Windows do usuário (item 11, `TEST_EVIDENCE.md` §16). Com os três pilares
+> independentemente provados -- geometria real (acima), interface real (E2E), e fluxo de
+> produção completo real (gate final) -- **a vertical completa do Incremento 2.1.1 está
+> aprovada**. O único item que permanece deliberadamente pendente é o empacotamento final
+> v2.2.1, que esta mesma rodada de trabalho está gerando (ver seção dedicada mais abaixo/no
+> fechamento deste documento).
 
 ## Evidência de teste do Incremento 2.1.1 (resumo; ver `TEST_EVIDENCE.md` para o log consolidado)
 

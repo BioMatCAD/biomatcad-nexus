@@ -910,6 +910,99 @@ um usuário/banco `biomatcad` reais.
 Também confirmado que o dialeto `postgresql://` (psycopg2, usado pelo CI) funciona igual
 contra o mesmo Postgres real.
 
+## 16. GATE FINAL REAL APROVADO no Windows: vertical completa API -> dispatcher -> worker PicoGK real -> STL -> Artifact -> Manifest -> download (2026-07-29)
+
+**Este é o evento que fecha o item 11/12 do checklist de aceite do Incremento 2.1.1.** Relatado
+literalmente pelo usuário, executado de verdade no Windows dele, contra o worker PicoGK real
+(não o sandbox Linux deste ambiente, que nunca teve o runtime nativo disponível).
+
+### Preflight (`apps/api/scripts/gate_preflight_check.py`)
+
+- `DATABASE_URL` não é SQLite: aprovado.
+- Driver `psycopg` importado com sucesso.
+- `localhost:5432` acessível (conexão TCP real).
+- Conexão e `SELECT 1` reais aprovados.
+- `result = "APPROVED"`, `overall_ok = true`.
+
+### Banco de dados
+
+- PostgreSQL real.
+- `alembic upgrade head` executado; revisões aplicadas: `927e185f097d`, `9242186001a8`,
+  `97983fbc0288`, `c32e9b0f0f3c`.
+
+### Vertical completa (sem job pré-semeado, sem simulação)
+
+- Usuário sintético do gate garantido (idempotente).
+- `POST /api/v1/auth/login` -> 200.
+- `GET /api/v1/auth/me` -> 200.
+- `POST /api/v1/projects` -> 201.
+- `POST .../recipes` -> 201.
+- `POST /api/v1/design-runs` (job NOVO) -> 201.
+  - `job_id`: `3bf6587d-a9f6-40a1-91bb-f41d385db05d`.
+  - `idempotency_key`: `gate-real-e7010eb3d7004294a172a543547ea0da`.
+- Dispatcher real (`geometry_dispatcher.py`) invocado e executado.
+- Transição de status observada de verdade: `queued -> running -> succeeded`.
+- Worker: **PicoGK real** (não `_FakeWorkerClientForE2ESeed`, não nenhum outro test double).
+- Nenhum job pré-semeado. Nenhuma simulação.
+
+### Métricas geométricas persistidas (nomes de campo reais do worker)
+
+| Campo | Valor |
+|---|---|
+| `volume_mm3` | `413.3012081417931` |
+| `porosity_pct_measured` | `58.6698791858207` |
+| `surface_area_mm2` | `2876.9469437800917` |
+| `vertex_count_unique` | `102338` |
+| `triangle_count` | `208560` |
+| `is_watertight` | `true` |
+| `stl_reload_validation_passed` | `true` |
+
+### SHA-256 idêntico nas cinco fontes independentes
+
+```
+cd97e3c2be2029fe54bb4743217254a7ecb769ba24b81bf737d76e73bbc1565d
+```
+
+Fontes comparadas: (1) STL físico em disco, (2) campo `sha256` do `Artifact` via API, (3) o
+mesmo campo via consulta direta ao banco, (4) `stl_sha256` do `ArtifactManifest`, (5) bytes
+efetivamente baixados via `GET /api/v1/artifacts/{id}/download`. Nenhuma divergência.
+
+### Auditoria e associações
+
+- Trilha de `AuditEvent` confirmada para o ciclo de vida deste job: `geometry_job_created`,
+  `geometry_job_succeeded`.
+- Associação usuário/organização/projeto/receita: aprovada, consistente entre o que foi
+  submetido e o que a API retornou.
+
+### Relatório final
+
+```
+gate = "full_pipeline_real_worker"
+result = "APPROVED"
+overall_ok = true
+```
+
+### O que este evento prova, e o que ele NÃO é
+
+Esta seção registra especificamente que o **gate completo de produção** (API real ->
+fila Postgres real -> dispatcher real -> worker PicoGK real -> STL real -> Artifact/Manifest
+reais -> download real -> comparação de SHA-256 em 5 fontes) foi executado de ponta a ponta
+com um job **novo**, nunca pré-semeado, e chegou a `succeeded` com integridade comprovada em
+todas as fontes. Isso é diferente de, e não deve ser confundido com:
+
+- **O E2E Playwright da interface** (Seção 11, commit `f7a9614`): valida a UI real (login,
+  criação de projeto/receita, navegação) contra um job succeeded PRÉ-SEMEADO (worker fake
+  rotulado) -- prova a interface, não o worker real.
+- **Os testes geométricos isolados do worker** (Seções 6-7, WORKER_STATUS.md): validam a
+  geometria/calibração das 3 golden recipes invocando o worker diretamente via CLI, fora do
+  fluxo de fila/dispatcher/API de produção.
+- **Este gate (Seção 16, aqui)**: é o único evento desta sessão que exercita a cadeia de
+  produção completa, com o worker PicoGK real, através da fila real, de ponta a ponta.
+
+Com os três provados independentemente (interface real, geometria real, e agora o gate de
+produção completo real), a **vertical completa do Incremento 2.1.1 está aprovada no Windows do
+usuário**.
+
 ## O que esta evidência explicitamente NÃO cobre
 
 - **Consistência STL-vs-manifesto via fluxo completo API→dispatcher→worker PicoGK real→
@@ -922,11 +1015,8 @@ contra o mesmo Postgres real.
   "AMBIENTE DE TESTE" visto na tela, ausência do segredo confirmada visualmente) -- a execução
   real no Windows foi aprovada pelo usuário (Seção 14) para o caminho principal, mas esses
   detalhes específicos não foram relatados individualmente.
-- **Gate final real do worker PicoGK via fila de produção com job NOVO (não pré-semeado)** --
-  script pronto e automatizado (`scripts/Run-FinalGate.ps1` + `apps/api/scripts/
-  verify_full_pipeline_sha256.py`), com a orquestração validada por dry-run real neste sandbox
-  (Postgres+API reais), mas a execução real no Windows do usuário (com PicoGK disponível) ainda
-  não ocorreu.
-- **Empacotamento final v2.2.1** — deliberadamente ainda não gerado.
+- **Empacotamento final v2.2.1** — pendente de geração nesta mesma rodada (ver seção de
+  empacotamento no fechamento deste documento, se já gerado no momento em que este arquivo for
+  lido).
 
 Estes itens são o que falta para declarar o Incremento 2.1.1 concluído.

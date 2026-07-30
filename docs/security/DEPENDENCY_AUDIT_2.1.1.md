@@ -28,6 +28,18 @@ encontrada** no pacote em si (as 7 entradas reportadas nesse venv isolado são t
 para `psycopg2` — há uso real de ambos os dialetos no repositório, então ambos os drivers
 precisam permanecer instalados.
 
+**Atualização (2026-07-29, pós-aprovação do gate final no Windows)**: formalizados limites de
+versão explícitos para ambos os drivers (`psycopg2-binary>=2.9,<3.0`,
+`psycopg[binary]>=3.1,<4.0`), evitando que um major futuro quebre a instalação silenciosamente.
+Criado um extra opcional `gate` (`pip install -e ".[gate]"`) com apenas `httpx`, para quem quiser
+rodar só o gate final sem instalar as ferramentas de lint/teste. `pgserver` (Postgres efêmero
+usado só para testes locais) recebeu o marcador de ambiente `python_version < '3.13'`, depois de
+confirmado via `pip download` contra `manylinux2014_x86_64`, `win_amd64` e `macosx_11_0_arm64`
+que a versão 0.1.4 (a mais recente disponível) não publica wheel para Python 3.13+ em nenhuma
+plataforma — sem esse marcador, `pip install -e ".[dev]"` falharia por inteiro em qualquer
+Python 3.13+ só por causa desse pacote de conveniência, que não é usado por nenhum código de
+produção nem pelo CI real.
+
 ## NuGet (`apps/geometry-worker`)
 
 Comando: `dotnet list package --vulnerable --include-transitive` nos dois projetos

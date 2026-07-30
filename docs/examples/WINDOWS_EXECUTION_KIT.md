@@ -185,6 +185,13 @@ python -m pytest -v | Tee-Object -FilePath C:\biomatcad-runs\pytest-windows-outp
 > `psycopg2-binary` estava declarado, e rodar o passo acima (ou o gate final da Seção 9) falhava
 > com `ModuleNotFoundError: No module named 'psycopg'`. Se você já tinha um `.venv` criado ANTES
 > desta correção, rode `pip install -e ".[dev]"` de novo dentro dele para pegar o driver novo.
+>
+> **Extra "gate" (opcional, mais leve)**: se você só quer rodar o gate final (Seção 9) sem as
+> ferramentas de lint/teste/pgserver, `pip install -e ".[gate]"` instala apenas o mínimo
+> necessário (httpx -- psycopg/SQLAlchemy já vêm nas dependências de produção). Note também que
+> `pgserver` (usado só para testes locais com Postgres efêmero, `python -m pytest`) agora exige
+> Python < 3.13 -- ele não publica wheels para 3.13+ em nenhuma plataforma. Isso não afeta o
+> gate final nem a API/worker, que usam o Postgres real que você já configurou.
 
 Um teste em particular (relacionado ao worker real) hoje está marcado `skip` no Linux porque o
 `dotnet`/PicoGK não está disponível ali. No Windows, com o worker compilado, esse teste deve
