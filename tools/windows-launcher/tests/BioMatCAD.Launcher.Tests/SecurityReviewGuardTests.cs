@@ -127,7 +127,7 @@ public class SecurityReviewGuardTests
     public void ProgramCs_ExibePermanentementeOBannerDeAmbienteDeTeste()
     {
         var source = ReadProgramSource();
-        Assert.Contains("AMBIENTE DE TESTE", source);
+        Assert.Contains("AMBIENTE DE PESQUISA", source);
         Assert.Contains("NÃO UTILIZAR DADOS CLÍNICOS REAIS", source);
         // O banner é impresso tanto no início quanto antes do loop de espera principal --
         // "mostrar permanentemente" é interpretado como "sempre visível durante a operação",

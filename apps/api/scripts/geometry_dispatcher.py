@@ -27,6 +27,19 @@ Incremento 2.2 (secao 3, "dispatcher continuo") acrescenta ao modo `--once` ja e
   permite que um processo externo (o launcher Windows, por exemplo) verifique liveness sem
   depender só de "o processo do SO ainda existe" (um dispatcher pode estar vivo mas travado);
   o mesmo padrão de "heartbeat com limite de atraso" já usado para jobs órfãos.
+
+Incremento 2.2 (seção 2, integração com o launcher Windows) acrescenta mais dois mecanismos:
+
+- campo "phase" no status file ("idle" | "processing"), atualizado com escrita IMEDIATA (sem o
+  throttle do heartbeat periódico) no exato momento em que um job é reivindicado e no momento em
+  que termina -- permite ao launcher distinguir "starting/idle/processing/stopping/stopped"
+  (estado pedido explicitamente na seção 2), não apenas "rodando ou não";
+- arquivo de pedido de parada (stop_file): além de SIGINT/SIGTERM, o loop também aceita um
+  pedido de shutdown gracioso via a simples EXISTÊNCIA de um arquivo sentinela no disco. Isso
+  existe porque um launcher .NET no Windows não tem uma forma simples e confiável de entregar
+  SIGINT/Ctrl+C a um processo filho iniciado sem console próprio (CreateNoWindow=true) --
+  GenerateConsoleCtrlEvent exige o mesmo grupo de console, o que não se aplica aqui. Um arquivo
+  sentinela funciona identicamente em qualquer SO e é trivial de testar.
 """
 from __future__ import annotations
 
@@ -123,15 +136,20 @@ def write_status_file(
     jobs_processed_total: int,
     current_poll_interval: float,
     last_job_id: str | None,
+    phase: str = "idle",
 ) -> None:
     """Escreve o snapshot de status do dispatcher em disco (Incremento 2.2, secao 3 e 7:
     observabilidade de liveness sem depender apenas do processo do SO). Escrita atomica
-    (arquivo temporario + rename) para nunca deixar um leitor externo ler um JSON parcial."""
+    (arquivo temporario + rename) para nunca deixar um leitor externo ler um JSON parcial.
+
+    `phase` distingue "idle" (loop rodando, nenhum job sendo processado agora) de "processing"
+    (dentro de dispatch_job() para last_job_id neste exato momento) -- ver `run_continuous`."""
     status_file.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "dispatcher_id": dispatcher_id,
         "pid": os.getpid(),
         "state": state,
+        "phase": phase,
         "started_at": started_at,
         "last_poll_at": _utcnow_iso(),
         "jobs_processed_total": jobs_processed_total,
@@ -143,7 +161,17 @@ def write_status_file(
     os.replace(tmp_path, status_file)
 
 
-def process_queued_jobs(limit: int | None = None, dispatcher_id: str | None = None) -> int:
+def process_queued_jobs(
+    limit: int | None = None,
+    dispatcher_id: str | None = None,
+    *,
+    on_phase_change: Any = None,
+) -> int:
+    """`on_phase_change`, se fornecido, é chamado como `on_phase_change("processing", job_id)`
+    logo após um job ser reivindicado e `on_phase_change("idle", job_id)` logo depois que
+    `dispatch_job` retorna (sucesso, falha ou cancelamento) -- usado por `run_continuous` para
+    manter o status file atualizado em tempo real, sem esperar o próximo ciclo de heartbeat
+    (Incremento 2.2, seção 2: estados "processing"/"idle" observáveis pelo launcher)."""
     settings = get_settings()
     storage = LocalStorageAdapter(Path(settings.artifact_storage_dir))
     worker_client = get_default_worker_client(REPO_ROOT)
@@ -158,18 +186,34 @@ def process_queued_jobs(limit: int | None = None, dispatcher_id: str | None = No
             job = claim_next_queued_job(db, dispatcher_id=dispatcher_id)
             if job is None:
                 break
-            dispatch_job(
-                db,
-                job_id=job.id,
-                worker_client=worker_client,
-                storage=storage,
-                output_dir=Path(settings.artifact_storage_dir) / "_work" / job.id,
-                repo_root=REPO_ROOT,
-            )
+            if on_phase_change is not None:
+                on_phase_change("processing", job.id)
+            try:
+                dispatch_job(
+                    db,
+                    job_id=job.id,
+                    worker_client=worker_client,
+                    storage=storage,
+                    output_dir=Path(settings.artifact_storage_dir) / "_work" / job.id,
+                    repo_root=REPO_ROOT,
+                )
+            finally:
+                if on_phase_change is not None:
+                    on_phase_change("idle", job.id)
             processed += 1
     finally:
         db.close()
     return processed
+
+
+def _stop_requested(shutdown: GracefulShutdown, stop_file: Path | None) -> bool:
+    """OR de duas fontes independentes de pedido de shutdown gracioso: sinal do SO
+    (SIGINT/SIGTERM, via `shutdown.requested`) OU a simples existência de `stop_file` no disco
+    -- o mecanismo que o launcher Windows usa, já que entregar um sinal POSIX real a um processo
+    filho sem console próprio não é confiável no Windows (ver docstring do módulo)."""
+    if shutdown.requested:
+        return True
+    return stop_file is not None and stop_file.exists()
 
 
 def run_continuous(
@@ -179,14 +223,16 @@ def run_continuous(
     limit_per_cycle: int | None,
     status_file: Path,
     shutdown: GracefulShutdown,
+    stop_file: Path | None = None,
     max_iterations: int | None = None,
     sleep_fn: Any = time.sleep,
 ) -> int:
-    """Loop principal do modo continuo (Incremento 2.2, secao 3). Extraido de `main()` para ser
-    testavel sem precisar rodar um processo real: os testes injetam `max_iterations` (para
-    terminar deterministicamente em vez de `while True`), `sleep_fn` (para não esperar de
-    verdade) e um `GracefulShutdown` já com `requested=True` programado para disparar após N
-    iterações, simulando Ctrl+C.
+    """Loop principal do modo continuo (Incremento 2.2, secao 3; stop_file: secao 2). Extraido
+    de `main()` para ser testavel sem precisar rodar um processo real: os testes injetam
+    `max_iterations` (para terminar deterministicamente em vez de `while True`), `sleep_fn`
+    (para não esperar de verdade) e um `GracefulShutdown` já com `requested=True` programado
+    para disparar após N iterações, simulando Ctrl+C -- ou um `stop_file` que os testes criam
+    em disco no meio da execução, simulando o launcher pedindo parada.
 
     Retorna o total de jobs processados na chamada (usado pelos testes para verificar
     comportamento).
@@ -199,14 +245,38 @@ def run_continuous(
     last_status_write = 0.0
     iteration = 0
 
+    def write_now(*, state: str, phase: str) -> None:
+        write_status_file(
+            status_file,
+            dispatcher_id=dispatcher_id,
+            state=state,
+            started_at=started_at,
+            jobs_processed_total=jobs_processed_total,
+            current_poll_interval=poll_interval,
+            last_job_id=last_job_id,
+            phase=phase,
+        )
+
+    def on_phase_change(phase: str, job_id: str) -> None:
+        nonlocal last_job_id
+        last_job_id = job_id
+        log_event("job_phase_changed", dispatcher_id=dispatcher_id, job_id=job_id, phase=phase)
+        # Escrita IMEDIATA (não sujeita ao throttle de heartbeat) -- transições de fase são
+        # eventos raros e importantes para quem está observando o status file de fora.
+        write_now(state="running", phase=phase)
+
     log_event("dispatcher_started", dispatcher_id=dispatcher_id, base_poll_interval=base_poll_interval)
 
-    while not shutdown.requested:
+    while not _stop_requested(shutdown, stop_file):
         if max_iterations is not None and iteration >= max_iterations:
             break
         iteration += 1
 
-        n = process_queued_jobs(limit=limit_per_cycle, dispatcher_id=dispatcher_id)
+        n = process_queued_jobs(
+            limit=limit_per_cycle,
+            dispatcher_id=dispatcher_id,
+            on_phase_change=on_phase_change,
+        )
         jobs_processed_total += n
 
         if n > 0:
@@ -228,32 +298,16 @@ def run_continuous(
 
         now_monotonic = time.monotonic()
         if now_monotonic - last_status_write >= STATUS_FILE_MIN_WRITE_INTERVAL_SECONDS:
-            write_status_file(
-                status_file,
-                dispatcher_id=dispatcher_id,
-                state="running",
-                started_at=started_at,
-                jobs_processed_total=jobs_processed_total,
-                current_poll_interval=poll_interval,
-                last_job_id=last_job_id,
-            )
+            write_now(state="running", phase="idle")
             last_status_write = now_monotonic
 
-        if shutdown.requested:
+        if _stop_requested(shutdown, stop_file):
             break
 
         sleep_fn(poll_interval)
 
     log_event("dispatcher_stopping", dispatcher_id=dispatcher_id, jobs_processed_total=jobs_processed_total)
-    write_status_file(
-        status_file,
-        dispatcher_id=dispatcher_id,
-        state="stopped",
-        started_at=started_at,
-        jobs_processed_total=jobs_processed_total,
-        current_poll_interval=poll_interval,
-        last_job_id=last_job_id,
-    )
+    write_now(state="stopped", phase="idle")
     log_event("dispatcher_stopped", dispatcher_id=dispatcher_id, jobs_processed_total=jobs_processed_total)
     return jobs_processed_total
 
@@ -268,6 +322,16 @@ def main() -> None:
         type=str,
         default=None,
         help="Caminho do arquivo de status JSON (padrão: <artifact_storage_dir>/_dispatcher/status.json).",
+    )
+    parser.add_argument(
+        "--stop-file",
+        type=str,
+        default=None,
+        help=(
+            "Caminho de um arquivo sentinela: se existir, o dispatcher inicia o shutdown "
+            "gracioso (mesmo efeito de SIGINT/SIGTERM). Usado pelo launcher Windows, que não "
+            "tem uma forma confiável de entregar Ctrl+C a um processo filho sem console."
+        ),
     )
     args = parser.parse_args()
 
@@ -289,6 +353,8 @@ def main() -> None:
     shutdown = GracefulShutdown()
     shutdown.install()
 
+    stop_file = Path(args.stop_file) if args.stop_file else None
+
     print("Dispatcher geométrico iniciado em modo contínuo (Ctrl+C para parar com segurança).")
     run_continuous(
         dispatcher_id=dispatcher_id,
@@ -296,6 +362,7 @@ def main() -> None:
         limit_per_cycle=args.limit,
         status_file=status_file,
         shutdown=shutdown,
+        stop_file=stop_file,
     )
 
 

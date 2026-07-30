@@ -16,7 +16,14 @@ public sealed record ManagedProcessHandle(string Name, int ProcessId);
 /// </summary>
 public sealed class ProcessSupervisor : IDisposable
 {
-    private readonly List<(string Name, Process Process)> _children = new();
+    private sealed class TrackedChild
+    {
+        public required string Name { get; init; }
+        public required Process Process { get; init; }
+        public StreamWriter? LogWriter { get; init; }
+    }
+
+    private readonly List<TrackedChild> _children = new();
     private readonly object _lock = new();
 
     public IReadOnlyList<ManagedProcessHandle> Children
@@ -34,16 +41,28 @@ public sealed class ProcessSupervisor : IDisposable
     }
 
     /// <summary>
-    /// Inicia um processo de longa duração (ex.: uvicorn, vite dev server) e passa a rastreá-lo.
-    /// <paramref name="environmentOverrides"/> é aplicado por cima do ambiente herdado -- é assim
-    /// que ENVIRONMENT=test e API_SECRET_KEY chegam ao processo da API sem nunca tocar disco.
+    /// Inicia um processo de longa duração (ex.: uvicorn, vite dev server, dispatcher contínuo)
+    /// e passa a rastreá-lo. <paramref name="environmentOverrides"/> é aplicado por cima do
+    /// ambiente herdado -- é assim que ENVIRONMENT=test e API_SECRET_KEY chegam ao processo da
+    /// API sem nunca tocar disco.
+    ///
+    /// Se <paramref name="logFilePath"/> for fornecido, stdout/stderr são drenados
+    /// assincronamente (via OutputDataReceived/ErrorDataReceived + BeginOutputReadLine) para
+    /// esse arquivo, linha a linha, passando cada linha por <paramref name="sanitizeLine"/>
+    /// antes de gravar (nunca grava segredos em disco). A drenagem assíncrona também evita um
+    /// problema real e conhecido de processos de longa duração com RedirectStandardOutput=true:
+    /// se ninguém lê os pipes, o buffer do SO enche e o processo filho trava ao tentar escrever
+    /// mais saída (Incremento 2.2, seção 2, item 3: "capturar logs sanitizados" da API --
+    /// e, por extensão, de qualquer processo de longa duração).
     /// </summary>
     public ManagedProcessHandle StartTracked(
         string name,
         string fileName,
         IReadOnlyList<string> arguments,
         string workingDirectory,
-        IReadOnlyDictionary<string, string>? environmentOverrides = null)
+        IReadOnlyDictionary<string, string>? environmentOverrides = null,
+        string? logFilePath = null,
+        Func<string, string>? sanitizeLine = null)
     {
         var psi = new ProcessStartInfo
         {
@@ -53,11 +72,21 @@ public sealed class ProcessSupervisor : IDisposable
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             CreateNoWindow = true,
+            StandardOutputEncoding = System.Text.Encoding.UTF8,
+            StandardErrorEncoding = System.Text.Encoding.UTF8,
         };
         foreach (var arg in arguments)
         {
             psi.ArgumentList.Add(arg);
         }
+        // PYTHONUTF8/PYTHONIOENCODING garantem que processos Python filhos (API, dispatcher,
+        // migrações) escrevam UTF-8 em stdout/stderr independentemente do codepage herdado do
+        // console do Windows -- mesma correção já aplicada em scripts/Run-FinalGate.ps1
+        // (Incremento 2.1.1) para o mojibake observado no Windows do usuário. Aplicado aqui
+        // incondicionalmente (não é ruim para processos não-Python, que simplesmente ignoram
+        // variáveis de ambiente que não leem).
+        psi.Environment["PYTHONUTF8"] = "1";
+        psi.Environment["PYTHONIOENCODING"] = "utf-8";
         if (environmentOverrides is not null)
         {
             foreach (var (key, value) in environmentOverrides)
@@ -67,14 +96,50 @@ public sealed class ProcessSupervisor : IDisposable
         }
 
         var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
+
+        StreamWriter? logWriter = null;
+        if (logFilePath is not null)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(logFilePath) ?? ".");
+            logWriter = new StreamWriter(logFilePath, append: false, System.Text.Encoding.UTF8) { AutoFlush = true };
+
+            void OnLine(object sender, DataReceivedEventArgs e)
+            {
+                if (e.Data is null)
+                {
+                    return;
+                }
+                var line = sanitizeLine is not null ? sanitizeLine(e.Data) : e.Data;
+                try
+                {
+                    logWriter.WriteLine(line);
+                }
+                catch (ObjectDisposedException)
+                {
+                    // Escritor já foi fechado (processo encerrado e supervisor descartado) --
+                    // linha tardia, sem problema descartá-la.
+                }
+            }
+
+            process.OutputDataReceived += OnLine;
+            process.ErrorDataReceived += OnLine;
+        }
+
         if (!process.Start())
         {
+            logWriter?.Dispose();
             throw new InvalidOperationException($"Falha ao iniciar processo '{name}' ({fileName}).");
+        }
+
+        if (logWriter is not null)
+        {
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
         }
 
         lock (_lock)
         {
-            _children.Add((name, process));
+            _children.Add(new TrackedChild { Name = name, Process = process, LogWriter = logWriter });
         }
 
         return new ManagedProcessHandle(name, process.Id);
@@ -100,11 +165,15 @@ public sealed class ProcessSupervisor : IDisposable
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             CreateNoWindow = true,
+            StandardOutputEncoding = System.Text.Encoding.UTF8,
+            StandardErrorEncoding = System.Text.Encoding.UTF8,
         };
         foreach (var arg in arguments)
         {
             psi.ArgumentList.Add(arg);
         }
+        psi.Environment["PYTHONUTF8"] = "1";
+        psi.Environment["PYTHONIOENCODING"] = "utf-8";
         if (environmentOverrides is not null)
         {
             foreach (var (key, value) in environmentOverrides)
@@ -146,6 +215,50 @@ public sealed class ProcessSupervisor : IDisposable
     }
 
     /// <summary>
+    /// Encerra à força SOMENTE o processo filho rastreado mais recente com este `name` (ex.:
+    /// "frontend", "dispatcher", "api") -- Incremento 2.2, seção 2 ("encerramento ordenado" e
+    /// "matar forçadamente apenas o processo filho específico"). Nunca afeta outros processos
+    /// filhos rastreados, e nunca usa taskkill genérico por nome/porta do sistema operacional.
+    /// Retorna false se nenhum processo vivo com esse nome estiver rastreado (idempotente --
+    /// chamar de novo depois que já encerrou não é erro).
+    /// </summary>
+    public bool TryKillNamed(string name)
+    {
+        lock (_lock)
+        {
+            for (var i = _children.Count - 1; i >= 0; i--)
+            {
+                if (_children[i].Name == name && !SafeHasExited(_children[i].Process))
+                {
+                    TryKillTree(_children[i].Process);
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// True se o processo filho rastreado mais recente com este nome ainda está vivo. Usado
+    /// para decidir se um "kill forçado" ainda é necessário depois de esperar um shutdown
+    /// gracioso.
+    /// </summary>
+    public bool IsNamedAlive(string name)
+    {
+        lock (_lock)
+        {
+            for (var i = _children.Count - 1; i >= 0; i--)
+            {
+                if (_children[i].Name == name)
+                {
+                    return !SafeHasExited(_children[i].Process);
+                }
+            }
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Encerra SOMENTE os processos filhos rastreados por este supervisor (e suas árvores de
     /// processo), na ordem inversa de criação. Nunca usa taskkill por nome ou por porta.
     /// </summary>
@@ -165,9 +278,10 @@ public sealed class ProcessSupervisor : IDisposable
         ShutdownAll();
         lock (_lock)
         {
-            foreach (var (_, process) in _children)
+            foreach (var child in _children)
             {
-                process.Dispose();
+                child.LogWriter?.Dispose();
+                child.Process.Dispose();
             }
             _children.Clear();
         }

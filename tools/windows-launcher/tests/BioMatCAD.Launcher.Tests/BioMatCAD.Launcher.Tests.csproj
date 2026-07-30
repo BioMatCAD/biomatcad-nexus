@@ -20,6 +20,9 @@
     <Compile Include="../../src/StartupPlanner.cs" Link="StartupPlanner.cs" />
     <Compile Include="../../src/ProcessSupervisor.cs" Link="ProcessSupervisor.cs" />
     <Compile Include="../../src/EnvironmentSetup.cs" Link="EnvironmentSetup.cs" />
+    <Compile Include="../../src/DatabasePreflight.cs" Link="DatabasePreflight.cs" />
+    <Compile Include="../../src/MigrationRunner.cs" Link="MigrationRunner.cs" />
+    <Compile Include="../../src/DispatcherManager.cs" Link="DispatcherManager.cs" />
   </ItemGroup>
 
   <ItemGroup>

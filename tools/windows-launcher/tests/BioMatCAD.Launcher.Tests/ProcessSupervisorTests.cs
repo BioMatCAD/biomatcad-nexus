@@ -151,3 +151,116 @@ public class ProcessSupervisorTests
         }
     }
 }
+
+public class ProcessSupervisorNamedControlTests
+{
+    private static (string FileName, string[] Args) LongRunningCommand(int seconds) =>
+        OperatingSystem.IsWindows()
+            ? ("cmd.exe", new[] { "/c", "timeout", "/t", seconds.ToString() })
+            : ("sleep", new[] { seconds.ToString() });
+
+    private static bool IsProcessAlive(int pid)
+    {
+        try { return !Process.GetProcessById(pid).HasExited; }
+        catch (ArgumentException) { return false; }
+    }
+
+    [Fact]
+    public void TryKillNamed_EncerraSomenteOProcessoComEsseNome()
+    {
+        // Incremento 2.2, seção 2 (encerramento ordenado frontend->dispatcher->API): prova que
+        // matar "frontend" por nome não afeta um "api" também rastreado -- essencial para o
+        // encerramento em ordem específica, diferente de ShutdownAll (que mata tudo de uma vez).
+        using var supervisor = new ProcessSupervisor();
+        var (fileName, args) = LongRunningCommand(30);
+
+        var api = supervisor.StartTracked("api", fileName, args, Directory.GetCurrentDirectory());
+        var frontend = supervisor.StartTracked("frontend", fileName, args, Directory.GetCurrentDirectory());
+
+        var killed = supervisor.TryKillNamed("frontend");
+        Thread.Sleep(400);
+
+        Assert.True(killed);
+        Assert.False(IsProcessAlive(frontend.ProcessId));
+        Assert.True(IsProcessAlive(api.ProcessId), "matar 'frontend' não deveria afetar 'api'");
+
+        supervisor.ShutdownAll();
+    }
+
+    [Fact]
+    public void TryKillNamed_SemProcessoComEsseNome_RetornaFalseSemLancar()
+    {
+        using var supervisor = new ProcessSupervisor();
+        Assert.False(supervisor.TryKillNamed("nome-que-nao-existe"));
+    }
+
+    [Fact]
+    public void IsNamedAlive_RefleteEstadoRealDoProcesso()
+    {
+        using var supervisor = new ProcessSupervisor();
+        var (fileName, args) = LongRunningCommand(30);
+        supervisor.StartTracked("dispatcher", fileName, args, Directory.GetCurrentDirectory());
+
+        Assert.True(supervisor.IsNamedAlive("dispatcher"));
+        supervisor.TryKillNamed("dispatcher");
+        Thread.Sleep(400);
+        Assert.False(supervisor.IsNamedAlive("dispatcher"));
+    }
+
+    [Fact]
+    public void StartTracked_ComLogFilePath_DrenaStdoutEStderrSanitizadosParaOArquivo()
+    {
+        using var supervisor = new ProcessSupervisor();
+        var tmpDir = Directory.CreateTempSubdirectory("biomatcad-log-test-");
+        try
+        {
+            var logFile = Path.Combine(tmpDir.FullName, "child.log");
+            var pythonPath = OperatingSystem.IsWindows() ? "python" : "python3";
+            var script =
+                "import sys\n" +
+                "print('linha stdout com postgresql://user:segredo123@host:5432/db')\n" +
+                "print('linha stderr', file=sys.stderr)\n";
+
+            static string Sanitize(string line) => line.Replace("segredo123", "***");
+
+            supervisor.StartTracked(
+                "logger-test", pythonPath, ["-c", script], Directory.GetCurrentDirectory(),
+                logFilePath: logFile, sanitizeLine: Sanitize);
+
+            // A entrega das últimas linhas via OutputDataReceived/ErrorDataReceived é
+            // assíncrona e pode continuar chegando por um curto período MESMO DEPOIS que
+            // Process.HasExited já é true (o SO ainda está entregando os buffers pendentes ao
+            // .NET) -- por isso o teste espera pelo CONTEÚDO esperado aparecer, com um timeout
+            // generoso, em vez de um sleep fixo após checar apenas a saída do processo.
+            var content = "";
+            for (var i = 0; i < 100; i++)
+            {
+                if (File.Exists(logFile))
+                {
+                    content = File.ReadAllText(logFile);
+                    if (content.Contains("linha stdout") && content.Contains("linha stderr"))
+                    {
+                        break;
+                    }
+                }
+                Thread.Sleep(100);
+            }
+
+            Assert.Contains("linha stdout", content);
+            Assert.Contains("linha stderr", content);
+            Assert.DoesNotContain("segredo123", content);
+            Assert.Contains("***", content);
+        }
+        finally
+        {
+            supervisor.ShutdownAll();
+            tmpDir.Delete(recursive: true);
+        }
+    }
+
+    private static bool Process_HasExitedSafely(int pid)
+    {
+        try { return Process.GetProcessById(pid).HasExited; }
+        catch (ArgumentException) { return true; }
+    }
+}
