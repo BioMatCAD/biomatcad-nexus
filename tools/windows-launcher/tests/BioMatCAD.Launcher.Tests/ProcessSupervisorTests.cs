@@ -413,6 +413,150 @@ public class ProcessSupervisorNamedControlTests
         }
     }
 
+    [Fact]
+    public void WaitUntilLogDrained_NaoConcluiAntecipadamenteEnquantoStderrAindaNaoTerminou()
+    {
+        // Regressão real relatada na revalidação Windows: ac2e189 passou 104/104 uma vez, mas
+        // falhou 103/104 na repetição dentro de Build-WindowsLauncher.ps1 -- o log continha
+        // stdout sanitizado, mas não continha "linha stderr". Este teste prova diretamente que
+        // o EOF de stdout e o EOF de stderr são sinalizados de forma INDEPENDENTE: um atraso
+        // artificial em stderr não pode fazer WaitUntilLogDrained concluir antes do tempo.
+        using var supervisor = new ProcessSupervisor();
+        var tmpDir = Directory.CreateTempSubdirectory("biomatcad-log-slow-stderr-test-");
+        try
+        {
+            var logFile = Path.Combine(tmpDir.FullName, "child.log");
+            var (fileName, args) = TestHelperProcessLocator.Command("slow-stderr", "1500");
+            supervisor.StartTracked("logger-test", fileName, args, Directory.GetCurrentDirectory(), logFilePath: logFile);
+
+            // Neste ponto o stdout já deve ter chegado (é escrito antes do delay), mas o
+            // stderr só chega depois de 1500ms -- um timeout curto (300ms) NÃO pode reportar
+            // drenagem completa.
+            var prematuro = supervisor.WaitUntilLogDrained("logger-test", TimeSpan.FromMilliseconds(300));
+            Assert.False(prematuro, "não deveria reportar drenagem completa antes do stderr atrasado terminar");
+
+            var completo = supervisor.WaitUntilLogDrained("logger-test", TimeSpan.FromSeconds(5));
+            Assert.True(completo);
+
+            var content = ProcessSupervisor.ReadLogFile(logFile);
+            Assert.Contains("linha stdout", content);
+            Assert.Contains("linha stderr", content);
+        }
+        finally
+        {
+            tmpDir.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void WaitUntilLogDrained_NaoConcluiAntecipadamenteEnquantoStdoutAindaNaoTerminou()
+    {
+        // Espelho do teste acima: atraso artificial no STDOUT (stderr chega primeiro) também
+        // não pode fazer a drenagem concluir antes do tempo -- prova que a independência dos
+        // dois EOFs vale nos dois sentidos, não só quando o stderr é o atrasado.
+        using var supervisor = new ProcessSupervisor();
+        var tmpDir = Directory.CreateTempSubdirectory("biomatcad-log-slow-stdout-test-");
+        try
+        {
+            var logFile = Path.Combine(tmpDir.FullName, "child.log");
+            var (fileName, args) = TestHelperProcessLocator.Command("slow-stdout", "1500");
+            supervisor.StartTracked("logger-test", fileName, args, Directory.GetCurrentDirectory(), logFilePath: logFile);
+
+            var prematuro = supervisor.WaitUntilLogDrained("logger-test", TimeSpan.FromMilliseconds(300));
+            Assert.False(prematuro, "não deveria reportar drenagem completa antes do stdout atrasado terminar");
+
+            var completo = supervisor.WaitUntilLogDrained("logger-test", TimeSpan.FromSeconds(5));
+            Assert.True(completo);
+
+            var content = ProcessSupervisor.ReadLogFile(logFile);
+            Assert.Contains("linha stdout", content);
+            Assert.Contains("linha stderr", content);
+        }
+        finally
+        {
+            tmpDir.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void StartTracked_ComEscritaConcorrenteIntensaEmStdoutEStderr_NaoPerdeNemCorrompeLinhas()
+    {
+        // Teste de stress mais agressivo que o de "log-lines": o processo auxiliar dispara DUAS
+        // threads verdadeiramente concorrentes escrevendo centenas de linhas simultaneamente em
+        // stdout e stderr, maximizando a chance real de sobreposição entre os callbacks
+        // OutputDataReceived/ErrorDataReceived -- exatamente o cenário que corrompia/perdia
+        // linhas silenciosamente antes do lock de sincronização (LogSyncRoot) desta correção.
+        // Verifica a CONTAGEM exata de linhas (não só presença de substring), que é um
+        // detector muito mais sensível de corrupção do que apenas checar se "linha stdout"
+        // aparece em algum lugar do arquivo.
+        using var supervisor = new ProcessSupervisor();
+        var tmpDir = Directory.CreateTempSubdirectory("biomatcad-log-flood-test-");
+        try
+        {
+            var logFile = Path.Combine(tmpDir.FullName, "child.log");
+            const int count = 300;
+            var (fileName, args) = TestHelperProcessLocator.Command("flood-lines", count.ToString());
+            supervisor.StartTracked("logger-test", fileName, args, Directory.GetCurrentDirectory(), logFilePath: logFile);
+
+            var drained = supervisor.WaitUntilLogDrained("logger-test", TimeSpan.FromSeconds(15));
+            Assert.True(drained);
+
+            var content = ProcessSupervisor.ReadLogFile(logFile);
+            var lines = content.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var stdoutLines = lines.Where(l => l.StartsWith("OUT-", StringComparison.Ordinal)).ToHashSet();
+            var stderrLines = lines.Where(l => l.StartsWith("ERR-", StringComparison.Ordinal)).ToHashSet();
+
+            Assert.Equal(count, stdoutLines.Count);
+            Assert.Equal(count, stderrLines.Count);
+            for (var i = 0; i < count; i++)
+            {
+                Assert.Contains($"OUT-{i:D4}", stdoutLines);
+                Assert.Contains($"ERR-{i:D4}", stderrLines);
+            }
+        }
+        finally
+        {
+            supervisor.Dispose();
+            tmpDir.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void StartTracked_RepetidoCinquentaVezesNoMesmoProcessoDeTeste_NuncaPerdeLinhaAlgumaSobStress()
+    {
+        // Stress test explicitamente pedido pelo usuário depois de observar flakiness real
+        // (1 falha em 104 testes, numa segunda execução do mesmo commit): roda o cenário
+        // completo (start -> espera EOF real dos dois streams -> lê -> Dispose) 50 vezes NO
+        // MESMO PROCESSO de teste, sem nenhum sleep fixo entre iterações além do que
+        // WaitUntilLogDrained já espera por condição real. Também cobre "Dispose não lança
+        // ObjectDisposedException nem perde as últimas linhas" a cada iteração.
+        for (var iteration = 1; iteration <= 50; iteration++)
+        {
+            var tmpDir = Directory.CreateTempSubdirectory($"biomatcad-log-stress-{iteration}-");
+            try
+            {
+                var logFile = Path.Combine(tmpDir.FullName, "child.log");
+                using var supervisor = new ProcessSupervisor();
+                var (fileName, args) = TestHelperProcessLocator.Command("log-lines");
+                supervisor.StartTracked("logger-test", fileName, args, Directory.GetCurrentDirectory(), logFilePath: logFile);
+
+                var drained = supervisor.WaitUntilLogDrained("logger-test", TimeSpan.FromSeconds(5));
+                Assert.True(drained, $"iteração {iteration}: drenagem não completou dentro do timeout");
+
+                var content = ProcessSupervisor.ReadLogFile(logFile);
+                Assert.True(content.Contains("linha stdout"), $"iteração {iteration}: faltando linha stdout -- conteúdo: '{content}'");
+                Assert.True(content.Contains("linha stderr"), $"iteração {iteration}: faltando linha stderr -- conteúdo: '{content}'");
+
+                var exceptionFromDispose = Record.Exception(() => supervisor.Dispose());
+                Assert.Null(exceptionFromDispose);
+            }
+            finally
+            {
+                tmpDir.Delete(recursive: true);
+            }
+        }
+    }
+
     private static bool Process_HasExitedSafely(int pid)
     {
         try { return Process.GetProcessById(pid).HasExited; }

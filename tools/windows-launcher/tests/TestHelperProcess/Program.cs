@@ -22,6 +22,24 @@
 //                                             <segundos> depois de imprimir -- usado para
 //                                             testar leitura do log com o processo AINDA
 //                                             rodando (não apenas depois de terminar).
+//   slow-stderr <atrasoMs>                  -- imprime a linha de stdout IMEDIATAMENTE, espera
+//                                             <atrasoMs> milissegundos, só então imprime a
+//                                             linha de stderr, e sai -- usado para provar que o
+//                                             EOF de stdout e o EOF de stderr são sinalizados de
+//                                             forma independente (um atraso artificial em UM
+//                                             stream não pode fazer a drenagem concluir antes
+//                                             do outro).
+//   slow-stdout <atrasoMs>                  -- o inverso de slow-stderr: imprime stderr
+//                                             imediatamente, espera <atrasoMs>, só então
+//                                             imprime stdout, e sai.
+//   flood-lines <quantidade>                -- dispara DUAS threads verdadeiramente
+//                                             concorrentes dentro do próprio processo filho:
+//                                             uma escreve "OUT-0000".."OUT-NNNN" em stdout, a
+//                                             outra escreve "ERR-0000".."ERR-NNNN" em stderr,
+//                                             ao mesmo tempo -- maximiza a chance real de
+//                                             sobreposição entre os callbacks OutputDataReceived
+//                                             e ErrorDataReceived do lado do ProcessSupervisor,
+//                                             para testes de stress da sincronização do log.
 
 if (args.Length == 0)
 {
@@ -88,6 +106,51 @@ switch (args[0])
         Console.Out.Flush();
         Console.Error.Flush();
         Thread.Sleep(TimeSpan.FromSeconds(seconds));
+        return 0;
+    }
+    case "slow-stderr":
+    {
+        var delayMs = args.Length > 1 ? int.Parse(args[1]) : 1000;
+        Console.WriteLine("linha stdout com postgresql://user:segredo123@host:5432/db");
+        Console.Out.Flush();
+        Thread.Sleep(delayMs);
+        Console.Error.WriteLine("linha stderr");
+        Console.Error.Flush();
+        return 0;
+    }
+    case "slow-stdout":
+    {
+        var delayMs = args.Length > 1 ? int.Parse(args[1]) : 1000;
+        Console.Error.WriteLine("linha stderr");
+        Console.Error.Flush();
+        Thread.Sleep(delayMs);
+        Console.WriteLine("linha stdout com postgresql://user:segredo123@host:5432/db");
+        Console.Out.Flush();
+        return 0;
+    }
+    case "flood-lines":
+    {
+        var count = args.Length > 1 ? int.Parse(args[1]) : 200;
+        var stdoutThread = new Thread(() =>
+        {
+            for (var i = 0; i < count; i++)
+            {
+                Console.WriteLine($"OUT-{i:D4}");
+            }
+            Console.Out.Flush();
+        });
+        var stderrThread = new Thread(() =>
+        {
+            for (var i = 0; i < count; i++)
+            {
+                Console.Error.WriteLine($"ERR-{i:D4}");
+            }
+            Console.Error.Flush();
+        });
+        stdoutThread.Start();
+        stderrThread.Start();
+        stdoutThread.Join();
+        stderrThread.Join();
         return 0;
     }
     default:

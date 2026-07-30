@@ -30,6 +30,17 @@ public sealed class ProcessSupervisor : IDisposable
         public ManualResetEventSlim? StdoutDrained { get; init; }
         public ManualResetEventSlim? StderrDrained { get; init; }
 
+        // Lock dedicado que serializa TODA gravação no LogWriter (tanto a linha de stdout
+        // quanto a de stderr, que chegam por callbacks assíncronos em threads INDEPENDENTES e
+        // podem correr concorrentemente entre si) com o Flush()+Dispose() final feito por
+        // FinalizeChild. Bug real corrigido nesta rodada: sem este lock, uma escrita de stdout
+        // e uma escrita de stderr concorrentes no MESMO StreamWriter (que não é thread-safe
+        // para chamadas concorrentes) podiam corromper/perder uma das duas linhas em silêncio
+        // (sem lançar exceção) -- exatamente o "103/104, faltando 'linha stderr'" relatado pelo
+        // usuário. Também garante que Flush/Dispose nunca rodem no meio de uma escrita ainda em
+        // voo.
+        public object LogSyncRoot { get; } = new();
+
         // Idempotência/thread-safety da finalização (item 3 do relatório do usuário): pode ser
         // disparada concorrentemente por Process.Exited (término natural), TryKillNamed,
         // ShutdownAll ou Dispose -- só a PRIMEIRA chamada deve realmente fechar o LogWriter.
@@ -171,7 +182,7 @@ public sealed class ProcessSupervisor : IDisposable
                     stdoutDrained!.Set();
                     return;
                 }
-                WriteSanitizedLine(logWriter, e.Data, sanitizeLine);
+                WriteSanitizedLine(child.LogSyncRoot, logWriter, e.Data, sanitizeLine);
             }
 
             void OnErrorLine(object sender, DataReceivedEventArgs e)
@@ -181,7 +192,7 @@ public sealed class ProcessSupervisor : IDisposable
                     stderrDrained!.Set();
                     return;
                 }
-                WriteSanitizedLine(logWriter, e.Data, sanitizeLine);
+                WriteSanitizedLine(child.LogSyncRoot, logWriter, e.Data, sanitizeLine);
             }
 
             process.OutputDataReceived += OnOutputLine;
@@ -214,16 +225,23 @@ public sealed class ProcessSupervisor : IDisposable
         return new ManagedProcessHandle(name, process.Id);
     }
 
-    private static void WriteSanitizedLine(StreamWriter logWriter, string data, Func<string, string>? sanitizeLine)
+    private static void WriteSanitizedLine(object logSyncRoot, StreamWriter logWriter, string data, Func<string, string>? sanitizeLine)
     {
         var line = sanitizeLine is not null ? sanitizeLine(data) : data;
-        try
+        // Lock item 5/6 do relatório do usuário: a escrita real precisa estar sob o MESMO lock
+        // usado pelo Flush/Dispose final em FinalizeChild -- stdout e stderr chegam por
+        // callbacks assíncronos em threads independentes e escrevem no mesmo StreamWriter, que
+        // não é thread-safe para chamadas concorrentes sem essa serialização externa.
+        lock (logSyncRoot)
         {
-            logWriter.WriteLine(line);
-        }
-        catch (ObjectDisposedException)
-        {
-            // Escritor já foi fechado (FinalizeChild já rodou) -- linha tardia, descartável.
+            try
+            {
+                logWriter.WriteLine(line);
+            }
+            catch (ObjectDisposedException)
+            {
+                // Escritor já foi fechado (FinalizeChild já rodou) -- linha tardia, descartável.
+            }
         }
     }
 
@@ -353,9 +371,33 @@ public sealed class ProcessSupervisor : IDisposable
     /// Dispose, TryKillNamed, ShutdownAll e término natural precisam convergir para a mesma
     /// rotina). Idempotente e thread-safe via <see cref="TrackedChild.TryBeginFinalize"/> --
     /// pode ser chamada mais de uma vez (ex.: Process.Exited dispara concorrentemente com uma
-    /// chamada explícita a TryKillNamed) sem efeito colateral duplicado. Espera (com timeout
-    /// limitado) a drenagem de stdout/stderr terminar antes de fechar o LogWriter, para nunca
-    /// perder as últimas linhas nem lançar no meio de uma entrega assíncrona ainda em voo.
+    /// chamada explícita a TryKillNamed) sem efeito colateral duplicado.
+    ///
+    /// Correção real desta rodada (flakiness 103/104 relatada pelo usuário dentro de
+    /// Build-WindowsLauncher.ps1: log continha stdout mas não stderr, mesmo com
+    /// WaitUntilLogDrained/StdoutDrained/StderrDrained já implementados na rodada anterior):
+    /// a versão anterior esperava os dois eventos de drenagem com um timeout FIXO de 5
+    /// segundos e, se esse timeout expirasse, PROSSEGUIA MESMO ASSIM para Flush()+Dispose() --
+    /// ou seja, podia marcar a finalização como completa e descartar o LogWriter mesmo que os
+    /// streams não tivessem realmente terminado (violando o item 6 do relatório do usuário).
+    /// Isso é exatamente o que a própria documentação da Microsoft alerta sobre
+    /// Process.Exited/WaitForExit: "quando a saída padrão é redirecionada para manipuladores de
+    /// eventos assíncronos, é possível que o processamento da saída não tenha sido concluído
+    /// quando [WaitForExit(timeout)] retorna" -- sob carga pesada de CPU (ex.: dentro de um
+    /// script que também compila com MSBuild/dotnet build concorrentemente, saturando a thread
+    /// pool), a entrega assíncrona da última linha de um stream pode legitimamente demorar mais
+    /// que qualquer timeout fixo escolhido -- e simplesmente AUMENTAR o número (item 10: "não
+    /// use... aumento arbitrário de timeout") não eliminaria a falha de design, só a tornaria
+    /// mais rara.
+    ///
+    /// A correção real, documentada e suportada pela própria Microsoft, é chamar a sobrecarga
+    /// SEM parâmetro de <see cref="Process.WaitForExit()"/> depois de já saber que o processo
+    /// terminou -- ela garante (bloqueando o tempo que for necessário, não um timeout arbitrário)
+    /// que todo o processamento assíncrono de stdout/stderr já foi concluído antes de retornar.
+    /// Como <see cref="FinalizeChild"/> só é chamado depois que o término do processo já foi
+    /// confirmado (via o próprio evento Process.Exited, ou via TryKillTree+WaitForExit(2000) nos
+    /// outros três caminhos), esta chamada nunca bloqueia indefinidamente em uso normal -- ela
+    /// só espera a entrega assíncrona que, por definição, já está em andamento.
     /// </summary>
     private static void FinalizeChild(TrackedChild child)
     {
@@ -363,10 +405,38 @@ public sealed class ProcessSupervisor : IDisposable
         {
             return;
         }
-        child.StdoutDrained?.Wait(TimeSpan.FromSeconds(5));
-        child.StderrDrained?.Wait(TimeSpan.FromSeconds(5));
-        child.LogWriter?.Flush();
-        child.LogWriter?.Dispose();
+        try
+        {
+            // Sem timeout de propósito (ver doc-comment acima): é a garantia real, não um
+            // "chute" de duração -- o processo já terminou, então isto sempre retorna assim que
+            // a entrega assíncrona pendente (que já está em andamento) for concluída pelo runtime.
+            child.Process.WaitForExit();
+        }
+        catch
+        {
+            // Processo pode já ter sido descartado por outro caminho concorrente -- segue mesmo
+            // assim para a espera redundante abaixo.
+        }
+        // Espera redundante pelos sinais de drenagem (item 1-4 do relatório do usuário) --
+        // depois do WaitForExit() acima, estes já devem estar sinalizados; mantidos como
+        // confirmação adicional e para o caso raro de EnableRaisingEvents=false. O timeout aqui
+        // é apenas uma rede de segurança de último recurso (não a garantia principal, que é o
+        // WaitForExit() acima) para nunca travar o encerramento do launcher indefinidamente.
+        child.StdoutDrained?.Wait(TimeSpan.FromSeconds(30));
+        child.StderrDrained?.Wait(TimeSpan.FromSeconds(30));
+        // Só agora o lock é tomado para o Flush+Dispose final -- o MESMO lock usado por
+        // WriteSanitizedLine, para que um Flush/Dispose nunca corra concorrentemente com uma
+        // escrita ainda em voo (item 5 do relatório do usuário). A espera acima fica FORA do
+        // lock de propósito (item 8): os callbacks OnOutputLine/OnErrorLine precisam conseguir
+        // adquirir esse mesmo lock livremente enquanto esperamos aqui -- se este método
+        // segurasse o lock durante a espera, um callback que ainda precisa gravar sua última
+        // linha antes de sinalizar EOF ficaria bloqueado esperando o lock, e este método ficaria
+        // bloqueado esperando o sinal que o callback nunca consegue emitir: deadlock.
+        lock (child.LogSyncRoot)
+        {
+            child.LogWriter?.Flush();
+            child.LogWriter?.Dispose();
+        }
     }
 
     /// <summary>

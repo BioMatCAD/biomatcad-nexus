@@ -302,3 +302,106 @@ possível para essa parte específica da correção é a nova execução do usu�
 anteriores + 3 novos testes). Como sempre: sucesso no sandbox Linux não é prova suficiente de
 sucesso no Windows real. A aprovação final desta seção continua condicionada à nova execução
 real do usuário no Windows, relatando 0 falhas.
+
+### Incremento 2.2, Seção 2 — commit ac2e189: flakiness real (104/104 depois 103/104 dentro de Build-WindowsLauncher.ps1)
+
+Registro honesto de uma terceira rodada de validação real: o usuário rodou a suíte duas vezes
+contra o commit `ac2e189`. **Primeira execução: 104/104 aprovados.** **Segunda execução,
+dentro de `Build-WindowsLauncher.ps1`: 103/104**, com a mesma falha do relatório anterior
+(`StartTracked_ComLogFilePath_DrenaStdoutEStderrSanitizadosParaOArquivo`, log sem "linha
+stderr"). O build foi corretamente cancelado pelo script; o `.exe` encontrado em `dist`
+(SHA-256 `B6AE108C...`) é um binário antigo e não constitui evidência do commit `ac2e189`.
+
+**Investigação desta rodada — duas hipóteses testadas, uma delas era a causa real:**
+
+1. **Hipótese A (EOF sinalizado fora de ordem entre stdout/stderr):** mutation-test aplicado
+   diretamente na condição de `WaitUntilLogDrained` (`stdoutOk && stderrOk` → `stdoutOk ||
+   stderrOk`). Resultado: **não detectável neste sandbox** -- comprovado experimentalmente
+   (inclusive tentando fechar deliberadamente um stream cedo com `Console.Out.Close()` no
+   processo auxiliar) que stdout e stderr de um processo simples só sinalizam EOF quando o
+   processo efetivamente termina e o SO fecha os dois handles praticamente ao mesmo tempo --
+   não há como um chegar "muito antes" do outro nesse cenário, então a condição AND/OR não
+   fazia diferença observável aqui. A lógica AND continua sendo a correta por construção, mas
+   esta parte específica não pôde ser provada por um teste que falha-e-depois-passa neste
+   sandbox.
+2. **Hipótese B (corrida de escrita entre as threads de callback de stdout e stderr no mesmo
+   `StreamWriter`):** testada com um teste de stress muito mais agressivo que o normal (300
+   linhas por stream, escritas por duas threads verdadeiramente concorrentes no processo
+   auxiliar -- novo modo `flood-lines`) e até com um atraso artificial de 2ms inserido na
+   escrita para alargar a janela de corrida. Resultado: **zero ocorrências de escrita
+   concorrente observada** (instrumentado com um contador `Interlocked`), em centenas de
+   escritas -- o .NET, pelo menos nesta combinação de runtime/SO, nunca despachou os callbacks
+   `OutputDataReceived`/`ErrorDataReceived` de streams diferentes verdadeiramente em paralelo
+   neste sandbox. Também não confirmável por um teste que falha-e-depois-passa aqui.
+3. **Causa real, encontrada por inspeção do código e confirmada por um terceiro experimento
+   controlado:** `FinalizeChild` esperava a drenagem de cada stream com um **timeout fixo de 5
+   segundos** e, se esse timeout expirasse, **prosseguia mesmo assim** para `Flush()` +
+   `Dispose()` do `LogWriter` -- ou seja, podia marcar a finalização como completa e descartar
+   o escritor mesmo que os streams não tivessem realmente terminado de entregar seu conteúdo.
+   Isso é exatamente o comportamento que a própria documentação da Microsoft alerta em
+   `Process.WaitForExit`: quando stdout/stderr são redirecionados para manipuladores
+   assíncronos, o processamento pode não estar concluído quando um `WaitForExit(timeout)`
+   (ou, por extensão, uma espera de drenagem com timeout) retorna -- sob carga pesada de CPU
+   (como dentro de `Build-WindowsLauncher.ps1`, que também roda `dotnet build`/`publish`
+   concorrentemente, saturando a thread pool), a entrega assíncrona da última linha pode
+   legitimamente demorar mais que qualquer timeout fixo escolhido.
+
+**Correção real aplicada** (commit seguinte a `ac2e189`, ver `git log`): `FinalizeChild` agora
+chama a sobrecarga **sem parâmetro** de `Process.WaitForExit()` (documentada e suportada pela
+própria Microsoft para exatamente este cenário) antes de tocar no `LogWriter` -- ela bloqueia
+pelo tempo que for necessário (não um timeout arbitrário) até que todo o processamento
+assíncrono de stdout/stderr já tenha sido concluído pelo runtime. Como `FinalizeChild` só é
+chamado depois que o término do processo já foi confirmado (via `Process.Exited` ou via
+`TryKillTree`+`WaitForExit(2000)` nos outros três caminhos), esta chamada nunca bloqueia
+indefinidamente em uso normal. As esperas por `StdoutDrained`/`StderrDrained` foram mantidas
+como confirmação redundante (não mais o mecanismo principal), com o timeout aumentado de 5s
+para 30s **apenas como rede de segurança de último recurso** -- não como a correção em si (o
+item "não use aumento arbitrário de timeout" do relatório do usuário está endereçado pela
+mudança estrutural do `WaitForExit()`, não pelo número maior). Também foi adicionado um lock
+dedicado (`LogSyncRoot`) sincronizando toda escrita no `LogWriter` com o `Flush`+`Dispose`
+final, como camada defensiva adicional (mesmo sem prova de exploração direta neste sandbox,
+por ser uma garantia documentada do próprio `StreamWriter`, que não é thread-safe para uso
+concorrente sem sincronização externa).
+
+**Mutation test real desta correção (a prova que faltava nas duas hipóteses acima):** como as
+mutações diretas no código não eram detectáveis neste sandbox (não havia como reproduzir carga
+real o suficiente), construí um experimento controlado que simula a condição relatada (rodar
+dentro de um script que compila concorrentemente): satura deliberadamente a `ThreadPool` do
+processo (`SetMinThreads(1,1)`/`SetMaxThreads(2,2)` + 8 tarefas bloqueantes de 4s) e então
+executa o cenário exato do bug (200-300 linhas via `flood-lines`, espera o término natural,
+chama `Dispose()` imediatamente, sem espera extra) 8 vezes seguidas, comparando a versão
+**antiga** de `FinalizeChild` (timeout fixo de 5s, prossegue mesmo assim) com a versão **nova**
+(`WaitForExit()` real):
+
+- Versão antiga: **2 falhas em 8 execuções**, reproduzido em 2 rodadas separadas (2/8 e 2/8),
+  com conteúdo **completamente vazio** (0/100 linhas de stdout e stderr) nas iterações que
+  falharam -- prova direta de que o código antigo podia finalizar e descartar o `LogWriter`
+  antes dos streams terminarem de fato.
+- Versão nova: **0 falhas em 8 execuções**, reproduzido em 3 rodadas separadas, sempre 100/100
+  linhas de stdout e stderr presentes.
+
+Este experimento não faz parte da suíte `dotnet test` permanente (alterar `ThreadPool.SetMax/
+MinThreads` globalmente afetaria os outros testes rodando no mesmo processo xUnit), mas foi
+executado e documentado aqui como evidência real e reproduzível da correção, já que o mutation
+test direto no código não era detectável neste sandbox pelas razões explicadas acima.
+
+**Testes novos permanentes adicionados à suíte:**
+`WaitUntilLogDrained_NaoConcluiAntecipadamenteEnquantoStderrAindaNaoTerminou` e
+`...EnquantoStdoutAindaNaoTerminou` (EOF independente via processo auxiliar com atraso
+artificial em um dos streams, novos modos `slow-stderr`/`slow-stdout`);
+`StartTracked_RepetidoCinquentaVezesNoMesmoProcessoDeTeste_NuncaPerdeLinhaAlgumaSobStress`
+(cenário completo repetido 50x no mesmo processo de teste, incluindo `Dispose()` a cada
+iteração, exatamente como pedido); e
+`StartTracked_ComEscritaConcorrenteIntensaEmStdoutEStderr_NaoPerdeNemCorrompeLinhas` (300
+linhas por stream via duas threads concorrentes no processo auxiliar, novo modo
+`flood-lines`, verificando contagem EXATA de linhas -- detector muito mais sensível de
+corrupção do que só checar presença de substring).
+
+`dotnet build` limpo (0 avisos, 0 erros) e `dotnet test` **108/108** no sandbox Linux (104
+anteriores + 4 novos testes), reconfirmado 3x consecutivas sem flakiness (cada execução já
+inclui as 50 iterações de stress + as 300 linhas concorrentes internamente). Como sempre:
+sucesso no sandbox Linux não é prova suficiente de sucesso no Windows real, e desta vez o
+próprio usuário já demonstrou que uma execução isolada bem-sucedida (104/104) não bastou para
+pegar este bug -- só a execução dentro do script real, sob carga real, revelou o problema. A
+aprovação final desta seção continua condicionada à execução completa de
+`Build-WindowsLauncher.ps1` no Windows, relatando 0 falhas.
