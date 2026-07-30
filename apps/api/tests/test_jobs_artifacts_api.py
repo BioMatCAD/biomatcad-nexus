@@ -176,6 +176,52 @@ def test_manifest_metrics_artifacts_and_download_after_success(client, db_sessio
     get_settings.cache_clear()  # não deixa a configuração de teste vazar para outros testes
 
 
+def test_artifact_download_is_denied_across_organizations(client, db_session, tmp_path, monkeypatch):
+    """Isolamento entre organizações no endpoint de download de artefato (Seção 8 da auditoria
+    do visualizador 3D): mesmo conhecendo o artifact_id real de um job concluído com sucesso em
+    outra organização, um usuário autenticado de uma organização diferente deve receber 403 --
+    nunca os bytes do STL. Isso complementa test_job_from_other_organization_is_not_accessible
+    (que cobre GET /jobs/{id}), exercitando especificamente o endpoint
+    GET /artifacts/{artifact_id}/download, que resolve o job por artifact.geometry_job_id antes
+    de aplicar _get_job_or_403."""
+    monkeypatch.setenv("ARTIFACT_STORAGE_DIR", str(tmp_path / "artifacts-cross-org"))
+    get_settings.cache_clear()
+
+    headers_a = _auth_header(client, db_session, "jobcrossdl-a@biomatcad.example")
+    headers_b = _auth_header(client, db_session, "jobcrossdl-b@biomatcad.example")
+    project_id, recipe_id = _setup_project_and_recipe(client, headers_a)
+
+    r = client.post(
+        "/api/v1/design-runs", headers=headers_a,
+        json={"project_id": project_id, "recipe_id": recipe_id, "idempotency_key": "http-cross-download-1"},
+    )
+    job_id = r.json()["latest_job"]["id"]
+
+    storage = LocalStorageAdapter(tmp_path / "artifacts-cross-org")
+    claimed = claim_next_queued_job(db_session, dispatcher_id="test-dispatcher-cross-org")
+    assert claimed is not None and claimed.id == job_id
+    dispatch_job(
+        db_session, job_id=job_id, worker_client=_FakeWorkerClient(b"solid crossorg\nendsolid crossorg\n"),
+        storage=storage, output_dir=tmp_path / "workdir-cross-org", repo_root=Path(__file__).resolve().parents[3],
+    )
+
+    artifacts = client.get(f"/api/v1/jobs/{job_id}/artifacts", headers=headers_a).json()
+    stl_artifact = next(a for a in artifacts if a["kind"] == "stl")
+
+    # A dona do job (organização A) consegue baixar normalmente.
+    own_download = client.get(f"/api/v1/artifacts/{stl_artifact['id']}/download", headers=headers_a)
+    assert own_download.status_code == 200
+    assert own_download.content == b"solid crossorg\nendsolid crossorg\n"
+
+    # Um usuário de outra organização, mesmo com o artifact_id real em mãos, é bloqueado --
+    # nunca recebe os bytes do STL de outra organização.
+    cross_download = client.get(f"/api/v1/artifacts/{stl_artifact['id']}/download", headers=headers_b)
+    assert cross_download.status_code == 403
+    assert b"solid crossorg" not in cross_download.content
+
+    get_settings.cache_clear()  # não deixa a configuração de teste vazar para outros testes
+
+
 def test_list_design_runs_for_project_returns_history_ordered_recent_first(client, db_session):
     headers = _auth_header(client, db_session, "jobapi5@biomatcad.example")
     project_id, recipe_id = _setup_project_and_recipe(client, headers)

@@ -94,7 +94,15 @@ export function StlViewer({
     };
   }, []);
 
-  // Reage a mudanças externas de artifactUrl (novo job/artefato): reseta o estado de carregamento.
+  // Reage a mudanças externas de artifactUrl (novo job/artefato): decide se carrega direto ou
+  // se precisa do gate de confirmação por tamanho. IMPORTANTE: este efeito NUNCA inclui `status`
+  // em suas dependências, e o efeito de carregamento abaixo depende só de [artifactUrl,
+  // loadToken] -- nunca de `status` -- porque um bug real foi encontrado nos testes desta
+  // rodada: quando o efeito de carregamento dependia de `status === "loading"`, o próprio
+  // `setStatus("ready")` (chamado por ELE MESMO ao terminar) mudava essa dependência de
+  // true->false, disparando a limpeza do efeito (dispose do renderer, refs zeradas a null)
+  // logo em seguida à conclusão do carregamento -- o botão de screenshot (e qualquer outro
+  // controle) parava de funcionar silenciosamente porque `rendererRef.current` já era `null`.
   useEffect(() => {
     if (!artifactUrl) {
       setStatus("empty");
@@ -104,12 +112,11 @@ export function StlViewer({
       setStatus("size-warning");
       return;
     }
-    setStatus("loading");
+    setLoadToken((v) => v + 1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [artifactUrl]);
 
   const handleProceedDespiteSize = () => {
-    setStatus("loading");
     setLoadToken((v) => v + 1);
   };
 
@@ -120,12 +127,12 @@ export function StlViewer({
   const handleRetry = () => {
     if (!artifactUrl) return;
     setErrorMessage(null);
-    setStatus("loading");
     setLoadToken((v) => v + 1);
   };
 
   useEffect(() => {
-    if (status !== "loading" || !artifactUrl || !containerRef.current) return;
+    if (loadToken === 0 || !artifactUrl || !containerRef.current) return;
+    setStatus("loading");
 
     const container = containerRef.current;
     const width = container.clientWidth || 640;
@@ -306,7 +313,7 @@ export function StlViewer({
       boxHelperRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status === "loading", artifactUrl, loadToken]);
+  }, [artifactUrl, loadToken]);
 
   useEffect(() => {
     if (materialRef.current) materialRef.current.wireframe = wireframe;
@@ -370,22 +377,14 @@ export function StlViewer({
     return <EmptyState title="Nenhum artefato disponível" description="Este job ainda não gerou um STL para visualização." />;
   }
 
-  if (status === "size-warning") {
-    const mb = ((declaredSizeBytes ?? 0) / (1024 * 1024)).toFixed(1);
-    const limitMb = (maxBytes / (1024 * 1024)).toFixed(0);
-    return (
-      <EmptyState
-        title={`Arquivo grande (${mb} MB)`}
-        description={`Este artefato excede o limite padrão de carregamento direto (${limitMb} MB). Carregar mesmo assim pode consumir bastante memória do navegador.`}
-      >
-        <button type="button" data-testid="viewer-proceed-despite-size" onClick={handleProceedDespiteSize}>
-          Carregar mesmo assim
-        </button>
-      </EmptyState>
-    );
-  }
-
   const isHeavyMesh = triangleCount > maxTrianglesForDirectRender;
+
+  // "size-warning" PRECISA continuar montando a div do container mais abaixo (mesmo padrão do
+  // bug corrigido para "loading"): quando o usuário clica em "Carregar mesmo assim", o efeito
+  // de carregamento roda no mesmo ciclo de commit em que `status` ainda é "size-warning" --
+  // se a div do container não existisse no DOM nesse momento, `containerRef.current` seria
+  // null e o carregamento nunca começaria. Por isso "size-warning" NÃO tem mais um `return`
+  // antecipado -- vira só mais um overlay condicional, como os demais estados pós-decisão.
 
   // IMPORTANTE: a partir daqui (loading/ready/error/cancelled/webgl-unavailable/context-lost),
   // a div referenciada por containerRef precisa continuar montada em TODOS esses estados --
@@ -397,6 +396,21 @@ export function StlViewer({
   // sempre). Corrigido mantendo a div sempre presente e usando overlays condicionais.
   return (
     <div>
+      {status === "size-warning" && (() => {
+        const mb = ((declaredSizeBytes ?? 0) / (1024 * 1024)).toFixed(1);
+        const limitMb = (maxBytes / (1024 * 1024)).toFixed(0);
+        return (
+          <EmptyState
+            title={`Arquivo grande (${mb} MB)`}
+            description={`Este artefato excede o limite padrão de carregamento direto (${limitMb} MB). Carregar mesmo assim pode consumir bastante memória do navegador.`}
+          >
+            <button type="button" data-testid="viewer-proceed-despite-size" onClick={handleProceedDespiteSize}>
+              Carregar mesmo assim
+            </button>
+          </EmptyState>
+        );
+      })()}
+
       {status === "loading" && (
         <div>
           <Loading label="Carregando visualização 3D…" />
