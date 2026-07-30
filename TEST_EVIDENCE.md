@@ -1096,6 +1096,122 @@ sessões anteriores.
 | Build normal + build:pages | ambos verificados literalmente (caminho-base correto) |
 | E2E Playwright | não executável neste sandbox (limitação já documentada, não nova) |
 
+## 18. Visualizador 3D consolidado -- STL real, controles, métricas, segurança e testes (2026-07-30)
+
+Rodada dedicada a fechar o item "Consolidar visualizador 3D (STL real, sem substituto)" --
+Voronoi real explicitamente NÃO implementado (por instrução), o visualizador foi deixado pronto
+primeiro. Commits: `32f4969` (auditoria), `61e8e2e` (carregamento seguro), `fa7d09f` (controles/
+métricas/desempenho), `35c51ee` (testes + 3 bugs de ciclo de vida corrigidos), `4180a67`
+(checksum placeholder do demo corrigido + teste de regressão).
+
+### Frontend (`apps/web`) -- tsc, eslint, vitest, build normal e de demonstração
+
+```text
+npx tsc --noEmit               -> sem erros
+npx eslint . --max-warnings=0  -> sem erros/avisos
+npx vitest run                 -> Test Files  23 passed (23)
+                                   Tests  113 passed (113)
+```
+
+Arquivos de teste novos/reescritos nesta rodada: `StlViewer.test.tsx` (reescrito de 1 caso de
+smoke test para 21 casos, ver lista completa no commit `35c51ee`), `demoStlViewer.test.tsx`
+(novo, 2 casos), `artifactDownload.test.ts` (novo, 10 casos), `stlParser.test.ts` (novo, 11
+casos que cobrem também o parser ASCII adicionado).
+
+Build duplo, ambos com sucesso:
+
+```text
+npm run build         -> vite build (produção)      -> built in ~4.4s-4.7s, 0 erros
+npm run build:pages   -> vite build --mode demo      -> built in ~4.7s-7.4s, 0 erros
+```
+
+### Backend (`apps/api`) -- pytest, contra Postgres real efêmero (não o fallback SQLite)
+
+Adicionado `test_artifact_download_is_denied_across_organizations` em
+`test_jobs_artifacts_api.py`, cobrindo o item da Seção 8 desta rodada ("isolamento entre
+organizações no endpoint do artefato") que ainda não tinha teste dedicado ao endpoint
+`GET /artifacts/{id}/download` especificamente (só `GET /jobs/{id}` já tinha).
+
+Executado contra uma instância Postgres efêmera NOVA via `pgserver` (caminho pretendido,
+documentado no próprio `apps/api/tests/conftest.py`), em dois lotes por limite de tempo de
+execução do sandbox (não por limitação de teste):
+
+```text
+Lote 1 (10 arquivos, incluindo test_auth_and_operational_state, test_clinical_suite,
+test_computational_intelligence, test_database_driver_contract, test_db_connection,
+test_dependency_contract_constraints, test_dev_auth_startup,
+test_geometry_dispatcher_continuous, test_geometry_job_cancellation,
+test_geometry_job_concurrency):
+  56 passed, 1 warning in 15.83s
+
+Lote 2 (10 arquivos, incluindo test_geometry_job_orchestration, test_geometry_job_security,
+test_health, test_jobs_artifacts_api (com o novo teste de isolamento), 
+test_materials_projects_recipes_api, test_migrations, test_observability,
+test_recipe_schema, test_system_status, test_topology_providers):
+  80 passed, 2 skipped, 2 warnings in 24.95s
+
+TOTAL: 136 passed, 2 skipped, 0 failed
+```
+
+**Achado de ambiente confirmado (não regressão desta rodada)**: rodando a mesma suíte contra o
+fallback SQLite padrão de `conftest.py` (quando `TEST_DATABASE_URL` não está definida, i.e.
+usando o arquivo `apps/api/test_biomatcad.db` já existente no sandbox de execuções anteriores),
+`test_clinical_suite.py::test_clinical_suite_expiration_is_respected` falhou com
+`TypeError: can't compare offset-naive and offset-aware datetimes`. Consistente com o padrão já
+registrado na Seção 17 acima (dados residuais entre invocações do sandbox) -- a suíte contra
+Postgres real efêmero e limpo (o caminho de teste pretendido) não reproduz essa falha, conforme
+os 136 aprovados acima.
+
+### Regressão real encontrada e corrigida: checksum placeholder do STL de demonstração
+
+Ao escrever `demoStlViewer.test.tsx` (teste de ponta a ponta do fluxo de demonstração do
+GitHub Pages, usando os bytes REAIS de `public/demo-assets/sample-scaffold-block-gyroid.stl`
+lidos do disco via `fetchSync`, não um buffer fabricado), descoberto que `demoClient.ts`
+declarava `sha256: "0".repeat(64)` (placeholder) para o artefato STL sintético -- o que fazia a
+verificação de checksum do lado do cliente (adicionada nesta mesma rodada) falhar SEMPRE no
+modo demo. Verificação de que o teste realmente detecta o bug (não é tautológico): revertido
+temporariamente o valor para o placeholder e reexecutado -- falhou como esperado
+(`AssertionError`); corrigido de volta e o teste voltou a passar. Corrigido substituindo pelo
+SHA-256 real do arquivo (`a1dffcd0...460fafc`, verificado via `sha256sum`).
+
+### Backend cross-organization download isolation -- prova literal
+
+```text
+apps/api/tests/test_jobs_artifacts_api.py::test_artifact_download_is_denied_across_organizations PASSED
+```
+
+O teste cria um job real via `_FakeWorkerClient` + `dispatch_job` até `succeeded` na
+organização A, confirma que a própria organização baixa os bytes do STL normalmente
+(`download_resp.status_code == 200`), e confirma que a organização B recebe `403` e nunca os
+bytes do arquivo (`b"solid crossorg" not in cross_download.content`), mesmo de posse do
+`artifact_id` real.
+
+### E2E Playwright
+
+Não executado nesta rodada -- mesma limitação já documentada (bibliotecas nativas do Chromium
+ausentes neste sandbox Linux, sem `sudo`). O E2E já aprovado no Windows (`f7a9614`, Seção 11
+acima) verifica a presença do botão de download (`data-testid="stl-download-link"`, preservado
+nesta rodada mesmo após a mudança de `<a href download>` para `<button>` com download
+autenticado via Blob) -- mas não exercita nenhum dos novos controles do visualizador
+(wireframe, transparência, eixos, grade, bounding box, clipping, screenshot, fullscreen,
+cancelamento) em navegador real. Essa cobertura hoje existe apenas em nível de componente. Não
+é fabricada como "coberta" -- ver lacuna registrada em
+`docs/architecture/viewer-3d-audit.md`. O script de execução no Windows já existente
+(`npm run test:e2e` em `apps/web/`) permanece o roteiro único a ser executado após esta rodada,
+sem necessidade de um script novo.
+
+### Resumo desta seção
+
+| Suíte | Resultado |
+|---|---|
+| Frontend vitest | 113 passed, 0 failed (23 arquivos) |
+| Frontend tsc/eslint | sem erros |
+| Build normal + build:pages | ambos com sucesso |
+| Backend pytest (Postgres real efêmero, ambiente limpo) | 136 passed, 2 skipped, 0 failed |
+| Isolamento entre organizações no download de artefato | teste dedicado novo, PASSED |
+| Regressão de checksum do demo do GitHub Pages | encontrada, corrigida, coberta por teste (verificado que o teste falha sem a correção) |
+| E2E Playwright | não executável neste sandbox (limitação já documentada); script único de re-execução no Windows já existente, sem necessidade de novo roteiro |
+
 ## O que esta evidência explicitamente NÃO cobre
 
 - **Consistência STL-vs-manifesto via fluxo completo API→dispatcher→worker PicoGK real→

@@ -51,3 +51,89 @@ Nenhuma biblioteca nova é introduzida nesta rodada: `three` 0.169.0 (já regist
 `NOTICES.md`) continua sendo a única dependência de renderização 3D. Nenhum loader de STL de
 terceiros é adicionado -- o parser próprio (`src/lib/stlParser.ts`) é estendido para ASCII, mas
 continua sem dependência externa.
+
+## Estado final desta rodada (pós-implementação, todos os itens acima fechados)
+
+Registro feito DEPOIS da implementação completa, por transparência (Prompt Mestre §3.1): cada
+item marcado **AUSENTE**/**PARCIAL**/**BUG** na tabela acima foi de fato corrigido/implementado
+e re-verificado por teste real, nesta ordem de commits (`incremento-2.2-alpha-pesquisa`):
+
+1. `32f4969` -- esta auditoria (antes de qualquer alteração de código).
+2. `61e8e2e` -- carregamento seguro: `stlParser.ts` ganhou `detectStlFormat`/`parseAsciiStl`
+   (formato ASCII, item #34 da tabela); novo módulo `src/lib/artifactDownload.ts` com
+   `fetchArtifactBuffer` (download autenticado via `Authorization: Bearer`, nunca token na URL;
+   limite de tamanho via `maxBytes`; verificação de checksum via `crypto.subtle.digest`) e
+   `downloadArtifactAsFile` (Blob + ObjectURL + revogação em `finally`).
+3. `fa7d09f` -- `StlViewer.tsx` reescrito: todos os controles pedidos (orbit/pan/zoom já
+   existentes via `OrbitControls`; wireframe; transparência com slider de opacidade granular;
+   eixos; grade; bounding box via `THREE.BoxHelper` opcional; clipping plane com slider de
+   posição -- orientação permanece fixa, documentada como limitação conhecida, não simulada;
+   screenshot; fullscreen via Fullscreen API com verificação de suporte); painel de
+   proveniência em `JobDetailPage.tsx` (métricas da API vs. manifesto comparadas campo a
+   campo, com `findMetricsDivergence` -- nunca escolhe um valor silenciosamente em caso de
+   divergência); aviso literal `Resultado computacional — não validado experimentalmente.`;
+   limites configuráveis (`DEFAULT_MAX_BYTES = 50 MiB`, `DEFAULT_MAX_TRIANGLES_DIRECT =
+   500_000` -- acima disso, aviso de malha densa, sem decimação automática); cancelamento via
+   `AbortController`; descarte completo (`geometry.dispose()`, `material.dispose()`,
+   `controls.dispose()`, `renderer.dispose()`, listeners de `webglcontextlost`/`restored`
+   removidos, guarda contra `setState` pós-desmontagem); fallback `"webgl-unavailable"` via
+   try/catch ao redor da criação do `WebGLRenderer`; `ResizeObserver` com guarda
+   `typeof ResizeObserver !== "undefined"` (jsdom não o implementa).
+4. `35c51ee` -- suíte de testes de componente do `StlViewer` (21 casos) e teste de isolamento
+   entre organizações no endpoint `GET /artifacts/{id}/download` (backend). Ao escrever esses
+   testes, três bugs REAIS de ciclo de vida React/WebGL foram encontrados e corrigidos no
+   próprio `StlViewer.tsx` (não apenas nos testes) -- ver corpo do commit para o diagnóstico
+   completo de cada um: (a) a div do container WebGL não ficava montada durante o status
+   `"loading"`; (b) o efeito de carregamento dependia de um valor derivado de `status` que ele
+   mesmo mudava, causando um cleanup/dispose imediato após o sucesso; (c) o botão "Carregar
+   mesmo assim" do aviso de tamanho quebrou como efeito colateral da correção de (b), corrigido
+   unificando a UI de `"size-warning"` no mesmo bloco condicional dos demais estados.
+5. `4180a67` -- corrigido um QUARTO bug real, encontrado ao escrever o teste de ponta a ponta
+   da demonstração sintética do GitHub Pages: `demoClient.ts` declarava um SHA-256 placeholder
+   (`"0".repeat(64)`) para o artefato STL de demonstração, o que fazia a verificação de
+   checksum do cliente (item 4 acima) falhar SEMPRE no modo demo -- quebrando exatamente o
+   requisito desta rodada de que o GitHub Pages sirva um STL sintético funcional. Corrigido
+   substituindo o placeholder pelo SHA-256 real do arquivo
+   (`public/demo-assets/sample-scaffold-block-gyroid.stl`, verificado via `sha256sum`);
+   regressão coberta por `apps/web/tests/demoStlViewer.test.tsx` (2 casos, incluindo um teste
+   que exercita o fluxo real e completo do `demoApiClient` contra os bytes reais do arquivo em
+   disco, não um buffer fabricado em memória).
+
+### Limitações conhecidas, registradas (não escondidas)
+
+- **Sem decimação/LOD real**: o indicador de nível de detalhe (`levelOfDetail`) é apenas texto
+  informativo opcional; nenhuma simplificação de malha é aplicada. Uma malha acima de 500.000
+  triângulos mostra aviso, mas é renderizada por completo (o artefato original nunca é
+  substituído por uma versão reduzida).
+- **Clipping plane com orientação fixa**: apenas a posição ao longo da normal `(0,0,-1)` é
+  ajustável; não há seleção de eixo/orientação do plano de corte.
+- **E2E Playwright continua bloqueado neste sandbox** (mesma limitação de incrementos
+  anteriores -- falta biblioteca nativa do Chromium, sem `sudo`). O E2E já aprovado no Windows
+  (`f7a9614`, ver `apps/web/e2e/README.md`) verifica a presença do botão de download
+  (`data-testid="stl-download-link"`, preservado nesta rodada mesmo após a mudança de `<a
+  href>` para `<button>`) mas **não** exercita nenhum dos novos controles desta rodada
+  (wireframe, transparência, eixos, grade, bounding box, clipping, screenshot, fullscreen,
+  cancelamento) em navegador real -- essa cobertura hoje existe apenas em nível de componente
+  (`StlViewer.test.tsx`, 21 casos, jsdom + `three.js` real exceto `WebGLRenderer`). Registrado
+  como lacuna explícita para um roteiro Windows futuro, não fabricado como "coberto".
+- **Achado de ambiente, não regressão desta rodada**: ao rodar a suíte backend contra o
+  fallback SQLite padrão de `apps/api/tests/conftest.py` (usado quando `TEST_DATABASE_URL` não
+  está definida), `test_clinical_suite.py::test_clinical_suite_expiration_is_respected` falhou
+  com `TypeError: can't compare offset-naive and offset-aware datetimes`. Rodando a suíte
+  completa contra uma instância Postgres efêmera NOVA via `pgserver` (o caminho pretendido,
+  documentado no próprio `conftest.py`), em dois lotes: **136 testes aprovados, 2 pulados, 0
+  falhas** -- consistente com o achado já registrado na rodada anterior em
+  `IMPLEMENTATION_STATUS.md` ("Achado real de ambiente de teste") sobre dados residuais de
+  execuções de teste anteriores persistindo entre invocações do sandbox (arquivo
+  `apps/api/test_biomatcad.db` do SQLite, ou diretório de dados do `pgserver`). Não bloqueia
+  esta rodada; não foi introduzido por ela.
+
+### Evidência de que nenhuma geometria substituta foi usada
+
+Em nenhum estado do `StlViewer` (`"error"`, `"size-warning"`, `"webgl-unavailable"`,
+`"context-lost"`, `"cancelled"`) existe qualquer malha/geometria placeholder renderizada --
+esses estados mostram apenas texto (via `EmptyState`/`ErrorState`) ou, no caso de
+`"size-warning"`, um botão explícito para o usuário decidir prosseguir. Verificado por teste
+(`StlViewer.test.tsx`, describe "artefato inválido/corrompido"): um STL binário truncado e um
+STL com checksum divergente do esperado ambos resultam em estado `"error"` com mensagem
+sanitizada, nunca em uma malha renderizada.

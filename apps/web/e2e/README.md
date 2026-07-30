@@ -227,3 +227,28 @@ usado nos testes de integração Python (`apps/api/tests/test_geometry_job_orche
 isto é explicitado no próprio teste E2E e NUNCA deve ser confundido com geometria real do
 PicoGK. A geometria real do PicoGK continua sendo validada separadamente (worker C#,
 `apps/geometry-worker/tests/`) e via execução manual no Windows.
+
+## Incremento 2.2 Alpha Pesquisa -- status após a consolidação do visualizador 3D (2026-07-30)
+
+O visualizador 3D (`StlViewer.tsx`) foi reescrito nesta rodada com download autenticado,
+verificação de checksum, e novos controles (wireframe, transparência/opacidade, eixos, grade,
+bounding box, clipping, screenshot, fullscreen, cancelamento) -- ver
+`docs/architecture/viewer-3d-audit.md`. Verificado que o testid usado pelo teste E2E acima
+(`data-testid="stl-download-link"`, linha `vertical.spec.ts:90`) foi preservado no elemento,
+mesmo após a mudança de um `<a href download>` estático para um `<button>` com download
+autenticado via Blob/ObjectURL -- então o E2E aprovado no Windows (`f7a9614`) continua válido
+sem alterações e pode ser re-executado com o mesmo comando acima.
+
+**Não coberto por este E2E, registrado com transparência**: nenhum dos novos controles do
+visualizador (wireframe, transparência, eixos, grade, bounding box, clipping, screenshot,
+fullscreen, cancelamento) é exercitado em navegador real por `vertical.spec.ts` -- essa
+cobertura hoje existe apenas em nível de componente
+(`apps/web/tests/StlViewer.test.tsx`, 21 casos, jsdom). Playwright continua bloqueado neste
+sandbox de desenvolvimento (mesma limitação de sempre: bibliotecas nativas do Chromium
+ausentes, sem `sudo`). Não foi criado um script Windows novo para esta rodada porque o
+comando acima (`npm run test:e2e`) já é o roteiro único e continua correto; se no futuro for
+necessário provar os novos controles em navegador real, um novo `*.spec.ts` precisará ser
+escrito exercitando os `data-testid`s introduzidos em `StlViewer.tsx` (`viewer-wireframe-toggle`,
+`viewer-transparency-toggle`, `viewer-axes-toggle`, `viewer-grid-toggle`,
+`viewer-bbox-toggle`, `viewer-clipping-toggle`, `viewer-reset-camera`, `viewer-screenshot`,
+`viewer-fullscreen`, `viewer-cancel-button`) -- não fabricado como concluído nesta rodada.

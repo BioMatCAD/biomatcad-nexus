@@ -29,8 +29,73 @@ instalador clínico, launcher definitivo, dados pessoais de pacientes.
 | Preparação técnica para Voronoi | **Documentação apenas, sem código** | `docs/architecture/voronoi-topology-preparation.md` |
 | Módulo de inteligência computacional | **Contratos + registro de decisão real; nenhuma IA autônoma concreta** | `apps/api/tests/test_computational_intelligence.py` (7 testes, incluindo regressão que barra implementação concreta de `DesignAdvisor`) |
 | Identidade visual oficial (logo) | **Real** | `apps/web/tests/brandAssets.test.ts`, `BrandLogo.test.tsx`, `AboutPage.test.tsx`; `docs/brand/ASSETS_NOTICE.md` |
-| Visualizador 3D consolidado (checklist completo) | **Pendente** | Já usa STL real (`StlViewer.tsx`); auditoria completa do checklist de recursos ainda não fechada nesta rodada |
+| Visualizador 3D consolidado (checklist completo, STL real, sem Voronoi) | **Real** | `docs/architecture/viewer-3d-audit.md` (matriz + estado final); `apps/web/tests/StlViewer.test.tsx` (21), `demoStlViewer.test.tsx` (2), `artifactDownload.test.ts` (10), `stlParser.test.ts` (11); `test_artifact_download_is_denied_across_organizations` (backend) |
 | E2E Playwright ponta a ponta neste sandbox | **Bloqueado** (mesma limitação de incrementos anteriores) | `apps/web/e2e/README.md`, `playwright.config.ts` — falta biblioteca nativa do Chromium, sem `sudo` |
+
+### Visualizador 3D consolidado (rodada desta sessão -- STL real, sem Voronoi)
+
+Objetivo explícito desta rodada: deixar o visualizador 3D pronto (STL real, controles
+completos, métricas rastreáveis, segurança de recursos, testes) para permitir inspeção técnica
+adequada de uma futura topologia -- **Voronoi real NÃO foi implementado nesta rodada**, por
+instrução explícita.
+
+**Commits desta rodada** (`incremento-2.2-alpha-pesquisa`, todos após `1abb99f`):
+
+| Commit | Conteúdo |
+|---|---|
+| `32f4969` | Auditoria inicial (`docs/architecture/viewer-3d-audit.md`), antes de qualquer alteração de código -- achou um bug real de autenticação (fetch do STL e links de download sem token) |
+| `61e8e2e` | Carregamento seguro: parser ASCII de STL (`stlParser.ts`); novo `artifactDownload.ts` (download autenticado via Blob/ObjectURL, verificação de checksum SHA-256, limite de tamanho) |
+| `fa7d09f` | `StlViewer.tsx` com todos os controles pedidos (wireframe, opacidade granular, eixos, grade, bounding box, clipping, screenshot, fullscreen), painel de proveniência com detecção de divergência API/manifesto, aviso experimental literal, limites configuráveis, cancelamento, descarte completo de recursos WebGL, fallback sem WebGL |
+| `35c51ee` | Suíte de testes do `StlViewer` (21 casos) + teste de isolamento entre organizações no endpoint de download de artefato (backend); 3 bugs reais de ciclo de vida React/WebGL encontrados e corrigidos durante a escrita dos testes |
+| `4180a67` | Corrigido um 4º bug real: checksum placeholder do artefato de demonstração do GitHub Pages fazia a verificação de checksum do cliente falhar sempre; corrigido + teste de regressão com o arquivo real do disco |
+
+**Formatos suportados**: STL binário (já existia) e STL ASCII (novo, `parseAsciiStl` com
+detecção automática de formato via `detectStlFormat`).
+
+**Limites adotados** (configuráveis via props do `StlViewer`, valores padrão): tamanho máximo
+do arquivo 50 MiB (`DEFAULT_MAX_BYTES`, avaliado ANTES do fetch usando `Artifact.size_bytes` já
+conhecido pela API, com gate explícito "Carregar mesmo assim"); acima de 500.000 triângulos
+(`DEFAULT_MAX_TRIANGLES_DIRECT`), aviso de malha densa -- renderizada por completo, sem
+decimação automática.
+
+**Diferença entre o STL original e qualquer pré-visualização**: não existe pré-visualização
+reduzida nesta rodada -- o que é buscado e renderizado é sempre o artefato original completo.
+O único "modo reduzido" que existe é o rótulo `demoLabel` do GitHub Pages, que troca o arquivo
+de origem inteiro por um STL sintético pequeno e claramente identificado como demonstração
+(nunca uma redução do artefato real de uma execução).
+
+**Segurança**: download sempre autenticado via `Authorization: Bearer` (nunca token na URL);
+`URL.createObjectURL`/`revokeObjectURL` para evitar vazamento de memória; verificação de
+checksum do lado do cliente contra o SHA-256 declarado pela API; teste dedicado de isolamento
+entre organizações no endpoint `GET /artifacts/{id}/download` (complementando o já existente
+para `GET /jobs/{id}`); nenhum caminho de arquivo do servidor exposto ao frontend; mensagens de
+erro sanitizadas (nunca stack trace bruto).
+
+**Testes executados nesta rodada** (contagens literais, ver `TEST_EVIDENCE.md` para o log
+completo):
+- Frontend: `npx vitest run` -- **23 arquivos de teste, 113 testes, 0 falhas**.
+- Frontend: `npx tsc --noEmit` -- 0 erros. `npx eslint . --max-warnings=0` -- 0 erros/avisos.
+- Frontend: `npm run build` (produção) e `npm run build:pages` (GitHub Pages/demo) -- ambos com
+  sucesso.
+- Backend: suíte completa rodada contra Postgres real efêmero (`pgserver`, diretório de dados
+  novo) em dois lotes -- **136 testes aprovados, 2 pulados, 0 falhas**.
+
+**Bloqueios/limitações registrados, não escondidos**:
+- E2E Playwright continua bloqueado neste sandbox (falta biblioteca nativa do Chromium, sem
+  `sudo`) -- mesma limitação de incrementos anteriores. O script de execução no Windows já
+  existente (`npm run test:e2e` em `apps/web/`, ver `apps/web/e2e/README.md`) permanece válido
+  para re-executar após esta rodada; o testid crítico do botão de download
+  (`stl-download-link`) foi preservado, mas os novos controles do visualizador (wireframe,
+  transparência, eixos, grade, bounding box, clipping, screenshot, fullscreen, cancelamento)
+  ainda não têm cobertura E2E em navegador real, apenas em nível de componente.
+- Clipping plane com orientação fixa (só a posição é ajustável); sem decimação/LOD real (apenas
+  indicador textual opcional).
+- Não há alegação de validação experimental em nenhuma métrica exibida -- o aviso literal
+  `Resultado computacional — não validado experimentalmente.` é mostrado sempre que há uma
+  malha carregada.
+
+Ver `docs/architecture/viewer-3d-audit.md` para a matriz completa requisito-por-requisito
+(20 itens auditados + itens extras encontrados) e o registro pós-implementação item a item.
 
 ### Achado real de ambiente de teste (não uma regressão de código) — registrado com transparência
 

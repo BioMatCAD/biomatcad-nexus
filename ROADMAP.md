@@ -33,9 +33,13 @@ decisões que o sustentam.
   `TopologyProvider` versionado (Gyroid real, Voronoi registrado como `planned`, ADR-0009);
   documentação de preparação técnica para Voronoi (sem código); módulo de inteligência
   computacional (apenas contratos + registro de decisão manual, sem IA autônoma real);
-  identidade visual oficial integrada (logo, favicon, PWA, página Sobre). Launcher Windows
-  permanece formalmente **deferido** (não retomado). Ainda **não concluído**: visualizador 3D
-  (checklist completo), Voronoi como implementação real, empacotamento final v2.2.
+  identidade visual oficial integrada (logo, favicon, PWA, página Sobre); visualizador 3D
+  consolidado com STL real (checklist completo de recursos, carregamento seguro com checksum,
+  controles de visualização, métricas/proveniência, limites de desempenho e descarte de
+  recursos WebGL, suíte de testes de componente e correção de 4 bugs reais encontrados durante
+  a auditoria/testes -- ver `docs/architecture/viewer-3d-audit.md` e a seção dedicada em
+  `IMPLEMENTATION_STATUS.md`). Launcher Windows permanece formalmente **deferido** (não
+  retomado). Ainda **não concluído**: Voronoi como implementação real, empacotamento final v2.2.
 
 ## Próximo (prioridade, nesta ordem)
 
@@ -75,10 +79,15 @@ Registradas aqui para não perder o fio entre sessões — nenhuma delas foi dec
 sem confirmação do usuário, apenas listadas como o que falta para poder declarar este
 incremento concluído:
 
-1. **Visualizador 3D consolidado** — já usa STL real (não substituto), mas o checklist completo
-   de recursos (órbita/pan/zoom, wireframe, transparência, eixos, escala, plano de corte,
-   screenshot, bounding box, métricas sobrepostas, LOD, estados de carregamento/erro/artefato
-   indisponível) ainda não foi auditado item a item nesta rodada.
+1. ~~**Visualizador 3D consolidado**~~ -- **CONCLUÍDO nesta rodada** (branch
+   `incremento-2.2-alpha-pesquisa`, commits `32f4969`..`4180a67`): STL real (binário e ASCII),
+   download autenticado com checksum e limite de tamanho, todos os controles do checklist
+   (órbita/pan/zoom, wireframe, transparência/opacidade, eixos, grade, bounding box, clipping,
+   screenshot, fullscreen), painel de proveniência com detecção de divergência API-vs-manifesto,
+   cancelamento, descarte completo de recursos WebGL, fallback sem WebGL. Voronoi real
+   continua deliberadamente fora desta rodada (item 2 abaixo). Pendência remanescente, não
+   escondida: E2E Playwright em navegador real dos novos controles ainda não executado (mesmo
+   bloqueio de sandbox de sempre — ver `docs/architecture/viewer-3d-audit.md`).
 2. **`VoronoiTopologyProvider` real** — a preparação técnica (`docs/architecture/
    voronoi-topology-preparation.md`) está pronta; a implementação real (geração de sítios,
    diagrama, grafo, struts, suavização) é trabalho de um incremento futuro, condicionado a
