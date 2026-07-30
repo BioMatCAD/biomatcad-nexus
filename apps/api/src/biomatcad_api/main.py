@@ -16,6 +16,7 @@ from biomatcad_api.routers import (
     health,
     jobs,
     materials,
+    observability,
     operational_state,
     projects,
     recipes,
@@ -64,6 +65,7 @@ def create_app() -> FastAPI:
     app.include_router(recipes.router)
     app.include_router(jobs.router)
     app.include_router(artifacts.router)
+    app.include_router(observability.router)
 
     logger.info("biomatcad_api_started environment=%s", settings.environment.value)
     return app
