@@ -220,15 +220,21 @@ public class ProcessSupervisorNamedControlTests
     [Fact]
     public void StartTracked_ComLogFilePath_DrenaStdoutEStderrSanitizadosParaOArquivo()
     {
+        // Bug real relatado pelo usuário na validação do commit 882d9fe no Windows: este teste
+        // lia o log com File.ReadAllText (FileShare.Read por padrão), que falha com IOException
+        // ("sendo usado por outro processo") sempre que o LogWriter interno ainda tem o arquivo
+        // aberto para escrita -- regra de compartilhamento do Windows: quem LÊ um arquivo que já
+        // está aberto para escrita precisa declarar tolerância a isso (FileShare.ReadWrite do
+        // lado do leitor), senão a abertura falha mesmo pedindo só acesso de leitura. Corrigido
+        // usando ProcessSupervisor.ReadLogFile (que abre com o compartilhamento correto) e
+        // ProcessSupervisor.WaitUntilLogDrained (espera uma condição real -- os handlers
+        // assíncronos de stdout/stderr sinalizarem EOF -- em vez de fazer polling manual de
+        // conteúdo).
         using var supervisor = new ProcessSupervisor();
         var tmpDir = Directory.CreateTempSubdirectory("biomatcad-log-test-");
         try
         {
             var logFile = Path.Combine(tmpDir.FullName, "child.log");
-
-            // Bug real corrigido nesta rodada: a versão anterior invocava "python"/"python3"
-            // diretamente para imprimir as linhas de teste -- substituído pelo processo auxiliar
-            // multiplataforma (modo "log-lines"), eliminando a dependência de Python instalado.
             static string Sanitize(string line) => line.Replace("segredo123", "***");
             var (fileName, args) = TestHelperProcessLocator.Command("log-lines");
 
@@ -236,24 +242,10 @@ public class ProcessSupervisorNamedControlTests
                 "logger-test", fileName, args, Directory.GetCurrentDirectory(),
                 logFilePath: logFile, sanitizeLine: Sanitize);
 
-            // A entrega das últimas linhas via OutputDataReceived/ErrorDataReceived é
-            // assíncrona e pode continuar chegando por um curto período MESMO DEPOIS que
-            // Process.HasExited já é true (o SO ainda está entregando os buffers pendentes ao
-            // .NET) -- por isso o teste espera pelo CONTEÚDO esperado aparecer, com um timeout
-            // generoso, em vez de um sleep fixo após checar apenas a saída do processo.
-            var content = "";
-            for (var i = 0; i < 100; i++)
-            {
-                if (File.Exists(logFile))
-                {
-                    content = File.ReadAllText(logFile);
-                    if (content.Contains("linha stdout") && content.Contains("linha stderr"))
-                    {
-                        break;
-                    }
-                }
-                Thread.Sleep(100);
-            }
+            var drained = supervisor.WaitUntilLogDrained("logger-test", TimeSpan.FromSeconds(10));
+            Assert.True(drained, "a drenagem de stdout/stderr deveria ter sinalizado EOF dentro do timeout");
+
+            var content = ProcessSupervisor.ReadLogFile(logFile);
 
             Assert.Contains("linha stdout", content);
             Assert.Contains("linha stderr", content);
@@ -262,13 +254,87 @@ public class ProcessSupervisorNamedControlTests
         }
         finally
         {
-            // Bug real corrigido nesta rodada (relatado pelo usuário): chamar apenas
-            // ShutdownAll() mata o processo filho mas NÃO fecha o StreamWriter do arquivo de
-            // log -- no Windows (ao contrário do Linux), um handle de arquivo ainda aberto
-            // impede Directory.Delete(recursive: true) de apagar o diretório temporário
-            // ("o processo não pode acessar o arquivo porque ele está sendo usado por outro
-            // processo"). Dispose() fecha o LogWriter (além de matar os processos), então
-            // precisa ser chamado ANTES de tentar apagar o diretório temporário.
+            supervisor.Dispose();
+            tmpDir.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ReadLogFile_LeOLogImediatamenteAposTerminoNatural_SemDisposeESemSleepArbitrario()
+    {
+        // Regressão DIRETA do bug real relatado: o processo termina sozinho (não é morto por
+        // TryKillNamed/ShutdownAll/Dispose), e o teste tenta ler o log LOGO EM SEGUIDA, sem
+        // nunca chamar Dispose() antes -- exatamente o cenário que lançava IOException no
+        // Windows real. Usa apenas condições reais (IsNamedAlive, WaitUntilLogDrained), nunca
+        // sleep fixo nem retry cego.
+        using var supervisor = new ProcessSupervisor();
+        var tmpDir = Directory.CreateTempSubdirectory("biomatcad-log-natural-test-");
+        try
+        {
+            var logFile = Path.Combine(tmpDir.FullName, "child.log");
+            var (fileName, args) = TestHelperProcessLocator.Command("log-lines");
+            supervisor.StartTracked("logger-test", fileName, args, Directory.GetCurrentDirectory(), logFilePath: logFile);
+
+            // Espera o término natural via uma condição real (o próprio Process.HasExited
+            // rastreado), nunca um sleep de duração fixa.
+            for (var i = 0; i < 200 && supervisor.IsNamedAlive("logger-test"); i++)
+            {
+                Thread.Sleep(25);
+            }
+            Assert.False(supervisor.IsNamedAlive("logger-test"), "o processo deveria ter terminado sozinho a esta altura");
+
+            var drained = supervisor.WaitUntilLogDrained("logger-test", TimeSpan.FromSeconds(5));
+            Assert.True(drained);
+
+            // Sem Dispose() aqui -- é exatamente o ponto do teste: a leitura precisa funcionar
+            // mesmo que ninguém tenha explicitamente fechado o supervisor ainda.
+            var content = ProcessSupervisor.ReadLogFile(logFile);
+            Assert.Contains("linha stdout", content);
+            Assert.Contains("linha stderr", content);
+        }
+        finally
+        {
+            supervisor.Dispose();
+            tmpDir.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ReadLogFile_ConsegueLerOLogComOProcessoAindaRodando()
+    {
+        // Item 5 do relatório do usuário: o painel de observabilidade precisa poder consultar o
+        // log ENQUANTO o processo ainda está rodando, não só depois de terminar. O processo
+        // auxiliar imprime as linhas e só então dorme, permanecendo vivo -- prova que
+        // ReadLogFile funciona nesse cenário sem lançar IOException por causa do LogWriter
+        // ainda estar aberto para escrita.
+        using var supervisor = new ProcessSupervisor();
+        var tmpDir = Directory.CreateTempSubdirectory("biomatcad-log-live-test-");
+        try
+        {
+            var logFile = Path.Combine(tmpDir.FullName, "child.log");
+            var (fileName, args) = TestHelperProcessLocator.Command("log-lines-then-sleep", "5");
+            supervisor.StartTracked("logger-test", fileName, args, Directory.GetCurrentDirectory(), logFilePath: logFile);
+
+            // Espera (condição real: o conteúdo esperado aparecer) a primeira entrega
+            // assíncrona chegar -- não há um evento de "meio-caminho drenado" (só EOF), então
+            // aqui um polling de conteúdo é o mecanismo correto, não um sleep arbitrário.
+            var content = "";
+            for (var i = 0; i < 100; i++)
+            {
+                content = ProcessSupervisor.ReadLogFile(logFile);
+                if (content.Contains("linha stdout") && content.Contains("linha stderr"))
+                {
+                    break;
+                }
+                Thread.Sleep(50);
+            }
+
+            Assert.True(supervisor.IsNamedAlive("logger-test"), "o processo deveria ainda estar rodando (dormindo) neste ponto do teste");
+            Assert.Contains("linha stdout", content);
+            Assert.Contains("linha stderr", content);
+        }
+        finally
+        {
             supervisor.Dispose();
             tmpDir.Delete(recursive: true);
         }
@@ -289,10 +355,7 @@ public class ProcessSupervisorNamedControlTests
             var (fileName, args) = TestHelperProcessLocator.Command("log-lines");
             supervisor.StartTracked("logger-test", fileName, args, Directory.GetCurrentDirectory(), logFilePath: logFile);
 
-            for (var i = 0; i < 100 && !File.Exists(logFile); i++)
-            {
-                Thread.Sleep(50);
-            }
+            supervisor.WaitUntilLogDrained("logger-test", TimeSpan.FromSeconds(5));
             Assert.True(File.Exists(logFile));
 
             supervisor.Dispose();
@@ -302,6 +365,47 @@ public class ProcessSupervisorNamedControlTests
             // validação real no Windows do usuário, nunca neste sandbox).
             var exception = Record.Exception(() => File.Delete(logFile));
             Assert.Null(exception);
+        }
+        finally
+        {
+            tmpDir.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void FinalizacaoDoLog_EhIdempotente_MesmoAcionadaPorCaminhosDiferentes()
+    {
+        // Itens 3 e 4 do relatório do usuário: a finalização do log (Flush+Dispose do
+        // LogWriter) precisa ser segura para ser acionada mais de uma vez, através de caminhos
+        // diferentes (aqui: término natural via Process.Exited, seguido de Dispose() do
+        // supervisor inteiro) -- nenhum dos dois deve lançar exceção nem corromper o arquivo só
+        // porque o outro caminho já finalizou primeiro.
+        var tmpDir = Directory.CreateTempSubdirectory("biomatcad-log-idempotente-test-");
+        try
+        {
+            var logFile = Path.Combine(tmpDir.FullName, "child.log");
+            var supervisor = new ProcessSupervisor();
+            var (fileName, args) = TestHelperProcessLocator.Command("log-lines");
+            supervisor.StartTracked("logger-test", fileName, args, Directory.GetCurrentDirectory(), logFilePath: logFile);
+
+            // Espera o término natural (condição real) -- isso já aciona Process.Exited ->
+            // FinalizeChild pela primeira vez, internamente.
+            for (var i = 0; i < 200 && supervisor.IsNamedAlive("logger-test"); i++)
+            {
+                Thread.Sleep(25);
+            }
+            Assert.False(supervisor.IsNamedAlive("logger-test"));
+            supervisor.WaitUntilLogDrained("logger-test", TimeSpan.FromSeconds(5));
+
+            // Segundo caminho de finalização para o MESMO processo já terminado: Dispose()
+            // tenta finalizar de novo (percorre todos os rastreados incondicionalmente) -- não
+            // deve lançar.
+            var exceptionFromDispose = Record.Exception(() => supervisor.Dispose());
+            Assert.Null(exceptionFromDispose);
+
+            // O conteúdo continua correto e o arquivo continua íntegro depois de tudo isso.
+            var content = ProcessSupervisor.ReadLogFile(logFile);
+            Assert.Contains("linha stdout", content);
         }
         finally
         {

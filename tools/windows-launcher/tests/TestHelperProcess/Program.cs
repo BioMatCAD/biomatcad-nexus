@@ -18,6 +18,10 @@
 //                                             segredo de teste a ser sanitizado) e uma linha
 //                                             fixa em stderr, então sai -- usado para testar a
 //                                             drenagem/sanitização de logs do ProcessSupervisor.
+//   log-lines-then-sleep <segundos>        -- igual a "log-lines", mas permanece vivo por
+//                                             <segundos> depois de imprimir -- usado para
+//                                             testar leitura do log com o processo AINDA
+//                                             rodando (não apenas depois de terminar).
 
 if (args.Length == 0)
 {
@@ -74,6 +78,16 @@ switch (args[0])
     {
         Console.WriteLine("linha stdout com postgresql://user:segredo123@host:5432/db");
         Console.Error.WriteLine("linha stderr");
+        return 0;
+    }
+    case "log-lines-then-sleep":
+    {
+        var seconds = args.Length > 1 ? int.Parse(args[1]) : 5;
+        Console.WriteLine("linha stdout com postgresql://user:segredo123@host:5432/db");
+        Console.Error.WriteLine("linha stderr");
+        Console.Out.Flush();
+        Console.Error.Flush();
+        Thread.Sleep(TimeSpan.FromSeconds(seconds));
         return 0;
     }
     default:

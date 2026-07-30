@@ -228,3 +228,77 @@ PATH/PATHEXT, dispose do arquivo de log, isolamento entre instâncias de `Proces
 prova, sucesso no sandbox Linux não é prova suficiente de sucesso no Windows real**. A
 aprovação final desta seção continua condicionada à nova execução real do usuário no Windows,
 relatando 0 falhas.
+
+### Incremento 2.2, Seção 2 — commit 882d9fe: 100/101 no Windows real (1 falha restante corrigida nesta rodada)
+
+Registro honesto de uma segunda rodada de validação real: o usuário rodou `dotnet build` +
+`dotnet test` de verdade no Windows contra o commit `882d9fe` (a correção das 14 falhas acima).
+Resultado: **melhora de 83/97 para 100/101 — mas com 1 falha real remanescente**, não
+cosmética:
+
+```
+ProcessSupervisorNamedControlTests.StartTracked_ComLogFilePath_DrenaStdoutEStderrSanitizadosParaOArquivo
+System.IO.IOException: child.log está sendo usado por outro processo.
+```
+
+**Causa raiz real** (não flakiness, não timing do teste): a regra de compartilhamento de
+arquivos do Windows é bidirecional. Quando o `LogWriter` do processo filho abre `child.log`
+para escrita com `FileShare.Read`, um leitor separado (como `File.ReadAllText`, que abre com
+`FileShare.Read` por padrão) só consegue abrir o mesmo arquivo se o handle **já aberto**
+também permitir a nova operação — e a checagem correspondente exige que o handle já aberto
+tenha `FileShare` compatível com o ACESSO do novo handle, e vice-versa. Como o escritor só
+oferece `FileShare.Read` (nunca `Write`), e o leitor pede compartilhamento padrão (`Read`), a
+checagem "o ACESSO do handle já existente (Write) é permitido pelo SHARE do novo handle" falha
+— por isso o `IOException`. Isso nunca aparece no Linux (sem imposição de sharing mandatório
+no nível do SO), o que explica por que o sandbox deste projeto sempre passou 101/101 mesmo com
+esse bug real presente.
+
+**Correção aplicada nesta rodada** (commit seguinte a `882d9fe`, ver `git log`):
+
+1. Novo `ProcessSupervisor.ReadLogFile(path)` estático, que abre o arquivo com
+   `FileShare.ReadWrite` do lado do LEITOR — não se alterou o lado do escritor (que continua
+   com `FileShare.Read`, nunca `Write`, preservando a garantia de que nenhum processo externo
+   pode escrever concorrentemente no log). É o padrão recomendado para observabilidade: ler um
+   arquivo que ainda está sendo escrito por outro handle no mesmo processo.
+2. Ciclo de vida do log tornado explícito e convergente: `StdoutDrained`/`StderrDrained`
+   (`ManualResetEventSlim`, sinalizados pelos próprios handlers `OutputDataReceived`/
+   `ErrorDataReceived` quando entregam `e.Data == null`, ou seja, EOF real de cada stream, não
+   um timing estimado) mais uma rotina privada única `FinalizeChild` que espera (bounded, 5s
+   por stream) a drenagem terminar antes de `Flush`+`Dispose` do `LogWriter`.
+3. `FinalizeChild` é idempotente e thread-safe (`Interlocked.CompareExchange` via
+   `TrackedChild.TryBeginFinalize()`) e é agora o ÚNICO lugar que fecha o log — chamado a
+   partir dos quatro caminhos de término (`Process.Exited` natural, `TryKillNamed`,
+   `ShutdownAll`, `Dispose`), garantindo que todos convirjam para o mesmo comportamento em vez
+   de cada um ter sua própria lógica de fechamento.
+4. Novo `ProcessSupervisor.WaitUntilLogDrained(name, timeout)` público, para quem precisar
+   esperar a drenagem terminar antes de ler (condição real, não sleep fixo).
+
+Cinco testes novos/reescritos cobrem exatamente os cenários pedidos: leitura do log com o
+processo ainda rodando (`ReadLogFile_ConsegueLerOLogComOProcessoAindaRodando`); leitura
+imediatamente após término natural, sem chamar `Dispose()` antes e sem sleep arbitrário
+(`ReadLogFile_LeOLogImediatamenteAposTerminoNatural_SemDisposeESemSleepArbitrario` — a
+regressão direta do bug relatado); fechamento e exclusão após `Dispose()`
+(`Dispose_FechaOArquivoDeLogPermitindoApagarODiretorioLogoEmSeguida`); finalização idempotente
+acionada por dois caminhos diferentes (término natural + `Dispose()`, sem exceção)
+(`FinalizacaoDoLog_EhIdempotente_MesmoAcionadaPorCaminhosDiferentes`); e stdout/stderr
+completos e sanitizados via `WaitUntilLogDrained` + `ReadLogFile`
+(`StartTracked_ComLogFilePath_DrenaStdoutEStderrSanitizadosParaOArquivo`, reescrito para não
+usar mais `File.ReadAllText`).
+
+**Mutation test real desta correção**: removida deliberadamente (e depois restaurada, com
+`diff` confirmando o arquivo idêntico ao original) a espera de drenagem
+(`StdoutDrained?.Wait`/`StderrDrained?.Wait`) dentro de `FinalizeChild`. Resultado: falha real
+e reproduzível (2 de 3 execuções) exatamente nos dois testes que essa espera deveria proteger
+(`ReadLogFile_LeOLogImediatamenteAposTerminoNatural...` e
+`FinalizacaoDoLog_EhIdempotente...`), com a mensagem exata esperada
+(`Assert.Contains() Failure: ... Not found: "linha stdout"` — prova de que o `LogWriter` foi
+fechado antes de todo o stdout assíncrono ter sido entregue). Note que a mutação equivalente no
+lado do **leitor** (voltar `ReadLogFile` para `FileShare.Read`) não é detectável por nenhum
+teste neste sandbox Linux, pelo mesmo motivo estrutural do bug original: o Linux não impõe essa
+regra de compartilhamento, então o teste não pode reproduzi-la aqui — a única prova real
+possível para essa parte específica da correção é a nova execução do usuário no Windows.
+
+`dotnet build` limpo (0 avisos, 0 erros) e `dotnet test` **104/104** no sandbox Linux (101
+anteriores + 3 novos testes). Como sempre: sucesso no sandbox Linux não é prova suficiente de
+sucesso no Windows real. A aprovação final desta seção continua condicionada à nova execução
+real do usuário no Windows, relatando 0 falhas.
