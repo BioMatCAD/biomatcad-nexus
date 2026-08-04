@@ -29,6 +29,21 @@ public sealed class RecipeTopology
     // Opcional no schema (default 0.0 = centro de banda balanceado); NÃO controla espessura.
     [JsonPropertyName("isovalue")] public double Isovalue { get; set; }
     [JsonPropertyName("target_porosity_pct")] public double? TargetPorosityPct { get; set; }
+
+    // Incremento 2.2 (Secao 3, rodada Voronoi): campos especificos de voronoi_cell_edges_v1,
+    // todos opcionais/nulaveis -- receitas Gyroid nunca os populam, e a ausencia deles nunca
+    // afeta a desserializacao/comportamento de uma receita Gyroid existente (aditivo, zero
+    // regressao). VoronoiScaffoldBuilder exige os obrigatorios (site_count, distribution,
+    // strut_radius_mm) em tempo de execucao e lanca erro estruturado se ausentes -- o JSON
+    // Schema (geometry-recipe-v1.schema.json) ja os torna obrigatorios no ramo voronoi_cell_edges_v1
+    // antes mesmo de chegar ao worker.
+    [JsonPropertyName("site_count")] public int? SiteCount { get; set; }
+    [JsonPropertyName("distribution")] public string? Distribution { get; set; }
+    [JsonPropertyName("seed_site_min_separation_mm")] public double? SeedSiteMinSeparationMm { get; set; }
+    [JsonPropertyName("strut_radius_mm")] public double? StrutRadiusMm { get; set; }
+    [JsonPropertyName("node_smoothing")] public double? NodeSmoothing { get; set; }
+    [JsonPropertyName("node_radius_factor")] public double? NodeRadiusFactor { get; set; }
+    [JsonPropertyName("boundary_behavior")] public string? BoundaryBehavior { get; set; }
 }
 
 public sealed class RecipeResolution
