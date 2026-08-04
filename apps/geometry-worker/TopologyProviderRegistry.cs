@@ -8,8 +8,13 @@
 // navegador ou por uma requisição de rede: toda topologia suportada é uma classe C# compilada
 // estaticamente neste projeto.
 //
-// "voronoi" e outras topologias futuras (outras TPMS, híbridas, espacialmente graduadas) só
-// devem ser adicionadas aqui quando tiverem uma implementação real e testada -- nunca antes.
+// Outras topologias futuras (TPMS adicionais, híbridas, espacialmente graduadas) só devem ser
+// adicionadas aqui quando tiverem uma implementação real e testada -- nunca antes.
+//
+// Incremento 2.2 (rodada Voronoi, Seção 8): "voronoi_cell_edges_v1" registrado como segunda
+// entrada real -- struts construídos sobre as ARESTAS REAIS de uma tesselação de Voronoi 3D
+// (ver docs/architecture/voronoi-cell-edges-v1-math-audit.md), nunca confundido com um grafo de
+// adjacência de sítios de Delaunay.
 namespace BioMatCadGeometryWorker;
 
 public static class TopologyProviderRegistry
@@ -17,6 +22,7 @@ public static class TopologyProviderRegistry
     private static readonly Dictionary<string, ITopologyProvider> _providers = new()
     {
         ["gyroid"] = new GyroidTopologyProvider(),
+        ["voronoi_cell_edges_v1"] = new VoronoiTopologyProvider(),
     };
 
     public static bool TryGet(string kind, out ITopologyProvider? provider) =>

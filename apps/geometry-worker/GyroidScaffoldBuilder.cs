@@ -73,9 +73,10 @@ public sealed class GyroidDomainImplicit : IImplicit
 
 public static class GyroidScaffoldBuilder
 {
-    public sealed class BuildResult
+    public sealed class BuildResult : TopologyBuildResult
     {
-        public SimpleMesh Mesh { get; init; } = new();
+        // Mesh agora é herdado de TopologyBuildResult (Incremento 2.2, Seção 8) -- mesmo
+        // nome/tipo/semântica de antes, nenhuma mudança de comportamento.
         // Calibração analítica (Passo 1, palpite inicial) -- estimativa contínua, PicoGK-
         // independente. NUNCA usada isoladamente para declarar sucesso (ver correção pós-
         // execução real abaixo).

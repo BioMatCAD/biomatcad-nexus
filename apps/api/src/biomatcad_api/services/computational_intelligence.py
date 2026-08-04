@@ -115,7 +115,8 @@ class DesignAdvisor(Protocol):
 
 def list_compatible_topology_providers(constraints: DesignConstraints) -> list[str]:
     """Único comportamento de "seleção" real desta rodada: lista quais providers de topologia
-    estão REGISTRADOS E IMPLEMENTADOS (ver topology_providers.py) -- hoje sempre ["gyroid"].
+    estão REGISTRADOS E IMPLEMENTADOS (ver topology_providers.py) -- hoje ["gyroid",
+    "voronoi_cell_edges_v1"] (Incremento 2.2, rodada Voronoi).
     Não avalia compatibilidade fina de parâmetros contra `constraints` (isso é trabalho de um
     DesignAdvisor real futuro); apenas filtra pela lista de providers com status="implemented".
     `constraints` é recebido para manter a assinatura estável para quando essa filtragem fina

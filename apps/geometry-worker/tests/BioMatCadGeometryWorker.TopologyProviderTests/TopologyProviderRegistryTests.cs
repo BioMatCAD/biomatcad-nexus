@@ -41,15 +41,18 @@ public class TopologyProviderRegistryTests
     }
 
     [Fact]
-    public void KnownKinds_ContemApenasGyroidNestaRodada()
+    public void KnownKinds_ContemGyroidEVoronoiCellEdgesV1NestaRodada()
     {
-        // Não implemente Voronoi completo ainda -- o registro real só pode conter o que
-        // realmente tem uma implementação testada por trás.
+        // Incremento 2.2 (rodada Voronoi, Secao 8): "voronoi_cell_edges_v1" passa a ser a
+        // segunda entrada REAL do registro (implementacao real testada por tras, ver
+        // VoronoiScaffoldBuilder.cs/VoronoiTopologyProvider.cs) -- o placeholder bare "voronoi"
+        // (reservado, nunca implementado nesta rodada) continua deliberadamente ausente.
         var kinds = TopologyProviderRegistry.KnownKinds;
 
         Assert.Contains("gyroid", kinds);
+        Assert.Contains("voronoi_cell_edges_v1", kinds);
         Assert.DoesNotContain("voronoi", kinds);
-        Assert.Single(kinds);
+        Assert.Equal(2, kinds.Count);
     }
 
     [Fact]
@@ -62,5 +65,28 @@ public class TopologyProviderRegistryTests
 
         Assert.Equal("gyroid", provider.Kind);
         Assert.Equal("1.0.0", provider.ProviderVersion);
+    }
+
+    [Fact]
+    public void TryGet_VoronoiCellEdgesV1_RetornaOProviderRealRegistrado()
+    {
+        bool found = TopologyProviderRegistry.TryGet("voronoi_cell_edges_v1", out var provider);
+
+        Assert.True(found);
+        Assert.NotNull(provider);
+        Assert.IsType<VoronoiTopologyProvider>(provider);
+        Assert.Equal("voronoi_cell_edges_v1", provider!.Kind);
+    }
+
+    [Fact]
+    public void VoronoiTopologyProvider_VersaoBateComORegistroPythonEspelhado()
+    {
+        // Mantido em sincronia manual com
+        // apps/api/src/biomatcad_api/services/topology_providers.py::_REGISTRY["voronoi_cell_edges_v1"].version
+        // -- se um dos dois lados mudar sem o outro, este teste (e o equivalente Python) falha.
+        var provider = new VoronoiTopologyProvider();
+
+        Assert.Equal("voronoi_cell_edges_v1", provider.Kind);
+        Assert.Equal("0.1.0", provider.ProviderVersion);
     }
 }

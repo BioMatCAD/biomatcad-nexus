@@ -97,9 +97,10 @@ public static class VoronoiScaffoldBuilder
     /// um valor derivado de forma implícita/mágica.</summary>
     public const double MaxStrutRadiusSearchMm = 3.0;
 
-    public sealed class BuildResult
+    public sealed class BuildResult : TopologyBuildResult
     {
-        public SimpleMesh Mesh { get; init; } = new();
+        // Mesh agora é herdado de TopologyBuildResult (Incremento 2.2, Seção 8) -- mesmo
+        // nome/tipo/semântica de antes, nenhuma mudança de comportamento.
         public VoronoiSiteGenerator.SiteGenerationResult SiteGeneration { get; init; } = null!;
         public VoronoiTessellationResult Tessellation { get; init; } = null!;
         // Calibração fechada contra a malha REAL do PicoGK -- só populada quando

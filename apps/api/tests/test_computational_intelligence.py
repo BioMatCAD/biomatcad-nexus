@@ -19,11 +19,13 @@ from biomatcad_api.services.computational_intelligence import (
 
 
 def test_list_compatible_topology_providers_reflete_o_registro_real():
-    # Hoje só gyroid está implementado -- o mesmo registro consultado por
-    # geometry_job_service/manifest_service (ver test_topology_providers.py).
+    # Incremento 2.2 (rodada Voronoi): gyroid e voronoi_cell_edges_v1 estao ambos
+    # implementados -- o mesmo registro consultado por geometry_job_service/manifest_service
+    # (ver test_topology_providers.py). O placeholder "voronoi" (planned) continua de fora.
     constraints = DesignConstraints(material_id=None, domain_shape="block")
     result = list_compatible_topology_providers(constraints)
-    assert result == ["gyroid"]
+    assert result == ["gyroid", "voronoi_cell_edges_v1"]
+    assert "voronoi" not in result
 
 
 def test_compare_metrics_to_objectives_calcula_erro_real():

@@ -117,22 +117,30 @@ try
     // --- Item 2: segunda checagem de consistência espessura/isovalor, específica da conversão
     // real usada pelo worker (a checagem estrutural genérica já roda na API antes de chegar aqui,
     // mas o worker é quem conhece a fórmula de conversão espessura->banda de verdade). ---
-    double effectiveWallThicknessMm = topology.WallThicknessMm;
-    if (topology.TargetPorosityPct is null && topology.WallThicknessMm >= topology.CellSizeMm / 2.0)
+    // Incremento 2.2 (Seção 8): esta checagem é ESPECÍFICA do Gyroid (cell_size_mm/isovalue só
+    // existem semanticamente para essa topologia) -- gated por topology.Kind para que uma
+    // receita Voronoi (cujos campos cell_size_mm/wall_thickness_mm/isovalue nunca são
+    // preenchidos, ficando em seus defaults 0.0) não seja rejeitada incorretamente por uma regra
+    // que não se aplica a ela.
+    if (job.Recipe.Topology.Kind == "gyroid")
     {
-        Console.Error.WriteLine(JsonSerializer.Serialize(MakeError(
-            "TOPOLOGY_PARAMETERS_INCONSISTENT",
-            $"wall_thickness_mm ({topology.WallThicknessMm}) >= cell_size_mm/2 ({topology.CellSizeMm / 2.0}) -- célula sem poro algum.")));
-        return 1;
-    }
-    double halfBandWidthCheck = GyroidMath.WallThicknessMmToHalfBandWidth(effectiveWallThicknessMm, topology.CellSizeMm);
-    const double maxFieldAmplitude = 3.0; // soma de 3 termos em [-1,1] -- limite algébrico exato
-    if (topology.Isovalue - halfBandWidthCheck > maxFieldAmplitude || topology.Isovalue + halfBandWidthCheck < -maxFieldAmplitude)
-    {
-        Console.Error.WriteLine(JsonSerializer.Serialize(MakeError(
-            "TOPOLOGY_PARAMETERS_INCONSISTENT",
-            "A banda isovalor +/- meia-espessura resultante fica inteiramente fora da amplitude alcançável do campo gyroid ([-3,3]) -- geometria resultante seria vazia.")));
-        return 1;
+        double effectiveWallThicknessMm = topology.WallThicknessMm;
+        if (topology.TargetPorosityPct is null && topology.WallThicknessMm >= topology.CellSizeMm / 2.0)
+        {
+            Console.Error.WriteLine(JsonSerializer.Serialize(MakeError(
+                "TOPOLOGY_PARAMETERS_INCONSISTENT",
+                $"wall_thickness_mm ({topology.WallThicknessMm}) >= cell_size_mm/2 ({topology.CellSizeMm / 2.0}) -- célula sem poro algum.")));
+            return 1;
+        }
+        double halfBandWidthCheck = GyroidMath.WallThicknessMmToHalfBandWidth(effectiveWallThicknessMm, topology.CellSizeMm);
+        const double maxFieldAmplitude = 3.0; // soma de 3 termos em [-1,1] -- limite algébrico exato
+        if (topology.Isovalue - halfBandWidthCheck > maxFieldAmplitude || topology.Isovalue + halfBandWidthCheck < -maxFieldAmplitude)
+        {
+            Console.Error.WriteLine(JsonSerializer.Serialize(MakeError(
+                "TOPOLOGY_PARAMETERS_INCONSISTENT",
+                "A banda isovalor +/- meia-espessura resultante fica inteiramente fora da amplitude alcançável do campo gyroid ([-3,3]) -- geometria resultante seria vazia.")));
+            return 1;
+        }
     }
 
     Directory.CreateDirectory(job.OutputDir);
@@ -161,17 +169,18 @@ try
     // Item 6/7 (correção pós-execução real): measured_porosity_pct SEMPRE vem de
     // metrics.PorosityPctMeasured -- calculada sobre buildResult.Mesh, que é EXATAMENTE a malha
     // soldada gravada no STL (não uma medição separada em memória que poderia divergir do
-    // arquivo). Quando há calibração (target_porosity_pct presente), este valor coincide com
-    // buildResult.MeshPorosityCalibration.MeasuredPorosityPct (mesma malha vencedora), mas
-    // metrics.PorosityPctMeasured é a fonte de verdade única, por vir da malha efetivamente
-    // exportada.
-    bool hasCalibration = buildResult.MeshPorosityCalibration is not null;
-    double? measuredPorosityErrorPctPoints = hasCalibration
-        ? metrics.PorosityPctMeasured - topology.TargetPorosityPct!.Value
-        : null;
-    bool? measuredPorosityWithinTolerance = hasCalibration
-        ? Math.Abs(measuredPorosityErrorPctPoints!.Value) <= buildResult.PorosityToleranceUsedPctPoints
-        : null;
+    // arquivo).
+    //
+    // Incremento 2.2 (Seção 8): a montagem de EffectiveParameters (antes hardcoded aqui, direto
+    // contra os campos concretos de GyroidScaffoldBuilder.BuildResult) agora é DELEGADA ao
+    // próprio provider através da interface -- cada provider conhece seu próprio tipo de
+    // resultado (downcast interno seguro) e preenche os campos comuns + Extra
+    // topologia-específico, sem que Program.cs precise saber qual topologia rodou. Mesma lógica
+    // para as métricas extras (PopulateMetricsExtra) -- Gyroid não adiciona nada (metrics.Extra
+    // permanece nulo, JSON idêntico a antes); Voronoi preenche contagens/comprimentos/graus.
+    topologyProvider.PopulateMetricsExtra(metrics, buildResult);
+    var effectiveParameters = topologyProvider.DescribeEffectiveParameters(
+        job, buildResult, metrics, estimatedVoxelCount, estimatedMemoryMb);
 
     var output = new WorkerResultOutput
     {
@@ -180,27 +189,7 @@ try
         ThumbnailPath = null, // geração de thumbnail depende de execução real -- ver WORKER_STATUS.md
         VdbPath = null,       // vdb não implementado nesta versão -- rejeitado antes da execução, ver acima
         Metrics = metrics,
-        EffectiveParameters = new EffectiveParameters
-        {
-            WallThicknessRequestedMm = topology.WallThicknessMm,
-            WallThicknessEffectiveMm = buildResult.EffectiveWallThicknessMm,
-            IsovalueCenter = buildResult.IsovalueCenter,
-            TargetPorosityPctRequested = topology.TargetPorosityPct,
-            AnalyticalPorosityEstimatePct = buildResult.AnalyticalPorosityCalibration?.EstimatedPorosityPct,
-            AnalyticalCalibrationConverged = buildResult.AnalyticalPorosityCalibration?.Converged,
-            MeasuredPorosityPct = hasCalibration ? metrics.PorosityPctMeasured : null,
-            PorosityTolerancePctPoints = hasCalibration ? buildResult.PorosityToleranceUsedPctPoints : null,
-            MeasuredPorosityErrorPctPoints = measuredPorosityErrorPctPoints,
-            MeasuredPorosityWithinTolerance = measuredPorosityWithinTolerance,
-            MeshCalibrationIterations = buildResult.MeshPorosityCalibration?.Iterations,
-            Seed = job.Recipe.Seed,
-            SeedPhaseShiftRad = buildResult.SeedPhaseShiftRad,
-            Mode = job.Recipe.Mode,
-            VoxelSizeRequestedMm = job.Recipe.Resolution.VoxelSizeMm,
-            VoxelSizeEffectiveMm = buildResult.VoxelSizeEffectiveMm,
-            EstimatedVoxelCount = estimatedVoxelCount,
-            EstimatedMemoryMbUpperBound = estimatedMemoryMb,
-        },
+        EffectiveParameters = effectiveParameters,
         TopologyProviderKind = topologyProvider.Kind,
         TopologyProviderVersion = topologyProvider.ProviderVersion,
         WorkerVersion = WorkerVersion,

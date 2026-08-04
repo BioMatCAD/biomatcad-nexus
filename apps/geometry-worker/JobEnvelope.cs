@@ -89,6 +89,16 @@ public sealed class GeometryMetrics
     [JsonPropertyName("triangle_count")] public int TriangleCount { get; set; }
     [JsonPropertyName("is_watertight")] public bool IsWatertight { get; set; }
     [JsonPropertyName("stl_reload_validation_passed")] public bool StlReloadValidationPassed { get; set; }
+
+    // Incremento 2.2 (Secao 8/9): campos METRICOS especificos de cada topologia (ex.: contagem
+    // de sitios/nos/arestas/componentes do Voronoi) sao mesclados aqui de forma GENERICA via
+    // [JsonExtensionData] -- verificado empiricamente (probe descartavel) que, quando Extra e
+    // nulo ou vazio, a serializacao produz EXATAMENTE o mesmo JSON de antes (nenhuma chave nova
+    // aparece, zero regressao para o Gyroid, que nunca popula este dicionario). Quando populado
+    // (Voronoi), cada chave/valor e mesclado como um campo IRMAO no mesmo objeto JSON, nao
+    // aninhado sob uma chave "extra" -- Program.cs nunca precisa saber quais chaves cada
+    // topologia usa.
+    [JsonExtensionData] public Dictionary<string, object?>? Extra { get; set; }
 }
 
 public sealed class EffectiveParameters
@@ -118,6 +128,14 @@ public sealed class EffectiveParameters
     [JsonPropertyName("voxel_size_effective_mm")] public double VoxelSizeEffectiveMm { get; set; }
     [JsonPropertyName("estimated_voxel_count")] public long EstimatedVoxelCount { get; set; }
     [JsonPropertyName("estimated_memory_mb_upper_bound")] public double EstimatedMemoryMbUpperBound { get; set; }
+
+    // Incremento 2.2 (Secao 8/9): mesma tecnica de extensao generica de GeometryMetrics.Extra
+    // (ver comentario acima), aplicada aqui para parametros efetivos especificos de cada
+    // topologia (ex.: site_count, distribution_used, strut_radius_effective_mm do Voronoi).
+    // Os campos Gyroid-especificos ja existentes nesta classe (wall_thickness_*, isovalue_center,
+    // seed_phase_shift_rad, analytical_*) permanecem EXATAMENTE como estao -- nunca preenchidos
+    // por VoronoiTopologyProvider, que usa apenas este dicionario Extra para seus proprios campos.
+    [JsonExtensionData] public Dictionary<string, object?>? Extra { get; set; }
 }
 
 public sealed class WorkerResultOutput

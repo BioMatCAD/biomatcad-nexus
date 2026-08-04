@@ -6,12 +6,15 @@ visualização -- apenas registrando uma nova entrada aqui e no registro equival
 (apps/geometry-worker/TopologyProviderRegistry.cs, mantido deliberadamente em sincronia manual;
 um teste de regressão em ambos os lados trava os kinds/versões esperados).
 
-Nesta rodada, apenas "gyroid" está IMPLEMENTADO: é o único kind aceito pelo JSON Schema
-(schemas/biomatcem/geometry-recipe-v1.schema.json, topology.kind ainda é `"const": "gyroid"`) e
-pelo worker real. "voronoi" já aparece aqui com status="planned" para deixar o contrato futuro
-explícito e testável (rejeitado deliberadamente por get_topology_provider), mas não é aceito por
-nenhuma receita real ainda -- ver docs/architecture/voronoi-topology-preparation.md para a
-preparação técnica completa.
+"gyroid" e "voronoi_cell_edges_v1" estão IMPLEMENTADOS: são os dois kinds aceitos pelo JSON
+Schema (schemas/biomatcem/geometry-recipe-v1.schema.json, topology é um oneOf entre os dois) e
+pelo worker real (Incremento 2.2, rodada Voronoi, Seção 8 -- ver
+apps/geometry-worker/VoronoiTopologyProvider.cs/VoronoiScaffoldBuilder.cs). "voronoi" (nome
+genérico, sem sufixo de versão) permanece deliberadamente como um placeholder reservado com
+status="planned" -- um possível ponto de extensão futuro (ex.: uma variante anatomy_guided ou
+uma estratégia alternativa de suavização), nunca implementado nesta rodada e nunca confundido com
+"voronoi_cell_edges_v1" (a estratégia real e concreta implementada: struts sobre as ARESTAS REAIS
+de uma tesselação de Voronoi 3D, ver docs/architecture/voronoi-cell-edges-v1-math-audit.md).
 
 Esta checagem é DEFESA EM PROFUNDIDADE: o JSON Schema já impede topology.kind != "gyroid" de
 chegar a uma receita validada; este registro é a segunda camada, consultada tanto na criação do
@@ -65,10 +68,24 @@ _REGISTRY: dict[str, TopologyProviderInfo] = {
         version="0.0.0-planned",
         status="planned",
         description=(
-            "Preparação técnica documentada (sites, diagrama, grafo->struts, suavização de "
-            "nós, recorte anatômico, calibração de porosidade) em "
-            "docs/architecture/voronoi-topology-preparation.md -- execução real ainda NÃO "
-            "implementada nesta rodada."
+            "Placeholder reservado e genérico (sem sufixo de versão) -- NÃO é a implementação "
+            "real desta rodada (ver 'voronoi_cell_edges_v1' abaixo). Mantido como ponto de "
+            "extensão futuro (ex.: uma segunda estratégia de topologia baseada em Voronoi)."
+        ),
+    ),
+    "voronoi_cell_edges_v1": TopologyProviderInfo(
+        kind="voronoi_cell_edges_v1",
+        provider_class="VoronoiTopologyProvider",
+        version="0.1.0",
+        status="implemented",
+        description=(
+            "Primeira vertical real de Voronoi (Incremento 2.2): struts construídos sobre as "
+            "ARESTAS REAIS das células de uma tesselação de Voronoi 3D limitada pelo domínio "
+            "(nunca um grafo de adjacência de sítios de Delaunay -- ver distinção matemática "
+            "completa em docs/architecture/voronoi-cell-edges-v1-math-audit.md). Implementação "
+            "real em apps/geometry-worker/VoronoiScaffoldBuilder.cs/VoronoiTopologyProvider.cs. "
+            "Execução real do PicoGK ainda não verificada neste sandbox Linux -- ver "
+            "ADR-0007/roteiro de validação Windows."
         ),
     ),
 }

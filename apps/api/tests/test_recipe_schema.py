@@ -125,13 +125,25 @@ def test_invalid_output_format_is_rejected():
 def test_no_arbitrary_code_execution_structural_guarantee():
     """additionalProperties:false em todos os níveis é o mecanismo que impede o envio de
     código/expressões arbitrárias -- este teste apenas confirma estruturalmente que a raiz e
-    os sub-objetos do schema declaram essa restrição."""
+    os sub-objetos do schema declaram essa restrição.
+
+    Incremento 2.2 (rodada Voronoi): "topology" deixou de ser um único objeto plano e passou a
+    ser um oneOf entre o ramo gyroid e o ramo voronoi_cell_edges_v1 (mesmo padrão já usado por
+    domain.dimensions_mm para block/cylinder) -- a garantia estrutural continua válida, só
+    precisa ser verificada em CADA ramo do oneOf, não em "topology" diretamente (que agora não
+    tem mais uma chave "additionalProperties" própria, apenas "oneOf")."""
     from biomatcad_api.services.recipe_service import _load_schema
 
     schema = _load_schema()
     assert schema["additionalProperties"] is False
-    for key in ("domain", "topology", "resolution", "compute_limits"):
+    for key in ("domain", "resolution", "compute_limits"):
         assert schema["properties"][key]["additionalProperties"] is False
+
+    topology_schema = schema["properties"]["topology"]
+    assert "oneOf" in topology_schema
+    assert len(topology_schema["oneOf"]) == 2
+    for branch in topology_schema["oneOf"]:
+        assert branch["additionalProperties"] is False
 
 
 def test_canonicalization_is_order_independent():
