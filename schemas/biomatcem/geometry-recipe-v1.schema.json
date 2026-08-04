@@ -95,44 +95,116 @@
       }
     },
     "topology": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "kind",
-        "cell_size_mm",
-        "wall_thickness_mm"
-      ],
-      "properties": {
-        "kind": {
-          "const": "gyroid"
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "cell_size_mm",
+            "wall_thickness_mm"
+          ],
+          "properties": {
+            "kind": {
+              "const": "gyroid"
+            },
+            "cell_size_mm": {
+              "type": "number",
+              "exclusiveMinimum": 0.1,
+              "maximum": 20,
+              "description": "Tamanho da célula unitária da superfície mínima periódica (TPMS), em mm."
+            },
+            "wall_thickness_mm": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 5,
+              "description": "Espessura de parede solicitada, em mm. Campo obrigatório e único controlador de espessura. O worker calibra a meia-largura da banda isovalor a partir deste valor (conversão aproximada documentada em WORKER_STATUS.md, não distância euclidiana exata) e registra no manifesto o valor solicitado, o valor efetivamente aplicado e o erro residual."
+            },
+            "isovalue": {
+              "type": "number",
+              "minimum": -1.5,
+              "maximum": 1.5,
+              "description": "Centro da banda da superfície implícita gyroid (sin x cos y + sin y cos z + sin z cos x = isovalue +/- meia-espessura). NAO controla espessura — apenas desloca o centro da banda (isovalue=0 e a célula balanceada, ~50% fase sólida/vazia). Default 0.0 quando omitido.",
+              "default": 0.0
+            },
+            "target_porosity_pct": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 99,
+              "description": "Porosidade-alvo, em percentual. Quando presente, o worker executa uma calibração determinística (busca por bisseção sobre a meia-largura da banda, ver WORKER_STATUS.md) usando wall_thickness_mm como estimativa inicial, e registra no manifesto: valor solicitado, valor efetivamente atingido e erro residual. Não é garantia exata — é calibração por amostragem voxelizada finita."
+            }
+          }
         },
-        "cell_size_mm": {
-          "type": "number",
-          "exclusiveMinimum": 0.1,
-          "maximum": 20,
-          "description": "Tamanho da célula unitária da superfície mínima periódica (TPMS), em mm."
-        },
-        "wall_thickness_mm": {
-          "type": "number",
-          "exclusiveMinimum": 0,
-          "maximum": 5,
-          "description": "Espessura de parede solicitada, em mm. Campo obrigatório e único controlador de espessura. O worker calibra a meia-largura da banda isovalor a partir deste valor (conversão aproximada documentada em WORKER_STATUS.md, não distância euclidiana exata) e registra no manifesto o valor solicitado, o valor efetivamente aplicado e o erro residual."
-        },
-        "isovalue": {
-          "type": "number",
-          "minimum": -1.5,
-          "maximum": 1.5,
-          "description": "Centro da banda da superfície implícita gyroid (sin x cos y + sin y cos z + sin z cos x = isovalue +/- meia-espessura). NAO controla espessura — apenas desloca o centro da banda (isovalue=0 e a célula balanceada, ~50% fase sólida/vazia). Default 0.0 quando omitido.",
-          "default": 0.0
-        },
-        "target_porosity_pct": {
-          "type": "number",
-          "minimum": 1,
-          "maximum": 99,
-          "description": "Porosidade-alvo, em percentual. Quando presente, o worker executa uma calibração determinística (busca por bisseção sobre a meia-largura da banda, ver WORKER_STATUS.md) usando wall_thickness_mm como estimativa inicial, e registra no manifesto: valor solicitado, valor efetivamente atingido e erro residual. Não é garantia exata — é calibração por amostragem voxelizada finita."
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "site_count",
+            "distribution",
+            "strut_radius_mm"
+          ],
+          "properties": {
+            "kind": {
+              "const": "voronoi_cell_edges_v1"
+            },
+            "site_count": {
+              "type": "integer",
+              "minimum": 4,
+              "maximum": 500,
+              "description": "Número de sítios (sementes) da tesselação de Voronoi 3D. Mínimo 4 (necessário para qualquer tetraedralização de Delaunay não-degenerada). Máximo 500 nesta rodada (receitas pequenas e conservadoras, ver docs/architecture/voronoi-cell-edges-v1-math-audit.md)."
+            },
+            "distribution": {
+              "enum": [
+                "uniform_random",
+                "jittered_grid"
+              ],
+              "description": "Estratégia de geração dos sítios. 'uniform_random': amostragem por rejeição com distância mínima entre sítios. 'jittered_grid': grade regular com jitter determinístico por célula (pode produzir menos sítios que site_count perto de domínios não-retangulares, reportado honestamente em effective_parameters). 'anatomy_guided' é um ponto de extensão reservado para trabalho futuro e NÃO é aceito por esta versão do schema (rejeitado como enum inválido)."
+            },
+            "seed_site_min_separation_mm": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 50,
+              "description": "Distância mínima explícita entre sítios, em mm (opcional). Quando omitido, o worker deriva um valor conservador a partir do volume do domínio e de site_count (ver VoronoiSiteGenerator.DeriveDefaultMinSeparationMm) e registra o valor efetivamente usado em effective_parameters. Aplica-se apenas a distribution='uniform_random'."
+            },
+            "strut_radius_mm": {
+              "type": "number",
+              "exclusiveMinimum": 0.02,
+              "maximum": 3,
+              "description": "Raio do strut (cilindro/cápsula implícita construída sobre cada aresta real de célula de Voronoi), em mm. Quando target_porosity_pct está presente, este valor é usado como estimativa inicial para a calibração determinística (reaproveita a mesma bisseção monotônica já usada pelo Gyroid); o worker registra o valor solicitado, o valor efetivamente aplicado e o erro residual em effective_parameters."
+            },
+            "node_smoothing": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "default": 0.5,
+              "description": "Fator de suavização do blend implícito (smooth-min polinomial) usado para unir struts em cada nó -- 0 = união dura (booleana, pode produzir arestas vincadas), 1 = suavização máxima. Estratégia fixa desta rodada: implicit_smooth_union (ver auditoria matemática, Seção 6). Catmull-Clark é documentado como alternativa futura, não implementado nem equivalente a este parâmetro."
+            },
+            "node_radius_factor": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 3,
+              "default": 1.3,
+              "description": "Raio efetivo da esfera/blend implícito de cada nó = strut_radius_mm * node_radius_factor. Valores próximos de 1 favorecem nós mais finos (risco de lacunas entre struts); valores maiores garantem união sem lacunas ao custo de mais material concentrado no nó."
+            },
+            "boundary_behavior": {
+              "enum": [
+                "clip"
+              ],
+              "default": "clip",
+              "description": "Único comportamento suportado nesta rodada: arestas/raios de células de Voronoi são recortados pela SDF do domínio (bloco ou cilindro), nunca espelhados por sítios (site-mirroring) -- ver justificativa na auditoria matemática, Seção 'Tratamento de fronteira'. Campo mantido como enum (em vez de booleano ou constante fixa) como ponto de extensão explícito para estratégias futuras."
+            },
+            "target_porosity_pct": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 99,
+              "description": "Porosidade-alvo, em percentual. Quando presente, o worker executa calibração determinística (bisseção monotônica sobre strut_radius_mm, medindo a malha real gerada -- nunca apenas estimativa analítica) e registra em effective_parameters: valor solicitado, valor efetivamente atingido, erro residual e número de iterações. Tolerância: 2 pontos percentuais em modo final, 5 em modo preview (mesmos limites do Gyroid)."
+            }
+          },
+          "description": "voronoi_cell_edges_v1: struts construídos sobre as ARESTAS REAIS das células de uma tesselação de Voronoi 3D (não um grafo de adjacência de sítios de Delaunay -- ver distinção matemática completa em docs/architecture/voronoi-cell-edges-v1-math-audit.md). Fluxo: sítios -> tetraedralização de Delaunay (MIConvexHull) -> circuncentros -> arestas de Voronoi (internas + raios de fronteira recortados pelo domínio) -> struts/nós implícitos suavizados (PicoGK) -> voxelização -> malha -> calibração de porosidade -> métricas. site_count, distribution e seed (campo canônico de nível superior da receita) determinam de forma determinística os sítios; a mesma seed sempre produz a mesma tesselação."
         }
-      },
-      "description": "SEMÂNTICA INEQUÍVOCA (corrige ambiguidade do Incremento 2.1, ver ADR-0008): a superfície implícita gyroid F(x,y,z) = sin(x)cos(y) + sin(y)cos(z) + sin(z)cos(x) define, por si só, uma superfície de espessura zero (não manufaturável). O sólido efetivamente gerado é sempre a BANDA em torno de 'isovalue': { F(x,y,z) em [isovalue - d, isovalue + d] }, onde d é derivado de wall_thickness_mm por uma conversão aproximada (não é distância euclidiana exata — ver WORKER_STATUS.md). 'isovalue' é sempre o CENTRO da banda (default 0.0 = célula balanceada). 'wall_thickness_mm' é sempre obrigatório e é o único parâmetro que controla a espessura; não existe mais precedência ambígua entre os dois campos. Combinações fisicamente impossíveis (wall_thickness_mm >= cell_size_mm, ou banda que extrapola a amplitude máxima da função) são rejeitadas com erro estruturado TOPOLOGY_PARAMETERS_INCONSISTENT antes da execução."
+      ],
+      "description": "SEMÂNTICA INEQUÍVOCA (corrige ambiguidade do Incremento 2.1, ver ADR-0008): a superfície implícita gyroid F(x,y,z) = sin(x)cos(y) + sin(y)cos(z) + sin(z)cos(x) define, por si só, uma superfície de espessura zero (não manufaturável). O sólido efetivamente gerado é sempre a BANDA em torno de 'isovalue': { F(x,y,z) em [isovalue - d, isovalue + d] }, onde d é derivado de wall_thickness_mm por uma conversão aproximada (não é distância euclidiana exata — ver WORKER_STATUS.md). 'isovalue' é sempre o CENTRO da banda (default 0.0 = célula balanceada). 'wall_thickness_mm' é sempre obrigatório e é o único parâmetro que controla a espessura; não existe mais precedência ambígua entre os dois campos. Combinações fisicamente impossíveis (wall_thickness_mm >= cell_size_mm, ou banda que extrapola a amplitude máxima da função) são rejeitadas com erro estruturado TOPOLOGY_PARAMETERS_INCONSISTENT antes da execução. Incremento 2.2 (rodada Voronoi): um segundo ramo de topologia, voronoi_cell_edges_v1, foi adicionado de forma aditiva e compatível -- receitas Gyroid existentes (topology.kind == 'gyroid') continuam validando exatamente como antes, sem nenhuma mudança de campo, limite ou comportamento."
     },
     "resolution": {
       "type": "object",
