@@ -15,6 +15,13 @@
 
   <ItemGroup>
     <PackageReference Include="PicoGK" Version="2.2.0" />
+    <!-- MIConvexHull (MIT): usado exclusivamente para triangulacao de Delaunay 3D
+         (Triangulation.CreateDelaunay), nucleo do VoronoiTopologyProvider. Ver auditoria de
+         dependencia completa em docs/architecture/voronoi-cell-edges-v1-math-audit.md, Secao 6,
+         e aviso de licenca em apps/geometry-worker/NOTICE. Puramente gerenciado (netstandard1.0,
+         sem dependencias transitivas, sem binario nativo): nao introduz nenhum novo risco de
+         plataforma alem do ja existente para PicoGK. -->
+    <PackageReference Include="MIConvexHull" Version="1.1.19.1019" />
   </ItemGroup>
 
 </Project>
