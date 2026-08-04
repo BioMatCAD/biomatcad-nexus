@@ -18,12 +18,18 @@
     <Compile Include="../../GyroidMath.cs" Link="GyroidMath.cs" />
     <Compile Include="../../OutputCleanup.cs" Link="OutputCleanup.cs" />
     <Compile Include="../../PorosityCalibrationExceptions.cs" Link="PorosityCalibrationExceptions.cs" />
+    <Compile Include="../../VoronoiSiteGenerator.cs" Link="VoronoiSiteGenerator.cs" />
+    <Compile Include="../../VoronoiTessellation.cs" Link="VoronoiTessellation.cs" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <!-- MIConvexHull (MIT): exigido por VoronoiTessellation.cs (Triangulation.CreateDelaunay).
+         Ver docs/architecture/voronoi-cell-edges-v1-math-audit.md, Secao 6, e o mesmo
+         PackageReference em BioMatCadGeometryWorker.csproj. -->
+    <PackageReference Include="MIConvexHull" Version="1.1.19.1019" />
   </ItemGroup>
 
 </Project>
