@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -233,6 +234,59 @@ class DotnetPicoGkWorkerClient:
         if on_process_started is not None:
             on_process_started(proc.pid)
 
+        # Correção real (rodada Voronoi 20260806-*, auditoria pedida pelo usuário após a Fase A
+        # provar que o worker/PicoGK real termina sozinho em ~2.5s quando invocado diretamente,
+        # sem este cliente): a versão anterior deste método fazia um loop de `proc.wait(timeout=
+        # POLL_INTERVAL_SECONDS)` para cancelamento/timeout SEM NUNCA LER `proc.stdout`/
+        # `proc.stderr` durante essa espera -- só chamava `proc.communicate()` DEPOIS do loop.
+        # Pipes do SO têm um buffer FINITO (tipicamente ~64KB no Linux; ordem de grandeza
+        # semelhante em pipes anônimos do Windows). Se o processo filho escrever mais do que
+        # esse buffer comporta em stdout OU stderr antes que alguém leia, a própria chamada de
+        # escrita do filho BLOQUEIA no nível do SO, esperando um leitor que nunca vem (o pai
+        # está preso em `wait()`, não lendo nada) -- um deadlock clássico entre processos.
+        # `proc.wait()` nunca detecta isso como "processo travado": do ponto de vista do SO, o
+        # processo continua vivo (só bloqueado numa chamada de sistema), então o loop de poll
+        # simplesmente esgota o prazo e aciona o WORKER_TIMEOUT externo -- exatamente o sintoma
+        # relatado (worker "trava" e só é resolvido pelo watchdog), mesmo quando o cálculo em si
+        # já tinha terminado (ver o JSON quase completo capturado no stdout parcial de rodadas
+        # anteriores). Reproduzido nesta rodada com um processo auxiliar que escreve ~5.7MB
+        # simultaneamente em stdout/stderr: a implementação anterior sempre resultava em
+        # WORKER_TIMEOUT, mesmo o processo auxiliar sendo capaz de terminar em milissegundos se
+        # tivesse um leitor ativo.
+        #
+        # Correção: duas threads em segundo plano DRENAM stdout e stderr CONTINUAMENTE, em
+        # paralelo ao loop de poll/cancelamento/timeout abaixo -- o filho nunca mais bloqueia
+        # esperando um leitor, porque sempre há um. As threads terminam sozinhas quando os
+        # pipes fecham (processo saiu normalmente, ou foi encerrado pelo kill de árvore abaixo,
+        # o que remove todos os escritores restantes do pipe e sinaliza EOF ao leitor). Nunca
+        # mais se usa `proc.communicate()` (que faria uma segunda leitura conflitante) -- o
+        # conteúdo acumulado pelas threads é a única fonte de verdade para stdout/stderr.
+        stdout_chunks: list[str] = []
+        stderr_chunks: list[str] = []
+
+        def _drain(stream, sink: list[str]) -> None:
+            try:
+                while True:
+                    chunk = stream.read(65536)
+                    if not chunk:
+                        break
+                    sink.append(chunk)
+            except (ValueError, OSError):
+                # Stream fechado externamente (ex.: kill do processo enquanto uma leitura
+                # estava em andamento) -- encerra silenciosamente; nunca mascara o erro
+                # original do worker, que é decidido abaixo pelo outcome/returncode reais.
+                pass
+            finally:
+                try:
+                    stream.close()
+                except (ValueError, OSError):
+                    pass
+
+        stdout_thread = threading.Thread(target=_drain, args=(proc.stdout, stdout_chunks), daemon=True)
+        stderr_thread = threading.Thread(target=_drain, args=(proc.stderr, stderr_chunks), daemon=True)
+        stdout_thread.start()
+        stderr_thread.start()
+
         outcome = "completed"
         tree_confirmed_terminated: bool | None = None
         while True:
@@ -250,13 +304,14 @@ class DotnetPicoGkWorkerClient:
                 tree_confirmed_terminated = _kill_process_tree(proc.pid)
                 break
 
-        try:
-            stdout, stderr = proc.communicate(timeout=10)
-        except subprocess.TimeoutExpired:
-            # Processo não drenou os pipes a tempo mesmo após kill -- melhor esforço, segue com
-            # o que já temos (normalmente vazio nesse caso extremo). Isso NÃO significa que o
-            # processo continua vivo -- tree_confirmed_terminated (acima) é quem prova isso.
-            stdout, stderr = "", ""
+        # Depois que o processo saiu (ou foi encerrado acima), os pipes fecham e as threads de
+        # dreno terminam sozinhas -- join com um teto curto de segurança (nunca bloqueia
+        # indefinidamente; se algo impedir o fechamento do pipe mesmo após o kill da árvore
+        # confirmado, ainda assim seguimos com o que já foi lido até aqui).
+        stdout_thread.join(timeout=10)
+        stderr_thread.join(timeout=10)
+        stdout = "".join(stdout_chunks)
+        stderr = "".join(stderr_chunks)
 
         # Diagnóstico preservado (correção real, auditoria 20260806-112714): stdout/stderr do
         # worker e a confirmação (ou não) do encerramento da árvore de processos SEMPRE entram

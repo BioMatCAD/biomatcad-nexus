@@ -93,6 +93,21 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
+# Item #168 (rodada 3): o usuario relatou uma execucao real onde t_library_go_returned ficou
+# null porque o worker.dll efetivamente executado NAO continha a instrumentacao [DIAG_MARKER]
+# adicionada em Program.cs no commit 7a44da4 (stderr veio vazio) -- ou seja, uma DLL nao
+# recompilada apos esse commit foi usada. Alem disso, um OutputDir relativo pode resolver para
+# locais diferentes dependendo do diretorio de trabalho de onde o PowerShell foi invocado,
+# tornando dificil localizar/auditar evidencias depois. Para eliminar ambas as causas de
+# confusao nesta rodada, exigimos explicitamente caminhos ABSOLUTOS para RepoPath e OutputDir,
+# e SEMPRE reconstruimos o worker em Release (nunca reutilizamos silenciosamente uma DLL
+# encontrada em disco) antes de localiza-lo.
+if (-not [System.IO.Path]::IsPathRooted($RepoPath)) {
+    throw "RepoPath deve ser um caminho ABSOLUTO (recebido: '$RepoPath') -- caminhos relativos podem resolver de forma ambigua dependendo do diretorio de trabalho atual."
+}
+if (-not [System.IO.Path]::IsPathRooted($OutputDir)) {
+    throw "OutputDir deve ser um caminho ABSOLUTO (recebido: '$OutputDir') -- caminhos relativos tornam as evidencias dificeis de auditar/localizar depois. Use, por exemplo, C:\biomatcad-runs\voronoi-direct-probe-<timestamp>."
+}
 if (-not (Test-Path $RepoPath)) {
     throw "RepoPath nao encontrado: $RepoPath"
 }
@@ -129,17 +144,58 @@ function Write-ReportAndExit {
     exit $ExitCode
 }
 
-# ---- 0. Localiza o worker compilado (mesma prioridade Release > Debug de worker_client.py::_find_worker_dll) ----
+# ---- 0. Reconstroi o worker em Release EXPLICITAMENTE (item #168) e so entao o localiza ----
+# Nunca reutiliza silenciosamente uma DLL ja existente em disco: uma DLL nao recompilada apos
+# uma mudanca de codigo (por exemplo, a instrumentacao [DIAG_MARKER] adicionada em Program.cs
+# no commit 7a44da4) produziria resultados enganosos (como t_library_go_returned=null por
+# ausencia real do marcador no binario executado, e nao por qualquer comportamento do worker).
+$workerProjDir = Join-Path $RepoPath "apps\geometry-worker"
+$currentHeadShort = $null
+try {
+    Push-Location $RepoPath
+    $currentHeadShort = (git rev-parse --short HEAD 2>$null)
+}
+finally {
+    Pop-Location
+}
+$report.repo_head_short = $currentHeadShort
+Write-Host "[INFO] Reconstruindo worker em Release (HEAD=$currentHeadShort) antes de localizar a DLL..." -ForegroundColor Cyan
+Push-Location $workerProjDir
+try {
+    $buildOutput = & $DotnetBin build --configuration Release 2>&1
+    $buildExit = $LASTEXITCODE
+}
+finally {
+    Pop-Location
+}
+$report.worker_build_exit_code = $buildExit
+if ($buildExit -ne 0) {
+    Write-Host "[FALHA] 'dotnet build --configuration Release' falhou (exit $buildExit):`n$buildOutput" -ForegroundColor Red
+    $report.fatal_error = "WORKER_BUILD_FAILED"
+    $report.worker_build_output = ($buildOutput -join "`n")
+    Write-ReportAndExit -ExitCode 1
+}
+Write-Host "[OK] Build Release concluido com sucesso." -ForegroundColor Green
+
 $workerBinDir = Join-Path $RepoPath "apps\geometry-worker\bin"
 $dllCandidates = @(Get-ChildItem -Path $workerBinDir -Filter "BioMatCadGeometryWorker.dll" -Recurse -ErrorAction SilentlyContinue)
 if ($dllCandidates.Count -eq 0) {
-    Write-Host "[FALHA] worker nao compilado -- rode 'dotnet build --configuration Release' em apps/geometry-worker antes." -ForegroundColor Red
-    $report.fatal_error = "WORKER_BINARY_NOT_BUILT"
+    Write-Host "[FALHA] worker nao encontrado apos build bem-sucedido -- verifique o caminho de saida do projeto." -ForegroundColor Red
+    $report.fatal_error = "WORKER_BINARY_NOT_FOUND_AFTER_BUILD"
     Write-ReportAndExit -ExitCode 1
 }
-$dllPath = ($dllCandidates | Sort-Object { if ($_.FullName -match "Release") { 0 } else { 1 } } | Select-Object -First 1).FullName
+$dllPath = ($dllCandidates | Where-Object { $_.FullName -match "Release" } | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1).FullName
+if (-not $dllPath) {
+    Write-Host "[FALHA] build reportou sucesso mas nenhuma DLL Release foi encontrada." -ForegroundColor Red
+    $report.fatal_error = "WORKER_BINARY_NOT_FOUND_AFTER_BUILD"
+    Write-ReportAndExit -ExitCode 1
+}
+$dllLastWriteUtc = (Get-Item $dllPath).LastWriteTimeUtc
+$secondsSinceBuild = ((Get-Date).ToUniversalTime() - $dllLastWriteUtc).TotalSeconds
 $report.dll_path = $dllPath
-Write-Host "[INFO] Worker DLL: $dllPath" -ForegroundColor Cyan
+$report.dll_last_write_time_utc = $dllLastWriteUtc.ToString("o")
+$report.dll_seconds_since_build_at_probe_start = [math]::Round($secondsSinceBuild, 1)
+Write-Host "[INFO] Worker DLL (recem-compilada ha $([math]::Round($secondsSinceBuild,1))s): $dllPath" -ForegroundColor Cyan
 
 # ---- 1. Constroi job.json a partir da golden recipe real (canonicalizacao real, nunca alterada) ----
 Write-Host "[INFO] Construindo job.json real para '$Recipe' (job_id=$jobId)..." -ForegroundColor Cyan
@@ -365,6 +421,21 @@ $report.kill_confirmed                              = $killConfirmed
 
 if ($tLibraryGoReturned) {
     $report.duration_process_start_to_library_go_returned_seconds = [math]::Round(($tLibraryGoReturned - $tProcessStart).TotalSeconds, 3)
+}
+elseif ($null -ne $tResultComplete) {
+    # Item #168: t_library_go_returned ficou null em uma execucao real anterior (rodada
+    # 20260806-211542) porque o stderr do worker veio COMPLETAMENTE VAZIO -- ou seja, o
+    # marcador [DIAG_MARKER] (adicionado a Program.cs no commit 7a44da4) simplesmente nao
+    # estava presente no binario efetivamente executado naquela rodada, quase certamente por
+    # uso de uma DLL nao recompilada apos esse commit. A partir desta versao do roteiro, o
+    # passo 0 sempre reconstroi o worker em Release explicitamente antes de rodar, o que deve
+    # eliminar essa causa; se t_library_go_returned ainda vier null apos essa reconstrucao
+    # explicita, e um achado real a investigar (nao mais atribuivel a uma DLL desatualizada).
+    # IMPORTANTE: a auséncia deste marcador NUNCA invalida a conclusao ja comprovada da Fase A
+    # (processo real terminando sozinho, com JSON final + STL legivel, exit code correto) --
+    # essa conclusao decorre de t_json_final_seen/t_result_complete/process_exited_naturally,
+    # que sao independentes deste marcador de diagnostico.
+    $report.t_library_go_returned_null_explicacao = "marcador [DIAG_MARKER] ausente em stderr apesar de resultado completo -- provavel causa historica: DLL nao recompilada apos commit 7a44da4 (corrigido nesta versao do roteiro via build Release explicito no passo 0; ver dll_last_write_time_utc/dll_seconds_since_build_at_probe_start acima). Isso NAO invalida a conclusao do resultado completo (t_json_final_seen/t_result_complete/process_exited_naturally), que independe deste marcador."
 }
 if ($tLibraryGoReturned -and $tJsonFinalSeen) {
     $report.duration_library_go_returned_to_json_final_seconds = [math]::Round(($tJsonFinalSeen - $tLibraryGoReturned).TotalSeconds, 3)

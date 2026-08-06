@@ -1634,6 +1634,50 @@ em que o roteiro Windows de fato executa a suíte.
   definitiva -- apenas localizada com precisão bem maior que antes (dentro do próprio Go(), não
   em nenhum parâmetro de aplicação) via decompilação real.
 
+## 22. Rodada 3 -- Fase A real no Windows REFUTA hipótese PicoGK/Voronoi; causa raiz real: deadlock de pipes no cliente Python (2026-08-06)
+
+**Evidência real do usuário, execução Windows** (`C:\biomatcad-runs\voronoi-direct-probe-20260806-211542\direct-worker-probe-report.json`): `block-voronoi-preview-v1` invocado diretamente via CLI do worker (sem API/dispatcher) produziu resultado completo (JSON final válido + STL de 444.684 bytes, reaberto com sucesso) em 2,5s, com exit code 0 e encerramento espontâneo imediato (`duration_process_alive_after_result_complete_seconds: 0.0`), sem kill externo, sem processo órfão (`stray_worker_processes_after: []`). Checksum da receita: `28465707f35d12300ed618241fafced39613b0be6f08a4d81c963dbaf8673cfe`.
+
+Veredito literal do relatório: `"REFUTADO NESTA EXECUCAO: o processo encerrou-se sozinho apos o resultado completo, sem necessidade de encerramento externo."`
+
+**Conclusão**: o algoritmo Voronoi e o processo PicoGK direto NÃO causam o `WORKER_TIMEOUT`. Por instrução explícita do usuário, a Fase B (WorkerProcessExitCoordinator/`Environment.Exit`) foi cancelada -- sua premissa não se sustentou.
+
+**Achado colateral não invalidante**: `t_library_go_returned` veio `null` (stderr vazio, 0 bytes) nessa execução -- indicando uma DLL não recompilada após o commit `7a44da4` (que adicionou o marcador `[DIAG_MARKER]`). Isso não invalida a conclusão acima, que independe desse marcador. Corrigido nesta rodada (ver item de correção do roteiro abaixo).
+
+### 22.1 Causa raiz real: deadlock de pipes stdout/stderr em `DotnetPicoGkWorkerClient.execute()`
+
+Auditoria confirmou um defeito clássico de `subprocess.Popen`: a implementação anterior fazia `proc.wait(timeout=POLL_INTERVAL_SECONDS)` em laço (para cancelamento/timeout cooperativos) sem nunca ler `proc.stdout`/`proc.stderr` durante a espera -- só chamava `proc.communicate()` depois do laço. Se o processo filho escreve mais que o buffer do pipe do SO (~64KB) em stdout OU stderr antes de qualquer leitura, a própria escrita do filho bloqueia, e o pai (preso em `wait()`) nunca lê -- reproduzindo exatamente o sintoma de "travamento" relatado, resolvido apenas pelo watchdog externo (`WORKER_TIMEOUT`).
+
+**Reprodução real e controlada** (processo Python auxiliar escrevendo ~5,7MB simultaneamente em stdout e stderr, terminando com JSON válido):
+- ANTES da correção (revalidado via `git stash` nesta sessão): `WORKER_TIMEOUT` após ~4,02s contra prazo de 3s+1s.
+- DEPOIS da correção: sucesso em ~0,18s, com stdout/stderr completos capturados.
+
+### 22.2 Correção aplicada e testes de regressão permanentes
+
+`DotnetPicoGkWorkerClient.execute()` agora drena `stdout`/`stderr` continuamente via threads daemon em background (iniciadas logo após `Popen()`, unidas após o laço de espera/cancelamento/timeout, que permanece inalterado). Ver detalhes completos em `apps/geometry-worker/WORKER_STATUS.md` seção 14.
+
+Quatro testes novos e permanentes em `apps/api/tests/test_worker_timeout_recovery.py` (todos passando):
+- `test_execute_nao_trava_quando_processo_escreve_volume_maior_que_buffer_do_pipe`
+- `test_execute_captura_stdout_e_stderr_completos_mesmo_com_volume_grande`
+- `test_execute_cancelamento_continua_funcionando_com_drenagem_continua`
+- `test_execute_timeout_genuino_continua_funcionando_com_drenagem_continua`
+
+**Resultado**: `12 passed in 3.45s` (arquivo completo, incluindo os 8 testes pré-existentes).
+
+### 22.3 Correção do roteiro `Run-VoronoiDirectWorkerProbe.ps1` (build explícito + caminhos absolutos)
+
+- Passo 0 agora sempre executa `dotnet build --configuration Release` explicitamente antes de localizar a DLL (nunca reutiliza silenciosamente um binário em disco) -- elimina a causa mais provável do `t_library_go_returned: null` (DLL desatualizada).
+- `RepoPath`/`OutputDir` relativos agora são rejeitados explicitamente com exceção clara.
+- Novo campo de relatório `t_library_go_returned_null_explicacao`, documentando a causa provável e afirmando explicitamente que a ausência do marcador não invalida a conclusão do resultado completo.
+
+Validação desta sessão (sandbox Linux, sem PicoGK real): sintaxe verificada via parser do PowerShell 7.4.6; lógica de build+localização de DLL+construção de job.json exercida com sucesso contra um ambiente fictício (dotnet/git fakes); rejeição de caminho relativo confirmada.
+
+### 22.4 Suítes completas rodadas nesta sessão (rodada 3, pós-correção)
+
+- **Worker C#** (`dotnet vstest`, dois projetos de teste -- `dotnet test` em si ficou preso indefinidamente neste sandbox Linux por razão de infraestrutura do VSTest host não relacionada ao código, contornado com `dotnet build` + `dotnet vstest` diretamente sobre as DLLs compiladas, com resultado idêntico): `BioMatCadGeometryWorker.Tests` 100/100 passando; `BioMatCadGeometryWorker.TopologyProviderTests` 11/11 passando. Build Release do worker principal: sucesso, 0 erros/avisos.
+- **Backend (pytest)**: rodado primeiro contra SQLite (default sem `TEST_DATABASE_URL`), resultando em 211 passed, 4 skipped, **2 failed** -- `test_two_concurrent_dispatchers_never_claim_the_same_job` (o próprio docstring do teste documenta que SQLite não suporta `FOR UPDATE SKIP LOCKED` da mesma forma e "não seria uma prova válida deste requisito") e `test_clinical_suite_expiration_is_respected` (teste sensível a tempo real, `sleep(1.2s)` contra expiração de 1s, sob CPU do sandbox compartilhado). Nenhum dos dois arquivos foi tocado nesta rodada. Re-executado contra Postgres real isolado (via `pgserver`, mesmo padrão de isolamento por schema da rodada 2): **215 passed, 2 skipped, 0 failed** em 41,49s -- confirmando que as 2 falhas eram artefatos do ambiente SQLite/timing, não regressões desta rodada.
+- **Frontend**: `npm run typecheck` limpo; `npm run lint` limpo (`--max-warnings=0`); `npm run test` (vitest) -- **119 passed (119)**, 23 arquivos; `npm run build` -- sucesso (aviso apenas de tamanho de chunk, pré-existente, não relacionado a esta rodada).
+
 ## O que esta evidência explicitamente NÃO cobre
 
 - **Consistência STL-vs-manifesto via fluxo completo API→dispatcher→worker PicoGK real→

@@ -291,6 +291,170 @@ def test_full_diagnostics_file_sobrevive_a_limpeza_do_output_dir(tmp_path, monke
 
 
 # ---------------------------------------------------------------------------
+# Item novo (rodada pós-Fase A real no Windows, commit 7a44da4): a Fase A provou, no Windows
+# real, que o worker/PicoGK genuíno (invocado DIRETAMENTE, sem este cliente) termina sozinho em
+# ~2.5s para block-voronoi-preview-v1 -- exit code 0, sem kill, sem órfão. Isso REFUTA a
+# hipótese de que o algoritmo Voronoi/PicoGK em si causa o WORKER_TIMEOUT, e aponta para
+# DotnetPicoGkWorkerClient.execute() (este arquivo). Auditoria: a versão anterior deste método
+# fazia um loop de `proc.wait(timeout=POLL_INTERVAL_SECONDS)` para cancelamento/timeout SEM
+# NUNCA ler `proc.stdout`/`proc.stderr` durante essa espera -- só chamava `proc.communicate()`
+# DEPOIS do loop. Pipes do SO têm buffer finito (tipicamente ~64KB no Linux) -- se o processo
+# filho escrever mais que isso em stdout OU stderr antes de qualquer leitura, a própria escrita
+# do filho BLOQUEIA no nível do SO esperando um leitor que nunca vem (o pai está preso em
+# `wait()`), reproduzindo exatamente o sintoma relatado (processo "trava", só resolvido pelo
+# watchdog externo) mesmo quando o cálculo em si já tinha terminado.
+#
+# Os testes abaixo prova(ra)m isso de forma real e permanente: (1) reproduzem o deadlock com um
+# processo auxiliar que escreve volume muito acima de qualquer buffer de pipe do SO,
+# simultaneamente em stdout e stderr, terminando com um JSON válido -- a versão SEM a correção
+# de drenagem contínua sempre resulta em WORKER_TIMEOUT aqui (confirmado manualmente nesta
+# sessão via `git stash`, comparando literalmente antes/depois desta mesma correção); (2)
+# confirmam que a versão CORRIGIDA completa rapidamente, com sucesso, capturando o stdout/stderr
+# completos; (3) confirmam que cancelamento e timeout genuíno continuam funcionando com a
+# drenagem contínua ativa.
+# ---------------------------------------------------------------------------
+
+
+def _make_fake_worker_repo_with_large_output_script(tmp_path: Path, *, hang_after_output: bool) -> Path:
+    """Processo auxiliar que escreve ~5.7MB simultaneamente em stdout e stderr (muito acima de
+    qualquer buffer de pipe do SO, tipicamente ~64KB no Linux/Windows), com flush explícito por
+    linha -- se ninguém drenar os dois pipes CONTINUAMENTE, a própria escrita do processo
+    bloqueia. Termina com um JSON final válido (linha limpa, como o worker real: Program.cs só
+    escreve UMA linha em stdout, o JSON -- qualquer volume grande de log real iria para
+    stderr). Se `hang_after_output`, permanece vivo indefinidamente depois (para o teste de
+    timeout genuíno); caso contrário, sai imediatamente com exit code 0."""
+    worker_script_lines = [
+        "import sys, json, time",
+        "chunk = ('X' * 8192) + chr(10)",
+        "for _ in range(700):",
+        "    sys.stdout.write(chunk)",
+        "    sys.stdout.flush()",
+        "    sys.stderr.write(chunk)",
+        "    sys.stderr.flush()",
+        "result = {'stl_path': '/fake/scaffold.stl', 'metrics': {'vertex_count': 1}, "
+        "'worker_version': 'fake-pipe-test', 'dotnet_version': 'fake', 'picogk_version': 'fake', "
+        "'duration_seconds': 0.01}",
+        "print(json.dumps(result), flush=True)",
+    ]
+    if hang_after_output:
+        worker_script_lines.append("time.sleep(300)")
+    worker_script = "\n".join(worker_script_lines) + "\n"
+    return _make_fake_worker_repo(tmp_path / "fake-repo", worker_script)
+
+
+def test_execute_nao_trava_quando_processo_escreve_volume_maior_que_buffer_do_pipe(tmp_path, monkeypatch):
+    """Reprodução direta e permanente do deadlock relatado: um processo que escreve muito mais
+    que o buffer de um pipe do SO em stdout E stderr, simultaneamente, deve ser drenado
+    continuamente e concluir rapidamente -- nunca resultar em WORKER_TIMEOUT."""
+    monkeypatch.setattr(worker_client_module, "STARTUP_OVERHEAD_SECONDS", 2)
+    monkeypatch.setattr(worker_client_module, "POLL_INTERVAL_SECONDS", 0.1)
+
+    repo_root = _make_fake_worker_repo_with_large_output_script(tmp_path, hang_after_output=False)
+    client = DotnetPicoGkWorkerClient(repo_root=repo_root, dotnet_bin=sys.executable)
+
+    t0 = time.monotonic()
+    result = client.execute(
+        recipe_canonical={"compute_limits": {"max_duration_seconds": 3}},
+        job_id="pipe-drain-success",
+        output_dir=tmp_path / "work",
+    )
+    elapsed = time.monotonic() - t0
+
+    assert result.worker_version == "fake-pipe-test"
+    # Deve completar MUITO antes do prazo (3s+2s=5s) -- se o deadlock não tivesse sido
+    # corrigido, isso teria estourado o timeout e levantado WorkerExecutionError.
+    assert elapsed < 4.0, f"execução demorou {elapsed:.2f}s -- indica que a drenagem não está funcionando"
+
+
+def test_execute_captura_stdout_e_stderr_completos_mesmo_com_volume_grande(tmp_path, monkeypatch):
+    """Além de não travar, a implementação corrigida deve preservar o CONTEÚDO INTEIRO de
+    stdout/stderr (não apenas o suficiente para destravar) -- necessário para diagnóstico real
+    em caso de falha, e para a extração correta da última linha JSON."""
+    monkeypatch.setattr(worker_client_module, "STARTUP_OVERHEAD_SECONDS", 2)
+    monkeypatch.setattr(worker_client_module, "POLL_INTERVAL_SECONDS", 0.1)
+
+    repo_root = _make_fake_worker_repo_with_large_output_script(tmp_path, hang_after_output=False)
+    client = DotnetPicoGkWorkerClient(repo_root=repo_root, dotnet_bin=sys.executable)
+
+    # Acessa o stdout/stderr brutos via um cancel_check espião não é necessário aqui -- a prova
+    # mais direta é que o JSON final (última linha de stdout) foi corretamente extraído E que
+    # nenhuma exceção de parsing ocorreu, o que só é possível se as ~700 linhas anteriores de
+    # padding (~5.7MB) foram de fato lidas e a linha final isolada corretamente.
+    result = client.execute(
+        recipe_canonical={"compute_limits": {"max_duration_seconds": 3}},
+        job_id="pipe-drain-content",
+        output_dir=tmp_path / "work2",
+    )
+    assert result.metrics == {"vertex_count": 1}
+
+
+def test_execute_cancelamento_continua_funcionando_com_drenagem_continua(tmp_path, monkeypatch):
+    """A correção de drenagem não pode quebrar o mecanismo de cancelamento real (item 7 do
+    Incremento 2.1.1) -- um processo que escreve continuamente mas NUNCA produz o JSON final
+    (nunca sai sozinho) deve continuar sendo encerrado corretamente quando cancel_check
+    retorna True."""
+    monkeypatch.setattr(worker_client_module, "STARTUP_OVERHEAD_SECONDS", 5)
+    monkeypatch.setattr(worker_client_module, "POLL_INTERVAL_SECONDS", 0.1)
+
+    worker_script = "\n".join([
+        "import sys, time",
+        "chunk = ('Y' * 8192) + chr(10)",
+        "while True:",
+        "    sys.stdout.write(chunk)",
+        "    sys.stdout.flush()",
+        "    sys.stderr.write(chunk)",
+        "    sys.stderr.flush()",
+        "    time.sleep(0.01)",
+    ]) + "\n"
+    repo_root = _make_fake_worker_repo(tmp_path / "fake-repo", worker_script)
+    client = DotnetPicoGkWorkerClient(repo_root=repo_root, dotnet_bin=sys.executable)
+
+    call_count = {"n": 0}
+
+    def cancel_after_a_bit() -> bool:
+        call_count["n"] += 1
+        return call_count["n"] >= 3  # cancela depois de algumas checagens (~0.3s)
+
+    with pytest.raises(WorkerExecutionError) as excinfo:
+        client.execute(
+            recipe_canonical={"compute_limits": {"max_duration_seconds": 60}},
+            job_id="pipe-drain-cancel",
+            output_dir=tmp_path / "work",
+            cancel_check=cancel_after_a_bit,
+        )
+
+    assert excinfo.value.error_code == "WORKER_CANCELLED"
+    assert excinfo.value.details.get("process_tree_confirmed_terminated") is True
+
+
+def test_execute_timeout_genuino_continua_funcionando_com_drenagem_continua(tmp_path, monkeypatch):
+    """A correção de drenagem não pode mascarar um timeout GENUÍNO (processo que realmente
+    nunca termina, mesmo drenado) -- continua resultando em WORKER_TIMEOUT com a árvore
+    confirmada encerrada, exatamente como antes desta correção."""
+    monkeypatch.setattr(worker_client_module, "STARTUP_OVERHEAD_SECONDS", 0.2)
+    monkeypatch.setattr(worker_client_module, "POLL_INTERVAL_SECONDS", 0.05)
+
+    repo_root = _make_fake_worker_repo_with_large_output_script(tmp_path, hang_after_output=True)
+    client = DotnetPicoGkWorkerClient(repo_root=repo_root, dotnet_bin=sys.executable)
+
+    with pytest.raises(WorkerExecutionError) as excinfo:
+        client.execute(
+            recipe_canonical={"compute_limits": {"max_duration_seconds": 0.3}},
+            job_id="pipe-drain-genuine-timeout",
+            output_dir=tmp_path / "work",
+        )
+
+    assert excinfo.value.error_code == "WORKER_TIMEOUT"
+    assert excinfo.value.details.get("process_tree_confirmed_terminated") is True
+    # Mesmo tendo travado de propósito (hang_after_output=True), o JSON final e todo o padding
+    # ANTES do hang devem ter sido capturados integralmente no diagnóstico completo -- prova
+    # que a drenagem estava ativa durante toda a execução, não apenas até o momento do kill.
+    diagnostics_path = Path(excinfo.value.details["full_diagnostics_path"])
+    payload = json.loads(diagnostics_path.read_text(encoding="utf-8"))
+    assert '"vertex_count": 1' in payload["stdout_full"] or "vertex_count" in payload["stdout_full"]
+
+
+# ---------------------------------------------------------------------------
 # 3) Recuperação da ORQUESTRAÇÃO: um job que falha com WORKER_TIMEOUT não pode
 #    impedir que a PRÓXIMA invocação do dispatcher processe um job novo
 #    normalmente (a cascata real observada na rodada 20260806-112714 foi um

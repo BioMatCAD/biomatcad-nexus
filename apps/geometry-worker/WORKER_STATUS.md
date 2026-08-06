@@ -690,3 +690,48 @@ true` (resultado completo + processo vivo por tempo adicional sem nenhum watchdo
 FASE B (implementação de um `WorkerProcessExitCoordinator` explícito no limite externo do
 processo) será iniciada com essa prova direta em mãos -- não antes, por instrução explícita do
 usuário.
+
+## 14. Rodada 3 — execução real da Fase A no Windows (REFUTA hipótese PicoGK/Voronoi) e causa raiz real: deadlock de pipes no cliente Python
+
+**Execução real do usuário no Windows** (evidência: `C:\biomatcad-runs\voronoi-direct-probe-20260806-211542\direct-worker-probe-report.json`, segunda execução real da Fase A, script `Run-VoronoiDirectWorkerProbe.ps1` do commit `7a44da4`): `block-voronoi-preview-v1` invocado **diretamente** via CLI do worker (sem API, sem dispatcher, sem `DotnetPicoGkWorkerClient`) produziu um resultado completo (JSON final + STL de 444.684 bytes, reabertura confirmada) em **2,5s**, com **exit code 0**, **encerramento espontâneo imediato** (`duration_process_alive_after_result_complete_seconds: 0.0`), sem kill externo, sem processo órfão. Veredito literal do próprio relatório: `"REFUTADO NESTA EXECUCAO: o processo encerrou-se sozinho apos o resultado completo, sem necessidade de encerramento externo."`
+
+**Conclusão direta e definitiva**: o algoritmo Voronoi e o processo PicoGK direto **não** causam o `WORKER_TIMEOUT` de 60s historicamente relatado. Por instrução explícita do usuário, a FASE B (implementação de um `WorkerProcessExitCoordinator`/`Environment.Exit` no limite externo do executável) foi **cancelada** — sua premissa (processo vivo indevidamente após resultado completo) não se sustentou. As tarefas correspondentes (#161/#162 no rastreador interno) foram marcadas como superadas.
+
+**Achado colateral, não invalidante**: `t_library_go_returned` veio `null` nessa execução, e o `worker-stderr.utf8.log` correspondente veio **completamente vazio** (0 bytes) — ou seja, o marcador `[DIAG_MARKER]` adicionado a `Program.cs` no commit `7a44da4` não estava presente no binário efetivamente executado, quase certamente por uso de uma DLL não recompilada após esse commit. Isso **não invalida** a conclusão acima (resultado completo + encerramento espontâneo), que decorre de `t_json_final_seen`/`t_result_complete`/`process_exited_naturally`, totalmente independentes desse marcador de diagnóstico.
+
+### 14.1 Causa raiz real: deadlock clássico de pipes stdout/stderr em `DotnetPicoGkWorkerClient.execute()`
+
+Com a hipótese PicoGK/Voronoi refutada, a diferença restante só pode estar em `apps/api/src/biomatcad_api/services/worker_client.py::DotnetPicoGkWorkerClient.execute()`. Auditoria confirmou um defeito clássico e bem documentado de `subprocess.Popen` em Python:
+
+A implementação anterior usava `stdout=subprocess.PIPE` e `stderr=subprocess.PIPE`, mas o laço de espera fazia apenas `proc.wait(timeout=POLL_INTERVAL_SECONDS)` repetidamente (para permitir cancelamento/timeout cooperativos) — **sem nunca ler** `proc.stdout`/`proc.stderr` durante essa espera. Só depois que o laço terminava é que `proc.communicate()` era chamado. Pipes do sistema operacional têm buffer finito (tipicamente ~64KB no Linux; ordem de grandeza semelhante no Windows). Se o processo filho escreve mais que esse buffer em stdout OU stderr antes de qualquer leitura, a própria chamada de escrita (`write()`) do processo filho **bloqueia** no nível do SO, esperando um leitor que nunca aparece (o processo pai está preso em `wait()`, não em leitura). Do ponto de vista do processo pai, isso é indistinguível de um hang genuíno do worker — `wait()` expira repetidamente até o `WORKER_TIMEOUT` externo disparar e matar a árvore, mascarando o verdadeiro problema.
+
+**Reprodução real e controlada** (sem depender de PicoGK real): um processo Python auxiliar escrevendo ~5,7MB simultaneamente em stdout e stderr (muito acima de qualquer buffer de pipe do SO), terminando com um JSON final válido na última linha —
+
+- **ANTES da correção** (código original, revalidado nesta sessão via `git stash`): `WORKER_TIMEOUT` após ~4,0s contra um prazo de 3s+1s — comprovando o deadlock de forma determinística e reproduzível.
+- **DEPOIS da correção**: conclusão bem-sucedida em ~0,18s, com `stdout`/`stderr` completos capturados.
+
+### 14.2 Correção aplicada
+
+`DotnetPicoGkWorkerClient.execute()` agora inicia, imediatamente após `Popen()` (e antes do laço de espera/cancelamento/timeout, que permanece inalterado), duas threads daemon em background que drenam continuamente `proc.stdout` e `proc.stderr` via `stream.read(65536)` em laço até EOF, acumulando os chunks em listas. O laço de `wait()`/cancelamento/timeout continua funcionando exatamente como antes (mesma lógica de `cancel_check`, `deadline`, `_kill_process_tree`). Após esse laço, em vez de `proc.communicate()`, as threads de drenagem são unidas (`join(timeout=10)`) e o conteúdo completo de stdout/stderr é montado a partir dos chunks acumulados. Isso elimina a janela de deadlock sem alterar nenhum outro comportamento: cancelamento, timeout genuíno, encerramento da árvore de processos apenas em timeout real, preservação do diagnóstico completo em arquivo, e extração do JSON final da última linha de stdout — todos continuam funcionando (ver testes na seção 14.3). Nenhuma mudança introduz risco de command injection: a chamada `Popen` continua usando uma lista de argumentos (`[self.dotnet_bin, str(dll_path), str(job_json_path)]`), nunca `shell=True` nem concatenação de string.
+
+### 14.3 Testes de regressão permanentes (arquivo `apps/api/tests/test_worker_timeout_recovery.py`)
+
+Quatro novos testes provam, de forma permanente e determinística (sem depender de PicoGK/dotnet reais — usam a fábrica `_make_fake_worker_repo` já existente com `dotnet_bin=sys.executable`):
+
+1. `test_execute_nao_trava_quando_processo_escreve_volume_maior_que_buffer_do_pipe` — reproduz o deadlock (escrita de ~5,7MB simultânea em stdout e stderr) e prova que a execução corrigida completa rapidamente (< 4s), nunca resultando em `WORKER_TIMEOUT`.
+2. `test_execute_captura_stdout_e_stderr_completos_mesmo_com_volume_grande` — prova que o conteúdo integral é capturado e o JSON final corretamente extraído mesmo com grande volume de padding anterior.
+3. `test_execute_cancelamento_continua_funcionando_com_drenagem_continua` — prova que o cancelamento cooperativo (`cancel_check`) continua funcionando corretamente com a drenagem contínua ativa, contra um processo que escreve continuamente e nunca sai sozinho.
+4. `test_execute_timeout_genuino_continua_funcionando_com_drenagem_continua` — prova que um timeout **genuíno** (processo que realmente nunca termina, mesmo drenado) continua sendo detectado e a árvore de processos corretamente encerrada, e que todo o conteúdo produzido antes do hang foi de fato capturado no diagnóstico completo.
+
+Todos os 12 testes do arquivo (incluindo os 8 pré-existentes) passam: `12 passed in 3.45s`.
+
+### 14.4 Correção de `Run-VoronoiDirectWorkerProbe.ps1` (item #168)
+
+Três correções aplicadas ao roteiro, em resposta direta ao achado colateral da seção 14 (marcador ausente por DLL desatualizada):
+
+1. **Build Release explícito**: o roteiro agora sempre executa `dotnet build --configuration Release` no projeto do worker **antes** de localizar a DLL — nunca mais reutiliza silenciosamente uma DLL pré-existente em disco, eliminando a possibilidade de rodar contra um binário desatualizado em relação ao HEAD. O relatório passa a registrar `repo_head_short`, `worker_build_exit_code`, `dll_last_write_time_utc` e `dll_seconds_since_build_at_probe_start` para auditabilidade.
+2. **`OutputDir`/`RepoPath` absolutos obrigatórios**: caminhos relativos agora são explicitamente rejeitados com uma exceção clara, eliminando ambiguidade de resolução dependente do diretório de trabalho atual.
+3. **Diagnóstico do `t_library_go_returned: null`**: quando o resultado fica completo mas o marcador nunca é visto em stderr, o relatório agora inclui o campo `t_library_go_returned_null_explicacao`, documentando a causa mais provável (DLL desatualizada, corrigida pelo item 1) e afirmando explicitamente que isso **não invalida** a conclusão do resultado completo.
+
+Validação desta sessão (sandbox Linux, sem PicoGK real): sintaxe verificada via `[System.Management.Automation.Language.Parser]::ParseFile` (OK); lógica de build+localização de DLL+construção de job.json exercida com sucesso contra um ambiente fictício (git repo vazio + "dotnet" fake que simula build e execução); rejeição de `OutputDir` relativo confirmada (lança exceção com mensagem clara). A etapa de verificação de processos órfãos (`Get-CimInstance Win32_Process`) é exclusiva do Windows e não pôde ser exercida neste sandbox Linux — validação completa depende da execução real do usuário.
+

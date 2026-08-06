@@ -150,6 +150,49 @@ executado nesta rodada; as 3 falhas backend eram defeitos reais de isolamento da
 contra um banco compartilhado, não bugs relacionados à ciência Voronoi/Gyroid -- corrigidos e
 comprovados nesta rodada.** Ver `TEST_EVIDENCE.md` seção 21 para o registro completo.
 
+### Rodada 3 -- Fase A real no Windows REFUTA hipótese PicoGK/Voronoi; causa raiz real: deadlock de pipes stdout/stderr no cliente Python
+
+A Fase A (roteiro `Run-VoronoiDirectWorkerProbe.ps1`, invocação direta do worker sem API/
+dispatcher) foi executada de verdade pelo usuário no Windows: `block-voronoi-preview-v1`
+completou em 2,5s com exit code 0, STL real de 444.684 bytes e encerramento espontâneo
+imediato, sem kill externo, sem órfão. **Isso refuta definitivamente a hipótese de que o
+algoritmo Voronoi ou o processo PicoGK causam o `WORKER_TIMEOUT`** -- por instrução explícita do
+usuário, a Fase B (`WorkerProcessExitCoordinator`/`Environment.Exit`) foi cancelada, sua premissa
+não se sustentou.
+
+Com essa hipótese eliminada, a auditoria se voltou para `DotnetPicoGkWorkerClient.execute()`
+(`apps/api/src/biomatcad_api/services/worker_client.py`) e confirmou um deadlock clássico de
+`subprocess.Popen`: o laço de espera fazia `proc.wait()` repetidamente sem nunca drenar
+`stdout`/`stderr`, e se o processo filho escreve mais que o buffer do pipe do SO antes de
+qualquer leitura, a própria escrita do filho bloqueia -- mascarando-se como um "travamento" só
+resolvido pelo `WORKER_TIMEOUT` externo. Reproduzido de forma real e controlada (~5,7MB
+escritos simultaneamente em stdout/stderr): ANTES da correção, `WORKER_TIMEOUT` determinístico;
+DEPOIS, sucesso em ~0,18s. Corrigido com drenagem contínua via threads daemon, preservando
+integralmente cancelamento, timeout genuíno, diagnóstico completo e extração do JSON final (4
+novos testes de regressão permanentes, todos passando).
+
+O achado colateral de `t_library_go_returned: null` na execução real (stderr vazio, DLL
+provavelmente desatualizada em relação ao commit que adicionou o marcador de diagnóstico) foi
+corrigido no roteiro `Run-VoronoiDirectWorkerProbe.ps1`: build Release explícito antes de
+localizar a DLL, `RepoPath`/`OutputDir` absolutos obrigatórios, e um campo de relatório
+documentando a causa sem invalidar a conclusão já comprovada.
+
+Suítes completas re-executadas nesta rodada: worker C# 100/100 + 11/11 (dois projetos de
+teste, via `dotnet vstest` sobre DLLs compiladas -- `dotnet test` en si travou indefinidamente
+neste sandbox Linux por uma limitação de infraestrutura do VSTest host não relacionada ao
+código, contornada sem alterar a cobertura real); backend 215 passed, 2 skipped, 0 failed
+contra Postgres real isolado (as 2 falhas vistas contra SQLite, `test_two_concurrent_
+dispatchers_never_claim_the_same_job` e `test_clinical_suite_expiration_is_respected`, são
+artefatos documentados de ambiente/tempo, não regressões desta rodada -- confirmado ao
+rodar a mesma suíte contra Postgres real); frontend 119/119 vitest + typecheck/lint/build OK.
+Ver `TEST_EVIDENCE.md` seção 22 e `apps/geometry-worker/WORKER_STATUS.md` seção 14 para o
+registro técnico completo.
+
+**Veredito desta rodada: PicoGK/Voronoi definitivamente exonerados como causa do
+`WORKER_TIMEOUT`; causa raiz real identificada e corrigida no cliente Python; roteiro de prova
+direta corrigido; novo piloto Windows (Voronoi 2x + Gyroid 2x) ainda pendente de execução real
+antes de declarar Voronoi aprovado.**
+
 ## Incremento 2.2 Alpha Pesquisa — resumo (branch `incremento-2.2-alpha-pesquisa`)
 
 Escopo desta rodada: observabilidade real + integração à GUI, GUI completa de pesquisa (retry,
