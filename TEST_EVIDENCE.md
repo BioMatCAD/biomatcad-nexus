@@ -1212,6 +1212,118 @@ sem necessidade de um script novo.
 | Regressão de checksum do demo do GitHub Pages | encontrada, corrigida, coberta por teste (verificado que o teste falha sem a correção) |
 | E2E Playwright | não executável neste sandbox (limitação já documentada); script único de re-execução no Windows já existente, sem necessidade de novo roteiro |
 
+## 19. Rodada Voronoi (Incremento 2.2) -- validação real no sandbox Linux, registro literal (2026-08-06)
+
+Esta seção registra literalmente o que foi executado NESTE sandbox Linux (sem PicoGK) ao longo
+da rodada Voronoi (Seções 1-14 da instrução original), reunindo em um só lugar as execuções que
+até aqui estavam apenas nos corpos dos commits. Nenhuma execução real do PicoGK ocorreu neste
+sandbox -- onde este documento diz "PASSED"/"OK" abaixo, refere-se sempre a testes/builds que
+rodam sem o runtime nativo do PicoGK (bloqueado neste ambiente, ADR-0007).
+
+### Worker C# (`apps/geometry-worker`) -- xUnit real
+
+```text
+$ dotnet test apps/geometry-worker/tests/BioMatCadGeometryWorker.Tests
+Passed!  - Failed: 0, Passed: 99, Skipped: 0, Total: 99, Duration: 461 ms
+```
+
+99 = 62 testes Gyroid (pré-existentes, sem regressão) + 22 testes de tesselação/sítios Voronoi
+(`VoronoiMathTests.cs`) + 15 testes de matemática implícita Voronoi
+(`VoronoiImplicitMathTests.cs`).
+
+```text
+$ dotnet build apps/geometry-worker
+Build succeeded. 0 Warning(s), 0 Error(s).
+```
+
+O worker (produção, não apenas os testes) compila sem erros/avisos com os campos novos
+(`MaxNodeContainmentViolationMm`, `valid_cell_count`, `smoothing_strategy`, ver commit
+`d319986`).
+
+### Backend (`apps/api`) -- pytest real (SQLite efêmero, ambiente de venv limpo desta sessão)
+
+```text
+$ pytest apps/api
+181 passed, 2 failed, 2 skipped
+```
+
+As 45 asserções novas desta rodada (41 em `test_recipe_schema_voronoi.py` + 4 em
+`test_topology_providers.py`) estão entre os 181 aprovados. As 2 falhas são as MESMAS duas
+falhas pré-existentes e não relacionadas a Voronoi, já identificadas em rodadas anteriores:
+
+- `tests/test_clinical_suite.py::test_clinical_suite_expiration_is_respected` -- `TypeError` em
+  `operational_state.py`, lógica de suíte clínica, sem nenhuma relação com topologia/schema.
+- `tests/test_geometry_job_concurrency.py::test_two_concurrent_dispatchers_never_claim_the_same_job`
+  -- teste de corrida esperando exatamente 24 jobs reivindicados ao todo por dois dispatchers,
+  observado 29 nesta execução (28/31/33 em execuções anteriores da rodada) -- um problema real
+  de isolamento entre testes/vazamento de estado na fila compartilhada (SQLite em arquivo, não
+  em memória, entre testes que não usam a fixture `db_session` para as threads reais do
+  dispatcher), não uma regressão introduzida por Voronoi.
+
+Ambas foram reproduzidas de forma idêntica em uma rodada anterior desta mesma sessão, fazendo
+`git stash` + `git checkout d09a616` (imediatamente anterior a todo o trabalho de Voronoi) e
+rodando as duas isoladamente -- falharam da mesma forma lá, confirmando que são dívida
+pré-existente, não introduzida nem agravada por esta rodada. Nenhuma tentativa de correção foi
+feita nesta rodada: uma correção real do problema de concorrência exigiria mudar o mecanismo de
+isolamento transacional em `conftest.py` (provavelmente introduzir SAVEPOINTs/nested
+transactions para que commits internos de serviços não escapem do rollback de teste) -- uma
+mudança estrutural que afeta TODOS os testes que usam `db_session`, incompatível com a regra
+desta rodada de "alteração pequena, isolada, comprovada, sem ampliar o escopo". Preservada aqui
+como evidência de reprodução comparativa, conforme instruído.
+
+### Frontend (`apps/web`) -- tsc, eslint, vitest, build, build:pages
+
+```text
+$ npx tsc --noEmit          # (0 erros)
+$ npx eslint . --ext .ts,.tsx   # (0 problemas)
+$ npx vitest run
+Test Files  23 passed (23)
+     Tests  118 passed (118)
+$ npm run build        # modo real -- sucesso
+$ npm run build:pages   # modo demo/GitHub Pages -- sucesso
+```
+
+118 testes (era 111 no início desta rodada) -- 7 em `RecipeEditorPage.test.tsx` (era 2; o teste
+antigo que esperava Voronoi desabilitado foi corrigido para refletir a implementação real, ver
+commit `284d2c6`).
+
+Confirmado por `grep` no bundle gerado por `build:pages` (`dist/assets/*.js`): nenhuma
+ocorrência de `"INVENTION"` nem `"docs/private"` -- apenas um ponteiro textual não-confidencial
+(`docs/architecture/voronoi-cell-edges-v1-math-audit.md`) aparece no texto explicativo da UI.
+
+### Regressão das 3 golden recipes Gyroid
+
+As 3 golden recipes Gyroid pré-existentes (`block-gyroid-v1`, `cylinder-gyroid-v1`,
+`preview-gyroid-low-res-v1`) continuam validando sem nenhuma mudança --
+`test_golden_recipes_all_validate` (parametrizado, agora com as 3 novas golden recipes Voronoi
+somadas às 3 Gyroid, 6/6 passando) e os 62 testes Gyroid do worker C# (`dotnet test`, sem
+regressão, contados dentro dos 99 acima).
+
+### E2E Playwright
+
+Não executado nesta rodada -- mesma limitação já documentada em rodadas anteriores (bibliotecas
+nativas do Chromium ausentes neste sandbox Linux, sem acesso root para instalá-las, ver
+`apps/web/e2e/README.md`). Nenhum cenário Voronoi foi adicionado a `e2e/vertical.spec.ts` nesta
+rodada -- ver lacuna registrada explicitamente no roteiro único de validação Windows
+desta rodada (entregue ao final desta sessão, ver Seção 7 da instrução original / seção
+de empacotamento deste documento).
+
+### Resumo consolidado desta seção
+
+| Suíte | Resultado |
+|---|---|
+| Worker C# (`dotnet test`) | 99 passed, 0 failed |
+| Worker C# (`dotnet build`, produção) | build succeeded, 0 warnings/errors |
+| Backend (`pytest`) | 181 passed, 2 failed (pré-existentes, não relacionadas a Voronoi, reproduzidas comparativamente em `d09a616`), 2 skipped |
+| Frontend `tsc --noEmit` | 0 erros |
+| Frontend `eslint` | 0 problemas |
+| Frontend `vitest run` | 118 passed, 0 failed (23 arquivos) |
+| Frontend `build` + `build:pages` | ambos com sucesso |
+| Confidencialidade do bundle Pages | confirmado via grep: sem "INVENTION"/"docs/private" |
+| Regressão Gyroid (golden recipes + testes C#) | zero regressão confirmada |
+| E2E Playwright | não executável neste sandbox (limitação pré-existente e documentada) |
+| Execução real do PicoGK (Voronoi ou Gyroid) neste sandbox | **NÃO ocorreu** -- nenhuma declaração em contrário é feita em nenhum commit ou documento desta rodada |
+
 ## O que esta evidência explicitamente NÃO cobre
 
 - **Consistência STL-vs-manifesto via fluxo completo API→dispatcher→worker PicoGK real→
