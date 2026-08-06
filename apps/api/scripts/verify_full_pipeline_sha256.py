@@ -40,6 +40,15 @@ terminal na MESMA configuração de DATABASE_URL/ARTIFACT_STORAGE_DIR):
 O relatório completo (todos os passos, valores literais, veredito) é salvo em
 GATE_FULL_PIPELINE_REPORT.json (apps/api/, já coberto por apps/api/data/ e *.log no
 .gitignore -- não deve ser versionado; é evidência local pontual, como o resultado de um teste).
+
+Incremento 2.2 (rodada Voronoi, Seção 7 -- roteiro único de validação Windows):
+--recipe agora também aceita as 3 golden recipes voronoi_cell_edges_v1 (nenhuma mudança de
+lógica além da lista de escolhas -- o restante do gate já era inteiramente agnóstico de
+topologia). --output-dir (opcional) persiste, além do relatório fixo de sempre, uma cópia do
+STL baixado, do manifesto e do relatório em arquivos nomeados por receita/execução, para
+permitir comparação de SHA-256 ENTRE execuções repetidas e auditoria independente posterior
+(ver apps/api/scripts/audit_stl_independent.py) -- nunca sobrescreve nada do comportamento
+padrão já usado pelo Incremento 2.1.1.
 """
 from __future__ import annotations
 
@@ -119,11 +128,33 @@ def main() -> int:
     parser.add_argument(
         "--recipe",
         default="block-gyroid-v1",
-        choices=["block-gyroid-v1", "cylinder-gyroid-v1", "preview-gyroid-low-res-v1"],
+        choices=[
+            "block-gyroid-v1",
+            "cylinder-gyroid-v1",
+            "preview-gyroid-low-res-v1",
+            # Incremento 2.2 (rodada Voronoi, Secao 11): 3 golden recipes voronoi_cell_edges_v1.
+            "block-voronoi-preview-v1",
+            "block-voronoi-final-v1",
+            "cylinder-voronoi-preview-v1",
+        ],
         help="Golden recipe (schemas/biomatcem/golden-recipes/) usada tal como está -- nunca modificada.",
     )
     parser.add_argument("--timeout-seconds", type=float, default=300.0)
     parser.add_argument("--poll-interval-seconds", type=float, default=2.0)
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+        help=(
+            "Diretorio opcional onde persistir uma copia do STL baixado, do manifesto e do "
+            "relatorio deste gate, nomeados por --recipe (e por --run-tag, se informado). "
+            "Nao substitui GATE_FULL_PIPELINE_REPORT.json (sempre gravado tambem)."
+        ),
+    )
+    parser.add_argument(
+        "--run-tag",
+        default=None,
+        help="Sufixo livre (ex.: 'run1'/'run2') para distinguir execucoes repetidas da mesma receita em --output-dir.",
+    )
     args = parser.parse_args()
 
     report: dict = {"gate": "full_pipeline_real_worker", "recipe": args.recipe, "steps": [], "hashes": None}
@@ -321,6 +352,21 @@ def main() -> int:
                 json.dumps(hashes, ensure_ascii=False, indent=2),
             )
 
+            if args.output_dir:
+                out_dir = Path(args.output_dir)
+                out_dir.mkdir(parents=True, exist_ok=True)
+                tag = f"_{args.run_tag}" if args.run_tag else ""
+                stem = f"{args.recipe}{tag}"
+                (out_dir / f"{stem}.stl").write_bytes(download_resp.content)
+                (out_dir / f"{stem}_manifest.json").write_text(
+                    json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+                step(
+                    "artefatos_persistidos_em_output_dir",
+                    True,
+                    f"STL e manifesto salvos em {out_dir} com prefixo {stem!r} (para comparacao entre execucoes e auditoria independente).",
+                )
+
             audit_events = (
                 db.query(AuditEvent)
                 .filter(AuditEvent.description.like(f"%{job_id}%"))
@@ -372,6 +418,13 @@ def main() -> int:
         report_path = API_DIR / "GATE_FULL_PIPELINE_REPORT.json"
         report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"\nRelatório completo salvo em: {report_path}")
+        if args.output_dir:
+            out_dir = Path(args.output_dir)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            tag = f"_{args.run_tag}" if args.run_tag else ""
+            report_copy_path = out_dir / f"{args.recipe}{tag}_report.json"
+            report_copy_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+            print(f"Cópia do relatório também salva em: {report_copy_path}")
 
 
 if __name__ == "__main__":
