@@ -177,6 +177,46 @@ function Save-ConsolidatedReport {
     Write-Host "`nRelatorio consolidado salvo em:`n  $jsonPath`n  $(Join-Path $OutputDir 'CONSOLIDATED_REPORT.md')" -ForegroundColor Cyan
 }
 
+# ---------------------------------------------------------------------------
+# Isolamento entre receitas (correcao real, auditoria da rodada
+# 20260806-112714): a validacao Windows anterior mostrou dois WORKER_TIMEOUT reais
+# (block-voronoi-preview-v1), seguidos de uma cascata de exit_code=1 em TODAS as invocacoes
+# SUBSEQUENTES do dispatcher, inclusive nas golden recipes Gyroid de controle ja aprovadas. A
+# auditoria de codigo concluiu que a causa mais provavel foi um processo dotnet.exe (o worker
+# PicoGK real) deixado ORFAO por uma condicao de corrida no proprio script de gate (corrigida
+# nesta rodada, ver verify_full_pipeline_sha256.py::compute_effective_gate_timeout_seconds) --
+# o orfao continuou consumindo recursos pelo resto da sessao, afetando toda execucao seguinte.
+# Estas funcoes tornam esse tipo de vazamento IMPOSSIVEL DE PASSAR DESPERCEBIDO: antes de cada
+# execucao de receita, verificamos e limpamos qualquer dotnet.exe orfao do worker que tenha
+# sobrevivido a uma execucao anterior -- e registramos o achado no relatorio consolidado,
+# nunca silenciosamente.
+function Get-StrayWorkerProcesses {
+    Get-CimInstance Win32_Process -Filter "Name = 'dotnet.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -and $_.CommandLine -match "BioMatCadGeometryWorker\.dll" }
+}
+
+function Clear-StrayWorkerProcesses {
+    param([string]$Context)
+    $stray = @(Get-StrayWorkerProcesses)
+    if ($stray.Count -gt 0) {
+        $strayPids = $stray | ForEach-Object { $_.ProcessId }
+        foreach ($p in $stray) {
+            try { Stop-Process -Id $p.ProcessId -Force -ErrorAction Stop } catch {
+                Write-Warning "Falha ao encerrar processo orfao PID $($p.ProcessId): $_"
+            }
+        }
+        Add-Step -Name "isolamento_$Context" -Ok $false -Detail (
+            "ENCONTRADO(S) E ENCERRADO(S) $($stray.Count) processo(s) dotnet.exe ORFAO(S) do " +
+            "worker ANTES desta etapa (PIDs: $($strayPids -join ', ')) -- evidencia real de " +
+            "vazamento de processo de uma execucao anterior (ver auditoria da rodada " +
+            "20260806-112714 em TEST_EVIDENCE.md). Isolamento restaurado antes de prosseguir."
+        )
+    }
+    else {
+        Add-Step -Name "isolamento_$Context" -Ok $true -Detail "Nenhum processo dotnet.exe orfao do worker encontrado antes desta etapa."
+    }
+}
+
 trap {
     Add-Step -Name "erro_nao_tratado" -Ok $false -Detail "Excecao nao tratada: $_"
     Save-ConsolidatedReport
@@ -371,10 +411,19 @@ try {
             run1_worker_watertight = $null
             run1_independent_watertight = $null
             run1_independent_containment_verified = $null
+            run1_duration_seconds = $null
+            run2_duration_seconds = $null
         }
 
         for ($run = 1; $run -le 2; $run++) {
             $runTag = "run$run"
+
+            # Isolamento (correcao real desta rodada): garante que nenhum processo orfao de
+            # uma execucao ANTERIOR (desta ou de outra receita) continue vivo e possa
+            # contaminar esta execucao -- ver Clear-StrayWorkerProcesses acima.
+            Clear-StrayWorkerProcesses -Context "$recipe`_$runTag`_pre"
+
+            $runStartedAt = Get-Date
             Push-Location $apiDir
             try {
                 $previousEap3 = $ErrorActionPreference
@@ -392,6 +441,14 @@ try {
             finally {
                 Pop-Location
             }
+            $runFinishedAt = Get-Date
+            $runDurationSeconds = [math]::Round(($runFinishedAt - $runStartedAt).TotalSeconds, 1)
+
+            # Isolamento pos-execucao: se esta execucao terminou (com sucesso, falha OU
+            # timeout) mas deixou um processo orfao para tras, detecta e limpa IMEDIATAMENTE,
+            # em vez de deixar o problema se acumular ate a proxima receita (exatamente o
+            # padrao real observado na rodada 20260806-112714).
+            Clear-StrayWorkerProcesses -Context "$recipe`_$runTag`_pos"
 
             $stlPath = Join-Path $OutputDir "$recipe`_$runTag.stl"
             $manifestPath = Join-Path $OutputDir "$recipe`_$runTag`_manifest.json"
@@ -442,7 +499,8 @@ try {
                 $recipeResult.run2_stl_sha256 = $stlSha256
             }
 
-            Add-Step -Name "gate_$recipe`_$runTag" -Ok ($gateExit -eq 0) -Detail "verify_full_pipeline_sha256.py --recipe $recipe --run-tag $runTag -> exit $gateExit"
+            Add-Step -Name "gate_$recipe`_$runTag" -Ok ($gateExit -eq 0) -Detail "verify_full_pipeline_sha256.py --recipe $recipe --run-tag $runTag -> exit $gateExit (duracao: ${runDurationSeconds}s)"
+            if ($run -eq 1) { $recipeResult.run1_duration_seconds = $runDurationSeconds } else { $recipeResult.run2_duration_seconds = $runDurationSeconds }
         }
 
         if ($recipeResult.run1_stl_sha256 -and $recipeResult.run2_stl_sha256) {
@@ -475,6 +533,21 @@ try {
     # ---- 8. E2E de GUI real ----
     if (-not $SkipE2E) {
         Write-Host "`n-- Etapa 8: E2E de GUI real (Playwright + Chromium) --" -ForegroundColor Cyan
+        # Correcao real (auditoria da rodada 20260806-112714): sem isto, o global-setup.ts do
+        # Playwright falhava com "ModuleNotFoundError: No module named psycopg" -- o script
+        # caia para o Python GLOBAL do Windows (sem as dependencias do backend instaladas) em
+        # vez do venv correto. E2E_PYTHON_BIN agora e OBRIGATORIA no proprio codigo
+        # (global-setup.ts lanca MissingE2EPythonBinError se ausente) -- este roteiro sempre a
+        # define explicitamente, apontando para o MESMO venv ja usado no resto do roteiro.
+        if (-not (Test-Path $venvPython)) {
+            Add-Step -Name "e2e_python_bin_venv_encontrado" -Ok $false -Detail "Venv da API nao encontrado em $venvPython -- E2E nao pode rodar sem o Python correto (psycopg etc.)."
+            Save-ConsolidatedReport
+            Write-Host "`n== ROTEIRO INTERROMPIDO: venv da API ausente antes do E2E ==" -ForegroundColor Red
+            exit 1
+        }
+        $env:E2E_PYTHON_BIN = $venvPython
+        Add-Step -Name "e2e_python_bin_definido" -Ok $true -Detail "E2E_PYTHON_BIN=$venvPython (venv real, nunca o Python global do sistema)."
+
         Push-Location $webDir
         try {
             npx playwright install chromium 2>&1 | Tee-Object -FilePath (Join-Path $OutputDir "e2e-install.log") | Write-Host
@@ -483,6 +556,7 @@ try {
         }
         finally {
             Pop-Location
+            Remove-Item Env:\E2E_PYTHON_BIN -ErrorAction SilentlyContinue
         }
     }
     else {

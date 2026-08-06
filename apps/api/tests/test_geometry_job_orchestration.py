@@ -4,9 +4,22 @@ transições de status, cancelamento, retry, e o caminho de falha controlada do 
 IMPORTANTE (transparência): FakeWorkerClient e AlwaysFailsWorkerClient são test doubles que
 NÃO alegam executar o PicoGK real -- servem apenas para validar a lógica de orquestração
 (persistência de artefato/checksum/manifesto/métricas). O teste
-`test_dispatch_job_real_worker_fails_in_blocked_environment`, ao final deste arquivo, usa o
-DotnetPicoGkWorkerClient REAL contra o binário REAL compilado, provando o bloqueio conhecido do
-runtime nativo PicoGK em linux-x64 (ver ADR-0007/WORKER_STATUS.md) -- nunca o contrário.
+`test_dispatch_job_real_worker_reflects_environment_honestly`, ao final deste arquivo, usa o
+DotnetPicoGkWorkerClient REAL contra o binário REAL compilado -- NÃO assume mais que o
+resultado é sempre uma falha.
+
+Correção real (rodada Voronoi, auditoria da execução Windows 20260806-112714):
+o teste anterior (`test_dispatch_job_real_worker_fails_in_blocked_environment`) hardcoded
+`assert result_job.status == JobStatus.FAILED`, uma premissa válida SÓ no sandbox Linux deste
+projeto (onde o runtime nativo do PicoGK é bloqueado, ADR-0007). Rodado de verdade no Windows
+do usuário (onde PicoGK funciona), o mesmo teste falhava -- não por um bug no produto, mas
+porque o job REALMENTE tinha sucesso ali, contradizendo a asserção fixa do teste. O teste
+corrigido abaixo aceita os dois desfechos REAIS possíveis, dependendo do ambiente onde roda, e
+prova algo forte em cada um: se FALHOU, o error_code precisa ser um dos códigos documentados do
+bloqueio (nunca um erro genérico/inesperado); se TEVE SUCESSO, prova que a execução foi
+genuína (STL não-vazio realmente gravado em disco, métricas e versões reais presentes) -- ou
+seja, o teste fica mais valioso em Windows (finalmente prova execução real) em vez de
+simplesmente pular a cobertura lá.
 """
 from __future__ import annotations
 
@@ -290,10 +303,12 @@ def test_dispatch_job_failure_path_marks_job_failed_not_fabricated_success(db_se
 
 
 @pytest.mark.skipif(shutil.which("dotnet") is None, reason="Requer .NET SDK instalado (dotnet no PATH).")
-def test_dispatch_job_real_worker_fails_in_blocked_environment(db_session, tmp_path):
-    """Prova automatizada e repetível do bloqueio real do PicoGK em linux-x64 (ADR-0007):
-    invoca o DotnetPicoGkWorkerClient de verdade contra o binário REAL compilado de
-    apps/geometry-worker -- não um test double."""
+def test_dispatch_job_real_worker_reflects_environment_honestly(db_session, tmp_path):
+    """Invoca o DotnetPicoGkWorkerClient de verdade contra o binário REAL compilado de
+    apps/geometry-worker -- não um test double. Multiplataforma por construção (ver docstring
+    do módulo): não assume de antemão se o PicoGK está bloqueado (Linux, ADR-0007) ou
+    disponível (Windows real) -- prova a consequência correta para QUALQUER um dos dois
+    desfechos, em vez de hardcodar um deles."""
     user = create_researcher(db_session, email="orch6@biomatcad.example")
     project, recipe = _setup_project_and_recipe(db_session, user)
     _, job, _ = create_design_run_and_job(
@@ -319,9 +334,36 @@ def test_dispatch_job_real_worker_fails_in_blocked_environment(db_session, tmp_p
         repo_root=REPO_ROOT,
     )
 
-    assert result_job.status == JobStatus.FAILED
-    assert result_job.error_code in (
-        "WORKER_RUNTIME_UNAVAILABLE",
-        "WORKER_BINARY_NOT_BUILT",
-        "DOTNET_RUNTIME_NOT_FOUND",
+    assert result_job.status in (JobStatus.FAILED, JobStatus.SUCCEEDED), (
+        f"desfecho inesperado: {result_job.status!r} (esperado FAILED com um error_code "
+        "documentado do bloqueio do PicoGK, OU SUCCEEDED com evidência real de execução)"
     )
+
+    if result_job.status == JobStatus.FAILED:
+        # Ambiente onde o PicoGK está genuinamente bloqueado (ex.: este sandbox Linux,
+        # ADR-0007) -- o error_code precisa ser um dos códigos DOCUMENTADOS do bloqueio, nunca
+        # um erro genérico/inesperado (isso continuaria a pegar uma regressão real).
+        assert result_job.error_code in (
+            "WORKER_RUNTIME_UNAVAILABLE",
+            "WORKER_BINARY_NOT_BUILT",
+            "DOTNET_RUNTIME_NOT_FOUND",
+        )
+    else:
+        # Ambiente onde o PicoGK real funciona (ex.: Windows do usuário) -- prova que o
+        # sucesso é GENUÍNO, não apenas um status bem-sucedido não verificado: STL real e
+        # não-trivial gravado no storage, métricas e versões reais presentes.
+        from biomatcad_api.models.artifact import Artifact, ArtifactKind
+
+        stl_artifact = (
+            db_session.query(Artifact)
+            .filter(Artifact.geometry_job_id == result_job.id, Artifact.kind == ArtifactKind.STL)
+            .first()
+        )
+        assert stl_artifact is not None, "job SUCCEEDED mas nenhum Artifact STL foi persistido"
+        assert stl_artifact.size_bytes > 0
+        stl_bytes = storage.get(stl_artifact.storage_key)
+        assert len(stl_bytes) == stl_artifact.size_bytes
+        assert result_job.metrics is not None
+        assert result_job.worker_version is not None
+        assert result_job.dotnet_version is not None
+        assert result_job.picogk_version is not None

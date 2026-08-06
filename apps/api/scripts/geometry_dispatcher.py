@@ -336,7 +336,16 @@ def main() -> None:
     args = parser.parse_args()
 
     dispatcher_id = _make_dispatcher_id()
-    print(f"Dispatcher ID: {dispatcher_id}")
+    # flush=True (correção real, auditoria da rodada Voronoi/execução Windows
+    # 20260806-112714): quando stdout é redirecionado para um pipe (subprocess.Popen(...,
+    # stdout=subprocess.PIPE), caso de verify_full_pipeline_sha256.py), o Python usa buffer de
+    # BLOCO por padrão, não de linha -- se este processo for morto (kill/TerminateProcess)
+    # antes de sair normalmente, qualquer print() sem flush=True explícito nunca chega ao pipe,
+    # mesmo que a linha já tivesse sido "impressa" do ponto de vista do código. Isso apagava
+    # justamente o diagnóstico ("Dispatcher ID: ...") que provaria até onde o processo chegou
+    # antes de travar/ser morto -- log_event() já usava flush=True (linha correspondente
+    # abaixo), só faltava aqui.
+    print(f"Dispatcher ID: {dispatcher_id}", flush=True)
 
     if args.once:
         # Modo usado por scripts/verify_full_pipeline_sha256.py e por operadores que querem
@@ -344,7 +353,7 @@ def main() -> None:
         # 2.1.1, sem log estruturado nem status file (chamada curta, sem necessidade de
         # observabilidade contínua).
         n = process_queued_jobs(limit=args.limit, dispatcher_id=dispatcher_id)
-        print(f"Processados {n} job(s).")
+        print(f"Processados {n} job(s).", flush=True)
         return
 
     settings = get_settings()

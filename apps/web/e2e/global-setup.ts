@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -22,18 +23,48 @@ export function currentModuleDir(moduleUrl: string): string {
 
 const currentDir = currentModuleDir(import.meta.url);
 
-// Seleção do interpretador Python, multiplataforma e testável isoladamente:
-// - E2E_PYTHON_BIN é sempre respeitado quando definido (permite qualquer override explícito,
-//   inclusive um caminho completo para um venv específico).
-// - No Windows, o instalador oficial do Python normalmente só registra o comando "python" (o
-//   launcher py.exe/python.exe); "python3" tipicamente não existe no PATH do Windows.
-// - Em Linux/macOS, "python3" é o nome convencional e mais confiável (muitas distros não têm
-//   mais "python" sem sufixo).
+export class MissingE2EPythonBinError extends Error {
+  constructor(invalidPath?: string) {
+    super(
+      invalidPath
+        ? `E2E_PYTHON_BIN aponta para um caminho que não existe: '${invalidPath}'. Defina ` +
+          "E2E_PYTHON_BIN com o caminho real do interprete do virtualenv do backend " +
+          "(ex.: apps/api/.venv/Scripts/python.exe no Windows, apps/api/.venv/bin/python em " +
+          "Linux/macOS)."
+        : "E2E_PYTHON_BIN não foi definida. O E2E Playwright depende de bibliotecas do " +
+          "backend (psycopg, sqlalchemy, etc.) instaladas apenas no virtualenv do projeto -- " +
+          "um 'python'/'python3' genérico do PATH do sistema quase certamente NÃO as tem " +
+          "(bug real observado na validação Windows de 2026-08-06: " +
+          "'ModuleNotFoundError: No module named psycopg' ao cair silenciosamente para o " +
+          "Python global). Defina E2E_PYTHON_BIN explicitamente antes de rodar " +
+          "'npm run test:e2e', apontando para o interpretador do venv -- por exemplo " +
+          "(Windows): apps\\api\\.venv\\Scripts\\python.exe " +
+          "(Linux/macOS): apps/api/.venv/bin/python"
+    );
+    this.name = "MissingE2EPythonBinError";
+  }
+}
+
+// Seleção do interpretador Python -- correção real (rodada Voronoi, auditoria da execução
+// Windows 20260806-112714): a versão anterior desta função caía silenciosamente para
+// "python"/"python3" do PATH do sistema quando E2E_PYTHON_BIN não estava definida -- na prática
+// isso executou o Python GLOBAL do Windows (sem as dependências do backend instaladas),
+// causando "ModuleNotFoundError: No module named 'psycopg'" bem no meio do seed do E2E. Um
+// interpretador genérico do PATH nunca é garantidamente o mesmo ambiente do virtualenv do
+// projeto -- por isso E2E_PYTHON_BIN agora é OBRIGATÓRIA, com uma mensagem de erro clara e
+// acionável em vez de uma falha tardia e confusa dentro de um subprocesso.
 export function resolvePythonBin(
   env: NodeJS.ProcessEnv = process.env,
-  platform: NodeJS.Platform = process.platform
+  existsSync: (p: string) => boolean = fs.existsSync
 ): string {
-  return env.E2E_PYTHON_BIN ?? (platform === "win32" ? "python" : "python3");
+  const bin = env.E2E_PYTHON_BIN;
+  if (!bin) {
+    throw new MissingE2EPythonBinError();
+  }
+  if (!existsSync(bin)) {
+    throw new MissingE2EPythonBinError(bin);
+  }
+  return bin;
 }
 
 export default async function globalSetup(): Promise<void> {

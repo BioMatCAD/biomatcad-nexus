@@ -67,6 +67,46 @@ ao mais novo): `e07a5e2`, `347289c`, `6790938`, `d09a616`, `64d243b`, `3649550`,
    quando executadas lado a lado com as novas golden recipes Voronoi no mesmo ambiente Windows
    (regressão real, não apenas testes unitários).
 
+### Tentativa real de validação Windows (20260806-112714) -- INCONCLUSIVA, causa raiz auditada e corrigida
+
+O usuário rodou `Run-VoronoiWindowsValidation.ps1` de verdade no Windows (com PicoGK real
+disponível). Resultado literal: `block-voronoi-preview-v1` excedeu o timeout (`WORKER_TIMEOUT`)
+nas duas tentativas, e TODA invocação seguinte do dispatcher falhou em cascata (exit_code=1,
+sem produzir nenhum STL) -- inclusive as 3 golden recipes Gyroid de controle, já aprovadas em
+rodadas anteriores. **Isso não é uma regressão do Gyroid**: a causa raiz auditada (ver
+`TEST_EVIDENCE.md`, seção 20) foi um defeito de orquestração/timeout no roteiro de validação
+(um processo `dotnet.exe` órfão deixado por uma condição de corrida no script de gate), não uma
+mudança na matemática/worker Gyroid.
+
+Causa mais provável do `WORKER_TIMEOUT` em si (auditoria de código, sem poder reexecutar PicoGK
+real neste sandbox para confirmar por instrumentação direta): a calibração de porosidade
+fechada sobre malha real, reaproveitada do Gyroid, faz até 12 iterações de voxelização+malha
+completas -- para Voronoi, cada avaliação por voxel é O(arestas+nós) sem estrutura de
+aceleração espacial (limitação já documentada no próprio código como risco assumido), ~78x mais
+cara que a avaliação O(1) do Gyroid nesta receita específica. **Não confirmado por medição real
+de tempo no Windows** -- nenhum timeout de golden recipe foi alterado sem essa prova, por
+instrução explícita.
+
+Correções aplicadas (código de orquestração, nunca a ciência Gyroid/Voronoi em si):
+`worker_client.py` (confirmação real de encerramento de árvore de processos + preservação de
+stdout/stderr no erro persistido), `geometry_dispatcher.py` (flush=True nos prints de
+diagnóstico), `verify_full_pipeline_sha256.py` (margem de timeout sempre maior que o orçamento
+interno do worker + kill de árvore como defesa em profundidade),
+`Run-VoronoiWindowsValidation.ps1` (isolamento real entre receitas via detecção/limpeza de
+processos órfãos, `E2E_PYTHON_BIN` definida explicitamente, duração registrada por execução),
+novo `Run-VoronoiWindowsValidation-Staged.ps1` (piloto de 2 receitas antes da matriz completa),
+`global-setup.ts` (E2E_PYTHON_BIN agora obrigatória, nunca mais cai para o Python global),
+2 testes backend corrigidos (premissas válidas só em Linux, ver `TEST_EVIDENCE.md` seção 20),
+11 testes novos de regressão. Suítes completas re-executadas neste sandbox após as correções:
+99 C# (sem regressão), 206 pytest passed + 2 failed pré-existentes (mesmas de sempre) + 1
+skipped, 119 vitest passed.
+
+**Veredito desta rodada de correção: NÃO declara Voronoi aprovado nem reprovado
+cientificamente** -- nenhuma das 6 golden recipes produziu um STL real na rodada
+20260806-112714, e o roteiro corrigido ainda não foi executado de novo no Windows. Ver
+`TEST_EVIDENCE.md`, seção 20, para o registro completo e honesto do que essa rodada demonstrou
+e do que não pôde demonstrar.
+
 ## Incremento 2.2 Alpha Pesquisa — resumo (branch `incremento-2.2-alpha-pesquisa`)
 
 Escopo desta rodada: observabilidade real + integração à GUI, GUI completa de pesquisa (retry,

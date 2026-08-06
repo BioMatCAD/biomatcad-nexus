@@ -2,12 +2,19 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { currentModuleDir, resolvePythonBin } from "../e2e/global-setup";
+import { MissingE2EPythonBinError, currentModuleDir, resolvePythonBin } from "../e2e/global-setup";
 
-// Guarda de regressão para o bug real reportado por execução no Windows:
-// "ReferenceError: __dirname is not defined" no global-setup.ts do E2E Playwright, e a escolha
-// hardcoded de "python3" (que não existe por padrão no PATH do Windows). Ver
-// e2e/global-setup.ts e apps/web/e2e/README.md para o relato completo.
+// Guarda de regressão para dois bugs reais reportados por execução no Windows:
+// 1. "ReferenceError: __dirname is not defined" no global-setup.ts do E2E Playwright.
+// 2. (rodada Voronoi, validação Windows 20260806-112714) resolvePythonBin caía
+//    silenciosamente para "python" (o Python GLOBAL do Windows, sem as dependências do
+//    backend) quando E2E_PYTHON_BIN não estava definida -- causou
+//    "ModuleNotFoundError: No module named 'psycopg'" no meio do seed do E2E, porque o
+//    Python global não tem o virtualenv do projeto instalado. Corrigido para EXIGIR
+//    E2E_PYTHON_BIN explicitamente, com um erro claro e acionável em vez de uma falha tardia
+//    e confusa dentro de um subprocesso.
+//
+// Ver e2e/global-setup.ts e apps/web/e2e/README.md para o relato completo.
 //
 // Nota: este arquivo fica em apps/web/tests/ (não em apps/web/e2e/) de propósito -- o vitest.
 // config exclui explicitamente "e2e/**" da coleta, pois aquele diretório contém specs do
@@ -15,32 +22,41 @@ import { currentModuleDir, resolvePythonBin } from "../e2e/global-setup";
 // teste importa o módulo de dentro de e2e/ normalmente; só o ARQUIVO DE TESTE precisa morar
 // fora da pasta excluída.
 
-describe("e2e/global-setup.ts -- resolvePythonBin (seleção multiplataforma do interpretador Python)", () => {
-  it("usa E2E_PYTHON_BIN quando definido, em qualquer plataforma", () => {
-    expect(resolvePythonBin({ E2E_PYTHON_BIN: "/custom/venv/bin/python" }, "win32")).toBe(
-      "/custom/venv/bin/python"
-    );
-    expect(resolvePythonBin({ E2E_PYTHON_BIN: "/custom/venv/bin/python" }, "linux")).toBe(
-      "/custom/venv/bin/python"
-    );
-    expect(resolvePythonBin({ E2E_PYTHON_BIN: "/custom/venv/bin/python" }, "darwin")).toBe(
+describe("e2e/global-setup.ts -- resolvePythonBin (exige E2E_PYTHON_BIN explicitamente)", () => {
+  it("usa E2E_PYTHON_BIN quando definida e o caminho existe", () => {
+    const existsSync = (p: string) => p === "/custom/venv/bin/python";
+    expect(resolvePythonBin({ E2E_PYTHON_BIN: "/custom/venv/bin/python" }, existsSync)).toBe(
       "/custom/venv/bin/python"
     );
   });
 
-  it("usa 'python' no Windows quando E2E_PYTHON_BIN não está definido", () => {
-    expect(resolvePythonBin({}, "win32")).toBe("python");
+  it("lança MissingE2EPythonBinError quando E2E_PYTHON_BIN não está definida", () => {
+    expect(() => resolvePythonBin({}, () => true)).toThrow(MissingE2EPythonBinError);
   });
 
-  it("usa 'python3' em Linux/macOS quando E2E_PYTHON_BIN não está definido", () => {
-    expect(resolvePythonBin({}, "linux")).toBe("python3");
-    expect(resolvePythonBin({}, "darwin")).toBe("python3");
+  it("a mensagem de erro sem E2E_PYTHON_BIN é clara e acionável (menciona o venv, não apenas 'defina a variável')", () => {
+    try {
+      resolvePythonBin({}, () => true);
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(MissingE2EPythonBinError);
+      expect((err as Error).message).toContain("E2E_PYTHON_BIN");
+      expect((err as Error).message).toContain(".venv");
+      expect((err as Error).message).toContain("psycopg");
+    }
   });
 
-  it("nunca retorna 'python3' no Windows nem 'python' (sem override) fora do Windows", () => {
-    expect(resolvePythonBin({}, "win32")).not.toBe("python3");
-    expect(resolvePythonBin({}, "linux")).not.toBe("python");
-    expect(resolvePythonBin({}, "darwin")).not.toBe("python");
+  it("lança MissingE2EPythonBinError quando E2E_PYTHON_BIN aponta para um caminho inexistente", () => {
+    const existsSync = () => false;
+    expect(() =>
+      resolvePythonBin({ E2E_PYTHON_BIN: "/caminho/que/nao/existe/python" }, existsSync)
+    ).toThrow(MissingE2EPythonBinError);
+  });
+
+  it("nunca cai silenciosamente para 'python'/'python3' do PATH do sistema", () => {
+    // Regressão direta do bug real: antes desta correção, {} (env vazio) retornava "python"
+    // (Windows) ou "python3" (Linux/macOS) sem lançar nada.
+    expect(() => resolvePythonBin({}, () => true)).toThrow();
   });
 });
 
@@ -52,7 +68,7 @@ describe("e2e/global-setup.ts -- currentModuleDir (substituto de __dirname compa
   });
 });
 
-describe("e2e/global-setup.ts -- guarda textual contra regressão das duas incompatibilidades reais", () => {
+describe("e2e/global-setup.ts -- guarda textual contra regressão das incompatibilidades reais", () => {
   const testFileDir = path.dirname(fileURLToPath(import.meta.url));
   const sourcePath = path.resolve(testFileDir, "../e2e/global-setup.ts");
   const source = fs.readFileSync(sourcePath, "utf-8");
@@ -68,17 +84,16 @@ describe("e2e/global-setup.ts -- guarda textual contra regressão das duas incom
   it("deriva o diretório atual via import.meta.url + fileURLToPath", () => {
     expect(source).toContain("fileURLToPath");
     expect(source).toContain("import.meta.url");
-    // A chamada real, testável (currentModuleDir), deve invocar fileURLToPath sobre o
-    // parâmetro recebido -- e o ponto de uso em produção deve passar import.meta.url a ela.
     expect(source).toMatch(/fileURLToPath\(\s*moduleUrl\s*\)/);
     expect(source).toMatch(/currentModuleDir\(\s*import\.meta\.url\s*\)/);
   });
 
-  it("preserva E2E_PYTHON_BIN e diferencia win32 de outras plataformas para o binário Python", () => {
+  it("exige E2E_PYTHON_BIN explicitamente -- nunca um fallback silencioso para 'python'/'python3'", () => {
     expect(source).toContain("E2E_PYTHON_BIN");
-    expect(source).toMatch(/platform\s*===\s*["']win32["']/);
-    // Guarda específica contra a regressão anterior: um "python3" hardcoded sem condicional de
-    // plataforma nem fallback para "python" no Windows.
-    expect(source).not.toMatch(/\?\?\s*["']python3["']\s*[;,)]/);
+    expect(source).toContain("MissingE2EPythonBinError");
+    // Guarda específica contra a regressão real desta rodada: um fallback incondicional tipo
+    // `?? "python3"` ou `?? (platform === "win32" ? "python" : "python3")`.
+    expect(source).not.toMatch(/\?\?\s*["']python3?["']/);
+    expect(source).not.toMatch(/\?\?\s*\(\s*platform/);
   });
 });

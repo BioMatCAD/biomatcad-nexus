@@ -1324,6 +1324,164 @@ de empacotamento deste documento).
 | E2E Playwright | não executável neste sandbox (limitação pré-existente e documentada) |
 | Execução real do PicoGK (Voronoi ou Gyroid) neste sandbox | **NÃO ocorreu** -- nenhuma declaração em contrário é feita em nenhum commit ou documento desta rodada |
 
+## 20. Validação Windows real 20260806-112714 -- INCONCLUSIVA (timeout real + defeitos de isolamento no roteiro), causa raiz auditada e corrigida (2026-08-06)
+
+Esta seção registra honestamente uma execução REAL do roteiro Windows (`Run-VoronoiWindowsValidation.ps1`, commit `3c07b9c`) feita pelo usuário no Windows, com PicoGK real disponível --
+diretório de evidência `C:\biomatcad-runs\voronoi-validation-20260806-112714\` (relatórios
+`CONSOLIDATED_REPORT.md`/`.json`, logs de cada etapa, `preflight.json`, `api-runtime.log`,
+`api-pytest.log`, `e2e-output.log`, e um `_gate-output.txt`/`_report.json` por receita/execução).
+
+**Veredito literal desta rodada, sem suavização: REPROVADA/INCONCLUSIVA.** Nenhuma das 6
+golden recipes (3 Voronoi + 3 Gyroid de controle) produziu um STL real nesta execução. Isso
+inclui as 3 golden recipes Gyroid, que já haviam sido aprovadas em rodadas anteriores (Seção
+16) -- **isso NÃO é uma regressão científica do Gyroid**: a causa raiz (auditada abaixo) é um
+defeito de orquestração/timeout no roteiro de validação, não uma mudança na matemática ou no
+worker Gyroid, que permaneceu intocado nesta rodada de correção (restrição explícita: nenhum
+parâmetro/timeout de golden recipe foi alterado antes de provar a causa).
+
+### O que esta rodada REALMENTE demonstrou
+
+| Suíte | Resultado real |
+|---|---|
+| Worker C# (`dotnet build` + `dotnet test`) | OK -- 99/99 testes, build limpo |
+| Frontend (`tsc`/`eslint`/`vitest`/`build`/`build:pages`) | OK -- 118/118 (119 após a correção desta seção) |
+| Backend (`pytest`) | 195 passed, 2 failed, 1 skipped -- as 2 falhas têm premissas de teste inválidas em Windows (não um bug de produto), auditadas e corrigidas nesta seção |
+| `block-voronoi-preview-v1` run1 e run2 | **FALHA real**: job chegou a `running` e depois `failed` com `WORKER_TIMEOUT` (30s + margem de 30s) nas duas tentativas |
+| Todas as invocações SEGUINTES do dispatcher (block-voronoi-final-v1, cylinder-voronoi-preview-v1, e as 3 golden recipes Gyroid, todas run1 e run2) | **FALHA real**: `geometry_dispatcher.py --once -> exit_code=1`, com **stdout vazio** em todos os casos -- nenhum STL produzido, determinismo/auditoria independente inconclusivos por ausência de artefato |
+| E2E Playwright | **FALHA real**: `ModuleNotFoundError: No module named 'psycopg'` -- o `global-setup.ts` usou o Python GLOBAL do Windows (sem as dependências do backend), não o venv do projeto |
+
+### Causa raiz dos dois `WORKER_TIMEOUT` (auditoria de código; execução real do PicoGK não pôde ser reexecutada neste sandbox Linux para confirmar por instrumentação direta)
+
+A receita `block-voronoi-preview-v1` (12 sítios, `target_porosity_pct: 65`) aciona a calibração
+de porosidade fechada contra a malha real (`GyroidMath.CalibrateByMonotonicBisection`, até 12
+iterações) -- cada iteração revoxeliza e remalha o domínio inteiro do zero. Medido neste
+sandbox (sem PicoGK, só a matemática pura, testável): esta receita produz **42 arestas + 36 nós
+usados = 78 primitivos** avaliados por voxel em `VoronoiStrutsImplicit.fSignedDistance`, contra
+~15.625 voxels (estimativa de grade densa) -- **sem nenhuma estrutura de aceleração espacial**,
+uma limitação já documentada explicitamente no próprio código (`VoronoiScaffoldBuilder.cs`,
+cabeçalho do arquivo) como um risco assumido e "nunca comprovado nesta rodada" por não ser
+possível executar PicoGK real no sandbox Linux. Para o Gyroid, a mesma calibração de até 12
+iterações é barata (avaliação O(1) por voxel, fórmula fechada); para Voronoi, cada iteração é
+~78x mais cara nesta receita específica, e a calibração pode multiplicar isso por até 12x. Esta
+é a explicação mais provável, e mais bem suportada pela evidência disponível, para o
+`WORKER_TIMEOUT` real -- mas **não foi confirmada por instrumentação direta de tempo real no
+Windows** (o próprio `stdout`/`stderr` do worker no momento do timeout era descartado antes desta
+correção, ver abaixo). Por instrução explícita ("não simplesmente aumentar o limite, sem provar
+a causa"), **nenhum timeout de golden recipe foi alterado** nesta correção.
+
+### Causa raiz da cascata de `exit_code=1` em TODAS as invocações seguintes (auditada e corrigida por código)
+
+Duas falhas reais, encontradas por auditoria de código e confirmadas pelos testes novos desta
+seção:
+
+1. **`worker_client.py` descartava o diagnóstico do processo morto.** `_kill_process_tree`
+   nunca verificava se o processo (e seus descendentes) realmente desapareceram após
+   `terminate()`/`kill()` -- apenas assumia sucesso. E o `stdout`/`stderr` do worker no momento
+   do timeout era anexado à exceção mas nunca lido por `_mark_failed` -- só a mensagem genérica
+   fixa chegava ao banco (`job.error_message`). Corrigido: `_kill_process_tree` agora **retorna
+   um booleano confirmado via `psutil.pid_exists`**, e a mensagem de erro sempre inclui esse
+   resultado mais um trecho final de `stdout`/`stderr` -- provado por 6 testes novos
+   (`test_worker_timeout_recovery.py`), incluindo um teste que mata um processo REAL com um
+   neto real (spawnado por ele) e confirma que ambos desaparecem.
+2. **`verify_full_pipeline_sha256.py` tinha uma margem de timeout insuficiente para receitas
+   "pesadas".** O timeout externo padrão do script (`--timeout-seconds`, 300s) podia ser MENOR
+   OU IGUAL ao orçamento interno do worker para receitas com `max_duration_seconds=300` (ex.:
+   `block-voronoi-final-v1`, modo final: orçamento interno = 300+30=330s). Nesse caso, o
+   PRÓPRIO script de gate podia matar seu processo filho (o dispatcher Python) via
+   `Popen.kill()` — e um `kill()` comum **não mata o neto** (o `dotnet.exe` real do worker),
+   deixando-o **órfão**, consumindo recursos pelo resto da sessão. Esta é a explicação mais
+   provável para a cascata observada em TODAS as invocações seguintes, inclusive nas golden
+   recipes Gyroid de controle (que nunca tiveram problema próprio -- foram vítimas do processo
+   órfão de uma receita anterior). Corrigido:
+   `compute_effective_gate_timeout_seconds()` agora calcula um timeout efetivo SEMPRE maior
+   que o orçamento interno do worker para a receita específica, com margem de segurança real; e
+   como defesa em profundidade, se o script AINDA assim precisar matar o dispatcher, agora mata
+   a ÁRVORE INTEIRA de processos (não só o processo Python direto) -- provado por 5 testes
+   novos (`test_verify_full_pipeline_timeout_margin.py`).
+
+Além disso, `geometry_dispatcher.py` tinha um bug de buffering real: os `print()` de
+diagnóstico (`"Dispatcher ID: ..."`, `"Processados N job(s)."`) não usavam `flush=True` --
+quando o processo é morto antes de sair normalmente (stdout redirecionado para um pipe usa
+buffer de bloco, não de linha), esse diagnóstico nunca chegava ao pipe, mesmo tendo sido
+"impresso" do ponto de vista do código. Corrigido (`flush=True` explícito).
+
+### Correções aplicadas nesta seção (commit desta rodada, ver lista de commits no relatório final)
+
+- `apps/api/src/biomatcad_api/services/worker_client.py`: `_kill_process_tree` retorna
+  confirmação real de encerramento; mensagens de erro preservam `stdout`/`stderr` truncado +
+  estado de encerramento da árvore.
+- `apps/api/scripts/geometry_dispatcher.py`: `flush=True` nos prints de diagnóstico do modo
+  `--once`.
+- `apps/api/scripts/verify_full_pipeline_sha256.py`: `compute_effective_gate_timeout_seconds()`
+  (margem de segurança real, nunca igual ao orçamento interno do worker) + kill de árvore de
+  processos como defesa em profundidade.
+- `apps/api/tests/test_worker_timeout_recovery.py` (novo, 6 testes) e
+  `apps/api/tests/test_verify_full_pipeline_timeout_margin.py` (novo, 5 testes): recuperação
+  real após `WORKER_TIMEOUT`, segunda execução do dispatcher após um timeout, encerramento real
+  de árvore de processos (pai + filho REAIS, via subprocess), preservação do diagnóstico de
+  erro, cálculo correto da margem de timeout.
+- `apps/web/e2e/global-setup.ts`: `resolvePythonBin` agora **exige `E2E_PYTHON_BIN`
+  explicitamente** (lança `MissingE2EPythonBinError` com mensagem clara e acionável) em vez de
+  cair silenciosamente para `python`/`python3` do PATH do sistema -- causa direta do
+  `ModuleNotFoundError: No module named 'psycopg'` observado nesta rodada. Teste atualizado
+  (`apps/web/tests/e2eGlobalSetup.test.ts`, 9 testes).
+- `apps/api/tests/test_observability.py::test_worker_unavailable_quando_binario_nao_compilado`:
+  corrigido para usar um `repo_root` isolado (`tmp_path`, sem o binário compilado) em vez do
+  checkout ambiente real -- a versão anterior assumia "o binário nunca existe" (premissa válida
+  só neste sandbox Linux) e falhava de verdade no Windows real (onde o binário FOI compilado
+  com sucesso antes da validação).
+- `apps/api/tests/test_geometry_job_orchestration.py::test_dispatch_job_real_worker_reflects_environment_honestly`
+  (renomeado de `..._fails_in_blocked_environment`): aceita os dois desfechos reais possíveis
+  (`FAILED` com um dos error_codes documentados do bloqueio PicoGK, OU `SUCCEEDED` com prova
+  real de execução -- STL não-vazio gravado, métricas/versões reais) em vez de assumir sempre
+  `FAILED` -- a asserção fixa anterior só era válida no sandbox Linux (ADR-0007) e falhava de
+  verdade em Windows real (onde o job pode legitimamente ter sucesso).
+- `scripts/Run-VoronoiWindowsValidation.ps1`: isolamento real entre receitas/execuções --
+  `Clear-StrayWorkerProcesses` detecta e encerra qualquer `dotnet.exe` órfão referenciando
+  `BioMatCadGeometryWorker.dll` ANTES e DEPOIS de cada execução de gate, registrando o achado no
+  relatório consolidado (nunca silenciosamente); `E2E_PYTHON_BIN` agora é definida
+  explicitamente para o venv real antes de rodar o E2E; duração em segundos de cada execução de
+  gate agora é registrada no relatório consolidado (para permitir confirmar/refutar a hipótese
+  de causa raiz numa próxima execução real).
+- `scripts/Run-VoronoiWindowsValidation-Staged.ps1` (novo): roteiro estagiado -- roda primeiro
+  apenas um piloto (`block-voronoi-preview-v1` + `preview-gyroid-low-res-v1` como controle) e
+  só prossegue para a matriz completa (6 receitas x 2 execuções) se AMBAS as receitas do piloto
+  tiverem sucesso em `run1` E `run2`. Não duplica lógica -- invoca
+  `Run-VoronoiWindowsValidation.ps1` duas vezes (piloto e matriz completa), preservando um único
+  ponto de verdade para a lógica real do gate.
+
+### O que esta correção NÃO prova (honestamente)
+
+- **Não confirma que a hipótese de causa raiz do `WORKER_TIMEOUT` (custo O(voxels × primitivos)
+  sem aceleração espacial, multiplicado pela calibração) está correta** -- é a explicação mais
+  bem suportada pela evidência disponível (contagens reais de arestas/nós/voxels, medidas neste
+  sandbox sem PicoGK), mas nunca foi confirmada por instrumentação de tempo real contra PicoGK
+  real. A próxima execução real do roteiro corrigido (que agora registra a duração de cada
+  execução de gate) poderá confirmar ou refutar isso com dados reais.
+- **Não prova que as correções eliminam o `WORKER_TIMEOUT` em si** -- elas garantem que, SE ele
+  ocorrer de novo, (a) o diagnóstico completo (stdout/stderr/estado da árvore) é preservado, e
+  (b) ele não mais contamina as receitas seguintes. Se a causa raiz for de fato a falta de
+  estrutura de aceleração espacial, a receita `block-voronoi-preview-v1` pode continuar
+  excedendo o timeout até que essa otimização seja implementada -- uma mudança de engenharia
+  maior, fora do escopo desta correção pontual (que foi proibida de alterar timeouts/parâmetros
+  de golden recipes antes de provar a causa).
+- **Nenhuma das 6 golden recipes foi validada com sucesso nesta rodada** -- nenhum STL real,
+  nenhuma auditoria independente contra STL real, nenhum determinismo 2x confirmado. A
+  afirmação "Voronoi funciona" ou "Voronoi não funciona" cientificamente **não pode ser feita**
+  a partir desta rodada -- apenas que o PRIMEIRO teste real (`block-voronoi-preview-v1`) excedeu
+  o timeout, e que o ROTEIRO tinha defeitos reais de isolamento que impediram qualquer conclusão
+  válida sobre as demais 5 receitas.
+- **O worker C#/PicoGK e o schema/tesselação Voronoi em si não foram alterados** nesta correção
+  -- toda a mudança ficou nas camadas de orquestração Python/PowerShell/TypeScript em volta.
+
+### Próximo passo real (não executado nesta correção)
+
+Rodar `Run-VoronoiWindowsValidation-Staged.ps1` no Windows do usuário (piloto primeiro) para
+obter, com as correções desta seção já em vigor: (a) o diagnóstico completo caso
+`block-voronoi-preview-v1` volte a exceder o timeout (confirmando ou refutando a hipótese de
+causa raiz), e (b) a prova de que uma eventual nova falha do piloto não invalida mais a matriz
+completa. **Este roteiro real ainda não foi executado após esta correção.**
+
 ## O que esta evidência explicitamente NÃO cobre
 
 - **Consistência STL-vs-manifesto via fluxo completo API→dispatcher→worker PicoGK real→

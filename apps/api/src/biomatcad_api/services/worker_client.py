@@ -78,30 +78,59 @@ def _find_worker_dll(repo_root: Path) -> Path | None:
     return candidates[0] if candidates else None
 
 
-def _kill_process_tree(pid: int) -> None:
+def _kill_process_tree(pid: int, *, wait_timeout_seconds: float = 3.0) -> bool:
     """Encerra o processo `pid` e TODOS os seus descendentes (item 3/7: "encerramento de toda a
     árvore do processo"). Usa psutil (multiplataforma -- Linux e Windows) em vez de depender de
     semântica de grupo de processo específica de SO. Melhor esforço: processos que já
-    terminaram entre a listagem e o kill são ignorados (psutil.NoSuchProcess)."""
+    terminaram entre a listagem e o kill são ignorados (psutil.NoSuchProcess).
+
+    Correção real (rodada Voronoi, auditoria da execução Windows 20260806-112714): a versão
+    anterior desta função assumia silenciosamente que terminate()+kill() sempre funcionam e
+    NUNCA verificava se os processos de fato desapareceram -- combinado com o chamador
+    (execute(), abaixo) que também nunca checava esse retorno, isso significa que um processo
+    (ou um descendente nativo do PicoGK) que sobrevivesse ao kill por qualquer motivo real
+    (arquitetura Windows, handle gráfico/GPU não liberado a tempo, processo "zumbi") ficaria
+    rodando em segundo plano SEM que ninguém soubesse -- explicação mais provável, encontrada
+    nesta auditoria, para a cascata de falhas em toda invocação SUBSEQUENTE do dispatcher na
+    rodada 20260806-112714 (ver TEST_EVIDENCE.md). Agora retorna True somente se TODOS os PIDs
+    da árvore original (pai + descendentes) foram confirmados ausentes após o kill -- via
+    psutil.pid_exists, não apenas "o kill não levantou exceção".
+    """
     if psutil is None:
-        return
+        return False
     try:
         parent = psutil.Process(pid)
     except psutil.NoSuchProcess:
-        return
+        return True
     children = parent.children(recursive=True)
     procs = [*children, parent]
+    original_pids = [p.pid for p in procs]
     for p in procs:
         try:
             p.terminate()
         except psutil.NoSuchProcess:
             pass
-    _, alive = psutil.wait_procs(procs, timeout=3)
+    _, alive = psutil.wait_procs(procs, timeout=wait_timeout_seconds)
     for p in alive:
         try:
             p.kill()
         except psutil.NoSuchProcess:
             pass
+    if alive:
+        # Segunda espera curta pós-kill(): dá ao SO uma última chance real de liberar o
+        # processo antes de declararmos "não confirmado" (nunca assumimos sucesso sem checar).
+        psutil.wait_procs(alive, timeout=wait_timeout_seconds)
+    return all(not psutil.pid_exists(original_pid) for original_pid in original_pids)
+
+
+def _truncate_for_log(text: str, max_chars: int = 300) -> str:
+    """Corta uma string de diagnóstico (stdout/stderr) para um tamanho seguro de embutir em
+    error_message (limitado a 1000 caracteres em _mark_failed, ver geometry_job_service.py) --
+    preserva o TRECHO FINAL (mais relevante para diagnosticar onde o processo travou/morreu),
+    não o início."""
+    if len(text) <= max_chars:
+        return text
+    return f"...[truncado, {len(text) - max_chars} chars omitidos]...{text[-max_chars:]}"
 
 
 class DotnetPicoGkWorkerClient:
@@ -156,6 +185,7 @@ class DotnetPicoGkWorkerClient:
             on_process_started(proc.pid)
 
         outcome = "completed"
+        tree_confirmed_terminated: bool | None = None
         while True:
             try:
                 proc.wait(timeout=POLL_INTERVAL_SECONDS)
@@ -164,32 +194,60 @@ class DotnetPicoGkWorkerClient:
                 pass
             if cancel_check is not None and cancel_check():
                 outcome = "cancelled"
-                _kill_process_tree(proc.pid)
+                tree_confirmed_terminated = _kill_process_tree(proc.pid)
                 break
             if time.monotonic() > deadline:
                 outcome = "timeout"
-                _kill_process_tree(proc.pid)
+                tree_confirmed_terminated = _kill_process_tree(proc.pid)
                 break
 
         try:
             stdout, stderr = proc.communicate(timeout=10)
         except subprocess.TimeoutExpired:
             # Processo não drenou os pipes a tempo mesmo após kill -- melhor esforço, segue com
-            # o que já temos (normalmente vazio nesse caso extremo).
+            # o que já temos (normalmente vazio nesse caso extremo). Isso NÃO significa que o
+            # processo continua vivo -- tree_confirmed_terminated (acima) é quem prova isso.
             stdout, stderr = "", ""
+
+        # Diagnóstico preservado (correção real, auditoria 20260806-112714): stdout/stderr do
+        # worker e a confirmação (ou não) do encerramento da árvore de processos SEMPRE entram
+        # na mensagem da exceção -- _mark_failed (geometry_job_service.py) persiste esta
+        # mensagem inteira em job.error_message, então este diagnóstico agora sobrevive ao
+        # término do processo em vez de ser descartado silenciosamente (antes: só
+        # `details={"stdout":..., "stderr":...}` era anexado à exceção, mas _mark_failed nunca
+        # lia `details`, só `.message` -- o conteúdo nunca chegava a lugar nenhum persistido).
+        def _diagnostic_suffix() -> str:
+            tree_status = {
+                True: "árvore de processos CONFIRMADA encerrada",
+                False: "árvore de processos NÃO CONFIRMADA como encerrada -- possível processo órfão sobrevivente",
+                None: "encerramento da árvore não verificado",
+            }[tree_confirmed_terminated]
+            return (
+                f" [{tree_status}; stdout(fim)={_truncate_for_log(stdout)!r}; "
+                f"stderr(fim)={_truncate_for_log(stderr)!r}]"
+            )
 
         if outcome == "cancelled":
             raise WorkerExecutionError(
                 "WORKER_CANCELLED",
-                "Execução do worker interrompida por cancelamento solicitado pelo usuário.",
-                {"stdout": stdout, "stderr": stderr},
+                "Execução do worker interrompida por cancelamento solicitado pelo usuário."
+                + _diagnostic_suffix(),
+                {
+                    "stdout": stdout,
+                    "stderr": stderr,
+                    "process_tree_confirmed_terminated": tree_confirmed_terminated,
+                },
             )
         if outcome == "timeout":
             raise WorkerExecutionError(
                 "WORKER_TIMEOUT",
                 f"Worker excedeu o tempo limite ({max_duration_seconds}s + margem de "
-                f"{STARTUP_OVERHEAD_SECONDS}s) -- árvore de processos encerrada.",
-                {"stdout": stdout, "stderr": stderr},
+                f"{STARTUP_OVERHEAD_SECONDS}s)." + _diagnostic_suffix(),
+                {
+                    "stdout": stdout,
+                    "stderr": stderr,
+                    "process_tree_confirmed_terminated": tree_confirmed_terminated,
+                },
             )
 
         if proc.returncode != 0:

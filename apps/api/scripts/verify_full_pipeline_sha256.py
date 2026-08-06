@@ -71,6 +71,74 @@ except ImportError:  # pragma: no cover
     )
     sys.exit(2)
 
+try:
+    import psutil
+except ImportError:  # pragma: no cover -- mesma dependencia obrigatoria de worker_client.py
+    psutil = None  # type: ignore[assignment]
+
+# Correção real (auditoria da execução Windows 20260806-112714, rodada Voronoi): mantido em
+# sincronia manual com worker_client.STARTUP_OVERHEAD_SECONDS -- é a MESMA margem que o worker
+# usa para calcular seu próprio deadline interno (max_duration_seconds + este valor). Antes
+# desta correção, o --timeout-seconds default deste script (300.0s) podia ser MENOR OU IGUAL ao
+# deadline interno do worker para receitas com max_duration_seconds=300 (ex.:
+# block-voronoi-final-v1, modo final) -- nesse caso este script podia matar seu PRÓPRIO processo
+# filho (o dispatcher Python) via Popen.kill() ANTES do worker_client.py interno ter chance de
+# concluir seu próprio ciclo de timeout/kill -- e um Popen.kill() comum NÃO mata o neto
+# (o dotnet.exe real do PicoGK, que o dispatcher havia spawnado), deixando-o órfão e consumindo
+# recursos pelo resto da sessão. É a explicação mais provável (auditoria de código, sem poder
+# reexecutar PicoGK real neste sandbox) para a cascata de exit_code=1 observada em TODAS as
+# invocações seguintes daquela rodada, inclusive nas golden recipes Gyroid de controle.
+_WORKER_STARTUP_OVERHEAD_SECONDS_MIRROR = 30.0
+# Margem de segurança GENUÍNA além do orçamento interno do worker -- nunca igual, sempre maior,
+# para que o watchdog INTERNO do worker (worker_client.py) sempre tenha a chance de agir
+# primeiro. Este valor é sobre o ORQUESTRADOR (este script), não sobre a receita/golden recipe.
+_GATE_TIMEOUT_SAFETY_MARGIN_SECONDS = 60.0
+
+
+def compute_effective_gate_timeout_seconds(recipe_body: dict, requested_timeout_seconds: float) -> float:
+    """Calcula o timeout externo EFETIVO deste gate para uma receita especifica -- nunca menor
+    ou igual ao deadline interno do worker (max_duration_seconds + STARTUP_OVERHEAD_SECONDS,
+    mesma constante de worker_client.py, espelhada aqui) mais uma margem de seguranca real.
+    Extraida como funcao de nivel de modulo (Incremento 2.2, correcao pos-auditoria da execucao
+    Windows 20260806-112714) especificamente para ser testavel isoladamente, sem precisar
+    rodar o gate inteiro contra uma API real."""
+    recipe_max_duration_seconds = float(recipe_body.get("compute_limits", {}).get("max_duration_seconds", 300))
+    worker_internal_deadline_seconds = recipe_max_duration_seconds + _WORKER_STARTUP_OVERHEAD_SECONDS_MIRROR
+    return max(requested_timeout_seconds, worker_internal_deadline_seconds + _GATE_TIMEOUT_SAFETY_MARGIN_SECONDS)
+
+
+def _kill_process_tree_best_effort(pid: int) -> bool:
+    """Mesma lógica de worker_client._kill_process_tree, duplicada aqui deliberadamente (este
+    script roda como processo standalone, fora do pacote biomatcad_api, e não deve importar
+    código de produção só para reaproveitar uma função utilitária) -- encerra pid e TODOS os
+    descendentes, e CONFIRMA via psutil.pid_exists que a árvore realmente desapareceu, em vez de
+    assumir sucesso silenciosamente (o mesmo defeito corrigido em worker_client.py nesta
+    rodada). Usado como DEFESA EM PROFUNDIDADE: se este script precisar matar o dispatcher por
+    ele mesmo ter estourado o timeout (agora calculado com margem segura, ver acima -- deve ser
+    raro), mata a árvore inteira, não apenas o processo Python direto, evitando órfãos."""
+    if psutil is None:
+        return False
+    try:
+        parent = psutil.Process(pid)
+    except psutil.NoSuchProcess:
+        return True
+    procs = [*parent.children(recursive=True), parent]
+    original_pids = [p.pid for p in procs]
+    for p in procs:
+        try:
+            p.terminate()
+        except psutil.NoSuchProcess:
+            pass
+    _, alive = psutil.wait_procs(procs, timeout=3)
+    for p in alive:
+        try:
+            p.kill()
+        except psutil.NoSuchProcess:
+            pass
+    if alive:
+        psutil.wait_procs(alive, timeout=3)
+    return all(not psutil.pid_exists(original_pid) for original_pid in original_pids)
+
 API_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = API_DIR.parents[1]
 
@@ -192,6 +260,19 @@ def main() -> int:
         recipe_path = REPO_ROOT / "schemas" / "biomatcem" / "golden-recipes" / f"{args.recipe}.json"
         step("golden_recipe_encontrada", recipe_path.exists(), str(recipe_path))
         recipe_body = json.loads(recipe_path.read_text(encoding="utf-8"))
+
+        # Correção real (ver _WORKER_STARTUP_OVERHEAD_SECONDS_MIRROR acima): o timeout externo
+        # efetivo deste gate NUNCA pode ser menor ou igual ao deadline interno do worker para
+        # ESTA receita especificamente -- calculado, não copiado de um --timeout-seconds fixo
+        # que pode ter sido pensado para uma receita mais leve.
+        effective_timeout_seconds = compute_effective_gate_timeout_seconds(recipe_body, args.timeout_seconds)
+        if effective_timeout_seconds > args.timeout_seconds:
+            print(
+                f"[AVISO] --timeout-seconds={args.timeout_seconds}s pode ser menor que o "
+                f"orçamento interno do worker para '{args.recipe}' + margem de segurança -- "
+                f"usando {effective_timeout_seconds}s para este gate, para nunca matar o "
+                "dispatcher antes do watchdog interno do worker ter a chance de agir."
+            )
         recipe_resp = client.post(
             f"/api/v1/projects/{project['id']}/recipes",
             json={"name": f"Receita gate ({args.recipe})", "recipe_body": recipe_body},
@@ -233,7 +314,7 @@ def main() -> int:
         )
 
         observed_statuses = [initial_status]
-        deadline = time.monotonic() + args.timeout_seconds
+        deadline = time.monotonic() + effective_timeout_seconds
         job = None
         while time.monotonic() < deadline:
             job_resp = client.get(f"/api/v1/jobs/{job_id}", headers=headers)
@@ -244,16 +325,36 @@ def main() -> int:
                 break
             time.sleep(args.poll_interval_seconds)
 
+        dispatcher_killed_by_gate = False
+        dispatcher_tree_confirmed_terminated: bool | None = None
         try:
             dispatcher_stdout, _ = dispatcher_proc.communicate(timeout=30)
         except subprocess.TimeoutExpired:
-            dispatcher_proc.kill()
-            dispatcher_stdout, _ = dispatcher_proc.communicate()
+            # Isso NUNCA deveria acontecer com a margem de segurança calculada acima (o
+            # watchdog INTERNO do worker sempre estoura primeiro) -- se acontecer mesmo assim,
+            # é um sinal real de que o processo travou por outro motivo (não coberto pelo
+            # próprio timeout do worker). Mata a ÁRVORE INTEIRA (não só o processo Python
+            # direto) para nunca deixar o dotnet.exe/worker real órfão -- correção real desta
+            # rodada (ver _kill_process_tree_best_effort acima).
+            dispatcher_killed_by_gate = True
+            dispatcher_tree_confirmed_terminated = _kill_process_tree_best_effort(dispatcher_proc.pid)
+            try:
+                dispatcher_stdout, _ = dispatcher_proc.communicate(timeout=10)
+            except subprocess.TimeoutExpired:
+                dispatcher_stdout = ""
         print(dispatcher_stdout)
         step(
             "dispatcher_real_executado",
             dispatcher_proc.returncode == 0,
-            f"scripts/geometry_dispatcher.py --once -> exit_code={dispatcher_proc.returncode}",
+            (
+                f"scripts/geometry_dispatcher.py --once -> exit_code={dispatcher_proc.returncode}"
+                + (
+                    f" [GATE PRECISOU MATAR O DISPATCHER apos {effective_timeout_seconds}s -- "
+                    f"arvore de processos {'CONFIRMADA encerrada' if dispatcher_tree_confirmed_terminated else 'NAO CONFIRMADA como encerrada (possivel processo orfao)'}]"
+                    if dispatcher_killed_by_gate
+                    else ""
+                )
+            ),
         )
 
         # Reconsulta final para garantir o estado mais atual pós-dispatcher.

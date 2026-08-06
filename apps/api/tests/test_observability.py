@@ -163,9 +163,19 @@ def test_dispatcher_unknown_quando_status_file_corrompido(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_worker_unavailable_quando_binario_nao_compilado(db_session):
-    # repo_root real -- o binário genuinamente não existe neste sandbox (bloqueio conhecido).
-    result = check_worker(db_session, REPO_ROOT)
+def test_worker_unavailable_quando_binario_nao_compilado(db_session, tmp_path):
+    # Correção real (auditoria da rodada Voronoi / execução Windows 20260806-112714): a versão
+    # anterior deste teste usava REPO_ROOT (o checkout real ambiente) assumindo que o binário
+    # "genuinamente nunca existe" -- premissa válida SÓ neste sandbox Linux (onde o runtime
+    # nativo do PicoGK é bloqueado, ADR-0007, então ninguém roda 'dotnet build' de verdade
+    # aqui). Em um ambiente Windows real, onde o worker FOI compilado com sucesso antes da
+    # validação (ver worker_dotnet_build no roteiro), REPO_ROOT tem o binário presente de
+    # verdade -- e o teste falhava ('assert True is False') não por um bug no produto, mas por
+    # uma premissa de ambiente equivocada no próprio teste. Corrigido para usar um repo_root
+    # ISOLADO (tmp_path, sem apps/geometry-worker/bin/) -- 'binário não compilado' passa a ser
+    # uma condição genuinamente determinística e multiplataforma, independente de o checkout
+    # ambiente ter sido buildado ou não.
+    result = check_worker(db_session, tmp_path)
     assert result.binary_found is False
     assert result.state == "unavailable"
 
