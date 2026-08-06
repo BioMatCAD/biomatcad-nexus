@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.0.0",
+  "domain": {
+    "shape": "block",
+    "dimensions_mm": {
+      "kind": "block",
+      "x_mm": 8,
+      "y_mm": 8,
+      "z_mm": 8
+    }
+  },
+  "topology": {
+    "kind": "voronoi_cell_edges_v1",
+    "site_count": 16,
+    "distribution": "jittered_grid",
+    "strut_radius_mm": 0.3,
+    "node_smoothing": 0.4,
+    "node_radius_factor": 1.25,
+    "boundary_behavior": "clip",
+    "target_porosity_pct": 70
+  },
+  "resolution": {
+    "voxel_size_mm": 0.15
+  },
+  "mode": "final",
+  "seed": 99,
+  "compute_limits": {
+    "max_duration_seconds": 300,
+    "max_memory_mb": 2048,
+    "max_voxel_count": 5000000
+  },
+  "output_formats": [
+    "stl"
+  ]
+}

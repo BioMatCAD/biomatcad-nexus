@@ -176,7 +176,20 @@ def test_schema_version_helper_matches_recipe():
 
 
 @pytest.mark.parametrize(
-    "golden_name", ["block-gyroid-v1", "cylinder-gyroid-v1", "preview-gyroid-low-res-v1"]
+    "golden_name",
+    [
+        "block-gyroid-v1",
+        "cylinder-gyroid-v1",
+        "preview-gyroid-low-res-v1",
+        # Incremento 2.2 (rodada Voronoi, Secao 11): 3 golden recipes voronoi_cell_edges_v1
+        # sinteticas, pequenas, deterministas -- ver schemas/biomatcem/golden-recipes/METADATA.json.
+        # Resultado computacional: geometria real (STL/metricas medidas) depende de execucao real
+        # do PicoGK no Windows (ADR-0007) -- estes arquivos JSON sao validados aqui apenas contra
+        # o schema, nunca contra um STL/hash fabricado.
+        "block-voronoi-preview-v1",
+        "block-voronoi-final-v1",
+        "cylinder-voronoi-preview-v1",
+    ],
 )
 def test_golden_recipes_all_validate(golden_name):
     recipe = load_golden_recipe(golden_name)

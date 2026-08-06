@@ -1,14 +1,26 @@
 {
   "block-gyroid-v1": {
-    "file": "block-gyroid-v1.json",
-    "description": "Bloco 10x10x10mm, gyroid final, caso principal de domínio retangular."
+    "description": "Bloco 10x10x10mm, gyroid final, caso principal de domínio retangular.",
+    "file": "block-gyroid-v1.json"
+  },
+  "block-voronoi-final-v1": {
+    "description": "Bloco 8x8x8mm pequeno, voronoi_cell_edges_v1 final, 16 sitios jittered_grid, exercita a distribuicao em grade jitterada e o modo final (resolucao mais fina). Resultado computacional -- ver aviso acima.",
+    "file": "block-voronoi-final-v1.json"
+  },
+  "block-voronoi-preview-v1": {
+    "description": "Bloco 10x10x10mm, voronoi_cell_edges_v1 preview, 12 sitios uniform_random, caso principal de topologia Voronoi em dominio retangular. Resultado computacional -- geometria real (STL/metricas) depende de execucao real do PicoGK no Windows (ver ADR-0007); nao aprovado como golden STL nesta rodada.",
+    "file": "block-voronoi-preview-v1.json"
   },
   "cylinder-gyroid-v1": {
-    "file": "cylinder-gyroid-v1.json",
-    "description": "Cilindro raio=5mm altura=12mm, gyroid final, caso principal de domínio cilíndrico."
+    "description": "Cilindro raio=5mm altura=12mm, gyroid final, caso principal de domínio cilíndrico.",
+    "file": "cylinder-gyroid-v1.json"
+  },
+  "cylinder-voronoi-preview-v1": {
+    "description": "Cilindro raio=5mm altura=10mm, voronoi_cell_edges_v1 preview, 14 sitios uniform_random, caso principal de topologia Voronoi em dominio cilindrico. Resultado computacional -- ver aviso acima.",
+    "file": "cylinder-voronoi-preview-v1.json"
   },
   "preview-gyroid-low-res-v1": {
-    "file": "preview-gyroid-low-res-v1.json",
-    "description": "Bloco 5x5x5mm, modo preview, resolução reduzida, iteração rápida."
+    "description": "Bloco 5x5x5mm, modo preview, resolução reduzida, iteração rápida.",
+    "file": "preview-gyroid-low-res-v1.json"
   }
 }
