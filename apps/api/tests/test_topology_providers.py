@@ -1,9 +1,12 @@
-"""Testes do contrato TopologyProvider (Incremento 2.2, Seção 4).
+"""Testes do contrato TopologyProvider (Incremento 2.2, Seção 4; estendido na Seção 12 da
+rodada Voronoi para cobrir o segundo provider real, voronoi_cell_edges_v1).
 
-Cobre: registro real (gyroid implementado, voronoi apenas planejado e por isso rejeitado),
-rejeição de provider desconhecido na criação do design run (defesa em profundidade, mesmo que o
-JSON Schema já bloqueie topology.kind != "gyroid" antes disso), e presença do provider
-efetivamente usado no manifesto de reprodutibilidade -- nunca assumido implicitamente.
+Cobre: registro real (gyroid e voronoi_cell_edges_v1 implementados; "voronoi" -- o placeholder
+genérico reservado, sem sufixo de versão -- permanece apenas planejado e por isso rejeitado,
+nunca confundido com voronoi_cell_edges_v1), rejeição de provider desconhecido na criação do
+design run (defesa em profundidade, mesmo que o JSON Schema já bloqueie topology.kind fora do
+oneOf antes disso), e presença do provider efetivamente usado no manifesto de reprodutibilidade
+-- nunca assumido implicitamente, para QUALQUER um dos dois providers implementados.
 """
 from __future__ import annotations
 
@@ -38,6 +41,16 @@ def test_gyroid_e_implementado_e_reconhecido():
     assert info.version
 
 
+def test_voronoi_cell_edges_v1_e_implementado_e_reconhecido():
+    # Regressão direta pedida no escopo desta rodada: voronoi_cell_edges_v1 (a implementação
+    # REAL, ver VoronoiTopologyProvider.cs/VoronoiScaffoldBuilder.cs) precisa estar registrada
+    # como "implemented" nos dois lados -- nunca confundida com o placeholder genérico "voronoi".
+    info = get_topology_provider("voronoi_cell_edges_v1")
+    assert info.status == "implemented"
+    assert info.provider_class == "VoronoiTopologyProvider"
+    assert info.version
+
+
 def test_voronoi_e_apenas_planejado_e_rejeitado():
     # Regressão direta pedida no escopo: "não implemente Voronoi completo ainda" -- o registro
     # PRECISA recusar voronoi mesmo que ele já apareça listado (status='planned').
@@ -54,6 +67,9 @@ def test_list_topology_providers_inclui_gyroid_implementado_e_voronoi_planejado(
     providers = {p.kind: p for p in list_topology_providers()}
     assert providers["gyroid"].status == "implemented"
     assert providers["voronoi"].status == "planned"
+    # Incremento 2.2 (rodada Voronoi): o segundo provider real também precisa aparecer listado
+    # e implementado, distinto do placeholder genérico "voronoi" acima.
+    assert providers["voronoi_cell_edges_v1"].status == "implemented"
 
 
 def _make_project(db_session, user):
@@ -137,6 +153,42 @@ def test_design_run_aceita_receita_gyroid_normalmente(db_session):
     assert job.status == JobStatus.QUEUED
 
 
+def test_design_run_aceita_receita_voronoi_normalmente(db_session):
+    # Espelha test_design_run_aceita_receita_gyroid_normalmente acima, mas para o segundo
+    # provider real (voronoi_cell_edges_v1) -- confirma que o caminho de criação de design
+    # run/job não é hardcoded para gyroid em nenhum lugar remanescente.
+    user = create_researcher(db_session, email="topology-voronoi-ok@biomatcad.example")
+    project = _make_project(db_session, user)
+
+    recipe_body = load_golden_recipe("block-voronoi-preview-v1")
+    canonical_str, checksum = validate_and_canonicalize(recipe_body)
+    recipe = GeometryRecipe(
+        organization_id=user.organization_id,
+        project_id=project.id,
+        created_by_user_id=user.id,
+        name="Receita Voronoi válida",
+        schema_version=recipe_body["schema_version"],
+        canonical_json=json.loads(canonical_str),
+        checksum_sha256=checksum,
+        version=1,
+        status=RecipeStatus.VALIDATED,
+    )
+    db_session.add(recipe)
+    db_session.commit()
+
+    _design_run, job, created = create_design_run_and_job(
+        db_session,
+        organization_id=user.organization_id,
+        project_id=project.id,
+        recipe_id=recipe.id,
+        material_id=None,
+        created_by_user_id=user.id,
+        idempotency_key="idem-topology-voronoi-ok",
+    )
+    assert created is True
+    assert job.status == JobStatus.QUEUED
+
+
 def test_manifesto_registra_o_provider_de_topologia_efetivamente_usado(db_session, tmp_path):
     user = create_researcher(db_session, email="topology-manifest@biomatcad.example")
     project = _make_project(db_session, user)
@@ -186,4 +238,58 @@ def test_manifesto_registra_o_provider_de_topologia_efetivamente_usado(db_sessio
         "kind": "gyroid",
         "provider_class": "GyroidTopologyProvider",
         "version": "1.0.0",
+    }
+
+
+def test_manifesto_registra_provider_voronoi_quando_e_o_efetivamente_usado(db_session, tmp_path):
+    # Espelha test_manifesto_registra_o_provider_de_topologia_efetivamente_usado acima, agora
+    # para uma receita Voronoi -- o manifesto nunca deve assumir gyroid implicitamente.
+    user = create_researcher(db_session, email="topology-manifest-voronoi@biomatcad.example")
+    project = _make_project(db_session, user)
+
+    recipe_body = load_golden_recipe("block-voronoi-preview-v1")
+    canonical_str, checksum = validate_and_canonicalize(recipe_body)
+    recipe = GeometryRecipe(
+        organization_id=user.organization_id,
+        project_id=project.id,
+        created_by_user_id=user.id,
+        name="Receita Voronoi para manifesto",
+        schema_version=recipe_body["schema_version"],
+        canonical_json=json.loads(canonical_str),
+        checksum_sha256=checksum,
+        version=1,
+        status=RecipeStatus.VALIDATED,
+    )
+    db_session.add(recipe)
+    db_session.commit()
+
+    design_run, job, _created = create_design_run_and_job(
+        db_session,
+        organization_id=user.organization_id,
+        project_id=project.id,
+        recipe_id=recipe.id,
+        material_id=None,
+        created_by_user_id=user.id,
+        idempotency_key="idem-topology-manifest-voronoi",
+    )
+
+    storage = LocalStorageAdapter(base_dir=tmp_path / "artifacts")
+    manifest = build_and_store_manifest(
+        db_session,
+        job=job,
+        design_run=design_run,
+        recipe=recipe,
+        versions={"worker_version": "0.2.0-test", "dotnet_version": "9.0.0", "picogk_version": "2.2.0"},
+        duration_seconds=1.23,
+        storage=storage,
+        repo_root=tmp_path,
+        effective_parameters=None,
+        platform_info="test-platform",
+        stl_sha256="a" * 64,
+    )
+
+    assert manifest.manifest_json["topology_provider"] == {
+        "kind": "voronoi_cell_edges_v1",
+        "provider_class": "VoronoiTopologyProvider",
+        "version": "0.1.0",
     }
