@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 import { validateRecipeBodyOffline, fingerprint, offlineValidateResponse } from "../src/api/recipeValidationOffline";
 import type { GeometryRecipeBody } from "../src/api/types";
 
-const VALID_RECIPE: GeometryRecipeBody = {
+// Usa `satisfies` (não `: GeometryRecipeBody`) deliberadamente: mantém o tipo literal
+// estreito de `topology` (o ramo gyroid concreto, com cell_size_mm/wall_thickness_mm) em vez
+// de alargar para a união GyroidTopologyBody | VoronoiTopologyBody -- do contrário,
+// `VALID_RECIPE.topology.cell_size_mm` abaixo exigiria uma checagem de narrowing em cada uso
+// (Incremento 2.2, rodada Voronoi: topology virou união quando voronoi_cell_edges_v1 foi
+// adicionado a GeometryRecipeBody).
+const VALID_RECIPE = {
   schema_version: "1.0.0",
   domain: { shape: "block", dimensions_mm: { kind: "block", x_mm: 10, y_mm: 10, z_mm: 10 } },
   topology: { kind: "gyroid", cell_size_mm: 2, wall_thickness_mm: 0.4, isovalue: 0, target_porosity_pct: 60 },
@@ -11,7 +17,7 @@ const VALID_RECIPE: GeometryRecipeBody = {
   seed: 42,
   compute_limits: { max_duration_seconds: 60, max_memory_mb: 512, max_voxel_count: 1000000 },
   output_formats: ["stl"],
-};
+} satisfies GeometryRecipeBody;
 
 describe("validateRecipeBodyOffline", () => {
   it("aceita uma receita válida sem erros", () => {
@@ -65,13 +71,13 @@ describe("validateRecipeBodyOffline", () => {
 describe("validateRecipeBodyOffline -- Incremento 2.1.1 (item 9)", () => {
   it("rejeita a ausência de wall_thickness_mm (agora obrigatório)", () => {
     const bad = { ...VALID_RECIPE, topology: { ...VALID_RECIPE.topology } } as Partial<GeometryRecipeBody>;
-    delete (bad.topology as Record<string, unknown>).wall_thickness_mm;
+    delete (bad.topology as unknown as Record<string, unknown>).wall_thickness_mm;
     expect(validateRecipeBodyOffline(bad).length).toBeGreaterThan(0);
   });
 
   it("aceita receita sem isovalue (agora opcional)", () => {
     const ok = { ...VALID_RECIPE, topology: { ...VALID_RECIPE.topology } } as Partial<GeometryRecipeBody>;
-    delete (ok.topology as Record<string, unknown>).isovalue;
+    delete (ok.topology as unknown as Record<string, unknown>).isovalue;
     expect(validateRecipeBodyOffline(ok)).toEqual([]);
   });
 

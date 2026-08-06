@@ -176,21 +176,47 @@ export interface ProjectCreateRequest {
   description?: string | null;
 }
 
+// Topologia gyroid (TPMS) -- espelha o ramo oneOf "gyroid" de
+// schemas/biomatcem/geometry-recipe-v1.schema.json.
+export interface GyroidTopologyBody {
+  kind: "gyroid";
+  cell_size_mm: number;
+  // Incremento 2.1.1 (item 2): obrigatório -- único controlador de espessura.
+  wall_thickness_mm: number;
+  // Opcional (default 0.0 no schema) -- apenas desloca o centro da banda, NÃO controla espessura.
+  isovalue?: number;
+  target_porosity_pct?: number;
+}
+
+// Topologia Voronoi (Incremento 2.2, rodada Voronoi) -- espelha o ramo oneOf
+// "voronoi_cell_edges_v1" do mesmo schema. Struts construídos sobre as ARESTAS REAIS das
+// células de uma tesselação de Voronoi 3D (nunca um grafo de adjacência de sítios de
+// Delaunay -- ver docs/architecture/voronoi-cell-edges-v1-math-audit.md).
+export interface VoronoiTopologyBody {
+  kind: "voronoi_cell_edges_v1";
+  // Número de sítios (sementes), 4..500.
+  site_count: number;
+  distribution: "uniform_random" | "jittered_grid";
+  // Opcional -- se omitido, o worker deriva um valor conservador a partir do domínio e de
+  // site_count e registra o valor efetivamente usado em effective_parameters.
+  seed_site_min_separation_mm?: number;
+  strut_radius_mm: number;
+  // Fator de suavização do blend implícito (smooth-min) nos nós, 0..1, default 0.5 no schema.
+  node_smoothing?: number;
+  // Raio efetivo do nó = strut_radius_mm * node_radius_factor, 1..3, default 1.3 no schema.
+  node_radius_factor?: number;
+  // Único valor suportado nesta rodada ("clip") -- mantido como enum para extensão futura.
+  boundary_behavior?: "clip";
+  target_porosity_pct?: number;
+}
+
 // Corpo de receita BioMatCEM -- espelha schemas/biomatcem/geometry-recipe-v1.schema.json.
 export interface GeometryRecipeBody {
   schema_version: "1.0.0";
   domain:
     | { shape: "block"; dimensions_mm: { kind: "block"; x_mm: number; y_mm: number; z_mm: number } }
     | { shape: "cylinder"; dimensions_mm: { kind: "cylinder"; radius_mm: number; height_mm: number } };
-  topology: {
-    kind: "gyroid";
-    cell_size_mm: number;
-    // Incremento 2.1.1 (item 2): obrigatório -- único controlador de espessura.
-    wall_thickness_mm: number;
-    // Opcional (default 0.0 no schema) -- apenas desloca o centro da banda, NÃO controla espessura.
-    isovalue?: number;
-    target_porosity_pct?: number;
-  };
+  topology: GyroidTopologyBody | VoronoiTopologyBody;
   resolution?: { voxel_size_mm?: number };
   mode: "preview" | "final";
   seed: number;
@@ -243,6 +269,34 @@ export interface GeometryMetrics {
   vertex_count_unique: number;
   triangle_count: number;
   is_watertight: boolean;
+
+  // Campos EXTRA específicos de voronoi_cell_edges_v1 (Incremento 2.2, rodada Voronoi,
+  // Seção 9) -- populados via metrics.Extra ([JsonExtensionData] em
+  // apps/geometry-worker/JobEnvelope.cs, preenchidos por
+  // VoronoiTopologyProvider.PopulateMetricsExtra) e repassados verbatim pela API
+  // (dict[str, Any] em schemas/jobs.py -- nunca renomeados). Ausentes/undefined para jobs
+  // Gyroid. Conectividade aqui é sempre TOPOLÓGICA (grafo de nós/arestas) -- nunca
+  // conectividade biológica nem validação experimental.
+  site_count?: number;
+  delaunay_cell_count?: number;
+  degenerate_cell_count?: number;
+  node_count?: number;
+  edge_count?: number;
+  internal_edge_count?: number;
+  boundary_ray_edge_count?: number;
+  discarded_boundary_ray_count?: number;
+  discarded_internal_edge_count?: number;
+  connected_component_count?: number;
+  isolated_node_count?: number;
+  total_strut_length_mm?: number;
+  mean_strut_length_mm?: number;
+  min_strut_length_mm?: number;
+  max_strut_length_mm?: number;
+  strut_length_stddev_mm?: number;
+  mean_node_degree?: number;
+  min_node_degree?: number;
+  max_node_degree?: number;
+  node_degree_stddev?: number;
 }
 
 export interface GeometryJobResponse {

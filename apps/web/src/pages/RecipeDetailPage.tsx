@@ -71,7 +71,14 @@ export function RecipeDetailPage() {
           <tr><td style={styles.td}><strong>Schema</strong></td><td style={styles.td}>{recipe.schema_version}</td></tr>
           <tr><td style={styles.td}><strong>Checksum</strong></td><td style={styles.td}><code>{recipe.checksum_sha256}</code></td></tr>
           <tr><td style={styles.td}><strong>Domínio</strong></td><td style={styles.td}>{d.domain.shape}</td></tr>
-          <tr><td style={styles.td}><strong>Topologia</strong></td><td style={styles.td}>{d.topology.kind} (célula {d.topology.cell_size_mm}mm, parede {d.topology.wall_thickness_mm}mm)</td></tr>
+          <tr>
+            <td style={styles.td}><strong>Topologia</strong></td>
+            <td style={styles.td}>
+              {d.topology.kind === "gyroid"
+                ? `gyroid (célula ${d.topology.cell_size_mm}mm, parede ${d.topology.wall_thickness_mm}mm)`
+                : `voronoi_cell_edges_v1 (${d.topology.site_count} sítios, ${d.topology.distribution}, strut ${d.topology.strut_radius_mm}mm)`}
+            </td>
+          </tr>
           <tr><td style={styles.td}><strong>Modo</strong></td><td style={styles.td}>{d.mode}</td></tr>
           <tr><td style={styles.td}><strong>Seed</strong></td><td style={styles.td}>{d.seed}</td></tr>
         </tbody>

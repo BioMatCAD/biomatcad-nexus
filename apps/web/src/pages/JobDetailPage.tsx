@@ -213,6 +213,38 @@ export function JobDetailPage() {
             </tbody>
           </table>
 
+          {job.metrics.site_count !== undefined && (
+            <>
+              <h2>Métricas específicas de Voronoi (voronoi_cell_edges_v1)</h2>
+              <p style={{ color: "var(--color-text-secondary)", fontSize: "0.9em" }} data-testid="voronoi-metrics-provenance-note">
+                Conectividade e contagens abaixo descrevem o grafo TOPOLÓGICO de nós/arestas da
+                tesselação de Voronoi -- nunca conectividade biológica nem validação experimental.
+              </p>
+              <table data-testid="job-voronoi-metrics" style={{ borderCollapse: "collapse" }}>
+                <tbody>
+                  <tr><td style={styles.td}><strong>Sítios</strong></td><td style={styles.td}>{job.metrics.site_count}</td></tr>
+                  <tr><td style={styles.td}><strong>Células de Delaunay</strong></td><td style={styles.td}>{job.metrics.delaunay_cell_count}</td></tr>
+                  <tr><td style={styles.td}><strong>Células degeneradas</strong></td><td style={styles.td}>{job.metrics.degenerate_cell_count}</td></tr>
+                  <tr><td style={styles.td}><strong>Nós</strong></td><td style={styles.td}>{job.metrics.node_count}</td></tr>
+                  <tr><td style={styles.td}><strong>Arestas (total)</strong></td><td style={styles.td}>{job.metrics.edge_count}</td></tr>
+                  <tr><td style={styles.td}><strong>Arestas internas</strong></td><td style={styles.td}>{job.metrics.internal_edge_count}</td></tr>
+                  <tr><td style={styles.td}><strong>Arestas de raio de fronteira</strong></td><td style={styles.td}>{job.metrics.boundary_ray_edge_count}</td></tr>
+                  <tr><td style={styles.td}><strong>Raios de fronteira descartados</strong></td><td style={styles.td}>{job.metrics.discarded_boundary_ray_count}</td></tr>
+                  <tr><td style={styles.td}><strong>Arestas internas descartadas</strong></td><td style={styles.td}>{job.metrics.discarded_internal_edge_count}</td></tr>
+                  <tr><td style={styles.td}><strong>Componentes conectados</strong></td><td style={styles.td}>{job.metrics.connected_component_count}</td></tr>
+                  <tr><td style={styles.td}><strong>Nós isolados</strong></td><td style={styles.td}>{job.metrics.isolated_node_count}</td></tr>
+                  <tr><td style={styles.td}><strong>Comprimento total dos struts (mm)</strong></td><td style={styles.td}>{job.metrics.total_strut_length_mm}</td></tr>
+                  <tr><td style={styles.td}><strong>Comprimento médio dos struts (mm)</strong></td><td style={styles.td}>{job.metrics.mean_strut_length_mm}</td></tr>
+                  <tr><td style={styles.td}><strong>Comprimento mín./máx. dos struts (mm)</strong></td><td style={styles.td}>{job.metrics.min_strut_length_mm} / {job.metrics.max_strut_length_mm}</td></tr>
+                  <tr><td style={styles.td}><strong>Desvio-padrão do comprimento (mm)</strong></td><td style={styles.td}>{job.metrics.strut_length_stddev_mm}</td></tr>
+                  <tr><td style={styles.td}><strong>Grau médio dos nós</strong></td><td style={styles.td}>{job.metrics.mean_node_degree}</td></tr>
+                  <tr><td style={styles.td}><strong>Grau mín./máx. dos nós</strong></td><td style={styles.td}>{job.metrics.min_node_degree} / {job.metrics.max_node_degree}</td></tr>
+                  <tr><td style={styles.td}><strong>Desvio-padrão do grau</strong></td><td style={styles.td}>{job.metrics.node_degree_stddev}</td></tr>
+                </tbody>
+              </table>
+            </>
+          )}
+
           {manifest && (
             <>
               <h2>Proveniência (manifesto de reprodutibilidade)</h2>

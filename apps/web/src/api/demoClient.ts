@@ -123,12 +123,23 @@ function toMaterialSummary(material: MaterialDetail): MaterialSummary {
 }
 
 /**
- * Simula queued -> running -> succeeded via setTimeout, populando métricas fixas e apontando
- * o artefato STL para um arquivo sintético pré-calculado versionado em
- * public/demo-assets/ -- NUNCA saída real do worker PicoGK (bloqueado neste sandbox, ver
- * apps/geometry-worker/WORKER_STATUS.md). Usado exclusivamente pelo modo demo (GitHub Pages).
+ * Simula queued -> running -> succeeded/failed via setTimeout. Usado exclusivamente pelo modo
+ * demo (GitHub Pages, sem backend real).
+ *
+ * Para topology.kind === "gyroid": populando métricas fixas e apontando o artefato STL para
+ * um arquivo sintético pré-calculado versionado em public/demo-assets/ -- NUNCA saída real do
+ * worker PicoGK (bloqueado neste sandbox, ver apps/geometry-worker/WORKER_STATUS.md).
+ *
+ * Para topology.kind === "voronoi_cell_edges_v1" (Incremento 2.2, rodada Voronoi, Seção 10):
+ * NÃO existe nenhum artefato STL/métrica pré-calculada real para Voronoi nesta demonstração
+ * estática (nenhuma execução do PicoGK real ocorreu neste sandbox -- ver
+ * schemas/biomatcem/golden-recipes/METADATA.json). Fabricar uma geometria/métrica "de sucesso"
+ * aqui seria exatamente o tipo de simulação enganosa que este projeto proíbe explicitamente.
+ * Em vez disso, o job termina honestamente em "failed" com um erro estruturado explicando a
+ * limitação -- o editor/validação/schema continuam funcionando normalmente em modo demo para
+ * Voronoi, apenas a EXECUÇÃO simulada de um job é que não finge sucesso.
  */
-function simulateJobProgress(jobId: string): void {
+function simulateJobProgress(jobId: string, topologyKind: string): void {
   setTimeout(() => {
     const job = demoStore.jobs.find((j) => j.id === jobId);
     if (!job || job.status !== "queued") return;
@@ -140,6 +151,20 @@ function simulateJobProgress(jobId: string): void {
   setTimeout(() => {
     const job = demoStore.jobs.find((j) => j.id === jobId);
     if (!job || job.status !== "running") return;
+
+    if (topologyKind !== "gyroid") {
+      job.status = "failed";
+      job.finished_at = new Date().toISOString();
+      job.error_code = "DEMO_EXECUTION_UNAVAILABLE";
+      job.error_message =
+        `A demonstração estática do GitHub Pages não executa o worker PicoGK real. Apenas o ` +
+        `exemplo pré-calculado Gyroid está disponível como demonstração completa nesta rodada ` +
+        `(ver METADATA.json das golden recipes). A receita '${topologyKind}' foi validada e ` +
+        `salva corretamente, mas a execução real requer o backend completo com PicoGK (ver ` +
+        `roteiro de validação Windows / ADR-0007).`;
+      return;
+    }
+
     job.status = "succeeded";
     job.progress_pct = 100;
     job.finished_at = new Date().toISOString();
@@ -420,7 +445,8 @@ export const demoApiClient: ApiClient = {
       latest_job: job,
     };
     demoStore.designRuns.push(designRun);
-    simulateJobProgress(jobId);
+    const submittedRecipe = demoStore.recipes.find((r) => r.id === payload.recipe_id);
+    simulateJobProgress(jobId, submittedRecipe?.canonical_json.topology.kind ?? "gyroid");
     return delay(designRun);
   },
   getDesignRun: (_token, designRunId) => {
@@ -447,7 +473,8 @@ export const demoApiClient: ApiClient = {
     };
     demoStore.jobs.push(newJob);
     run.latest_job = newJob;
-    simulateJobProgress(jobId);
+    const retriedRecipe = demoStore.recipes.find((r) => r.id === run.recipe_id);
+    simulateJobProgress(jobId, retriedRecipe?.canonical_json.topology.kind ?? "gyroid");
     return delay(newJob);
   },
 
