@@ -304,15 +304,29 @@ try {
     & $venvPython -m pip install --quiet -e ".[dev]" 2>&1 | Write-Host
     Add-Step -Name "api_venv_preparado" -Ok ($LASTEXITCODE -eq 0) -Detail "pip install -e .[dev] -> exit $LASTEXITCODE"
 
+    # Correcao real (rodada Voronoi 20260806-133141, itens 10-17): a suite pytest NUNCA deve
+    # rodar contra DATABASE_URL diretamente quando este aponta para o MESMO banco Postgres real
+    # usado pela validacao manual/gate abaixo -- isso foi comprovadamente a causa de 3 falhas
+    # reais por contaminacao (cancelamento reivindicou um job antigo real, concorrencia
+    # reivindicou jobs externos, observabilidade contou jobs "processing" que nao eram dela).
+    # A correcao (tests/conftest.py) le TEST_DATABASE_URL (nao DATABASE_URL) e cria um SCHEMA
+    # Postgres exclusivo e efemero dentro do MESMO servidor para toda a suite -- nunca toca no
+    # schema "public" real. Por isso aqui setamos TEST_DATABASE_URL (nao apenas DATABASE_URL)
+    # apontando para o mesmo servidor real -- prova isolamento de schema contra a MESMA
+    # instancia, sem exigir um Postgres separado so para testes.
+    $env:TEST_DATABASE_URL = $DatabaseUrl
     $env:DATABASE_URL = $DatabaseUrl
     $env:ENVIRONMENT = "test"
     & $venvPython -m pytest -q 2>&1 | Tee-Object -FilePath (Join-Path $OutputDir "api-pytest.log") | Write-Host
     $pytestExit = $LASTEXITCODE
-    # As 2 falhas pre-existentes e ja documentadas (test_clinical_suite_expiration_is_respected,
-    # test_two_concurrent_dispatchers_never_claim_the_same_job) NAO devem bloquear o restante
-    # deste roteiro -- registradas honestamente, nunca escondidas, mas nao fatais aqui (ja
-    # confirmadas como divida pre-existente nao relacionada a Voronoi, ver TEST_EVIDENCE.md).
-    Add-Step -Name "api_pytest" -Ok $true -Detail "pytest -> exit $pytestExit (2 falhas pre-existentes esperadas e documentadas em TEST_EVIDENCE.md; log: api-pytest.log)"
+    # Correcao real (mesma rodada, itens 15-16): um exit code de pytest diferente de zero deve
+    # SEMPRE ser reportado como [FALHA] -- a versao anterior deste roteiro hardcodava -Ok $true
+    # e uma mensagem fixa de "2 falhas pre-existentes esperadas", entao o relatorio consolidado
+    # NUNCA refletia o resultado real da suite (inclusive quando uma NOVA falha real, nao
+    # relacionada as 2 antigas, aparecia -- exatamente o que aconteceu na rodada
+    # 20260806-133141: 3 falhas, nao 2, e o roteiro teria reportado [OK] do mesmo jeito). Agora
+    # o relatorio usa o exit code real, sem nenhuma contagem de falha fixa/esperada.
+    Add-Step -Name "api_pytest" -Ok ($pytestExit -eq 0) -Detail "pytest -> exit $pytestExit (schema Postgres isolado via TEST_DATABASE_URL; ver resultado real em api-pytest.log -- nenhuma contagem de falha fixa/esperada e assumida aqui)"
 }
 finally {
     Pop-Location

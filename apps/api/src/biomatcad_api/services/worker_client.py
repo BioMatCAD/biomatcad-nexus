@@ -133,6 +133,55 @@ def _truncate_for_log(text: str, max_chars: int = 300) -> str:
     return f"...[truncado, {len(text) - max_chars} chars omitidos]...{text[-max_chars:]}"
 
 
+def _write_full_diagnostics_file(
+    *,
+    output_dir: Path,
+    job_id: str,
+    outcome: str,
+    stdout: str,
+    stderr: str,
+    tree_confirmed_terminated: bool | None,
+    returncode: int | None,
+) -> Path | None:
+    """Preserva o stdout/stderr COMPLETO (nunca truncado) do worker em um arquivo próprio,
+    fora de `output_dir` (rodada Voronoi 20260806-133141, item 7 da correção pedida pelo
+    usuário).
+
+    Por que fora de output_dir: em qualquer caminho de falha (cancelamento, timeout, exit code
+    != 0), o chamador (dispatch_job, em geometry_job_service.py) sempre invoca
+    `_cleanup_output_dir(output_dir)` logo depois de `_mark_failed`/`_finalize_cancelled` --
+    isso apaga `output_dir` inteiro recursivamente (`shutil.rmtree`). Um arquivo de diagnóstico
+    gravado DENTRO de `output_dir` seria destruído no mesmo instante em que se tornaria
+    necessário (exatamente o cenário que motivou este item: o WORKER_TIMEOUT do Voronoi mostrou
+    um JSON quase completo no stdout, mas apenas os últimos ~300 caracteres sobreviviam em
+    error_message -- o restante era permanentemente perdido). Em vez disso, grava em um
+    diretório IRMÃO de output_dir (`output_dir.parent / "_worker_diagnostics"`), que nenhuma
+    rotina de limpeza conhecida remove.
+
+    Melhor esforço: uma falha ao gravar o diagnóstico (ex.: disco cheio, permissão) NUNCA deve
+    mascarar o erro original do worker -- por isso todo o corpo roda em try/except e retorna
+    None silenciosamente em caso de problema, deixando o chamador seguir com o
+    WorkerExecutionError original de qualquer forma."""
+    try:
+        diagnostics_dir = output_dir.parent / "_worker_diagnostics"
+        diagnostics_dir.mkdir(parents=True, exist_ok=True)
+        diagnostics_path = diagnostics_dir / f"{job_id}.json"
+        payload = {
+            "job_id": job_id,
+            "outcome": outcome,
+            "returncode": returncode,
+            "process_tree_confirmed_terminated": tree_confirmed_terminated,
+            "stdout_full": stdout,
+            "stderr_full": stderr,
+            "stdout_char_count": len(stdout),
+            "stderr_char_count": len(stderr),
+        }
+        diagnostics_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        return diagnostics_path
+    except OSError:
+        return None
+
+
 class DotnetPicoGkWorkerClient:
     def __init__(self, repo_root: Path, dotnet_bin: str | None = None) -> None:
         self.repo_root = repo_root
@@ -216,15 +265,43 @@ class DotnetPicoGkWorkerClient:
         # término do processo em vez de ser descartado silenciosamente (antes: só
         # `details={"stdout":..., "stderr":...}` era anexado à exceção, mas _mark_failed nunca
         # lia `details`, só `.message` -- o conteúdo nunca chegava a lugar nenhum persistido).
+        # Item 7 (rodada Voronoi 20260806-133141): o stdout/stderr COMPLETO (nunca truncado)
+        # é sempre preservado em um arquivo próprio antes de qualquer levantamento de exceção
+        # abaixo -- independente do desfecho (cancelado, timeout, ou exit code != 0). O motivo:
+        # a evidência real coletada no Windows mostrou um JSON de resultado quase inteiro
+        # presente no stdout de um WORKER_TIMEOUT (mesh_calibration_iterations, porosidade
+        # medida etc.), mas `_truncate_for_log` (usado só para a mensagem embutida na exceção)
+        # descarta tudo, exceto os últimos 300 caracteres -- e `_mark_failed`
+        # (geometry_job_service.py) trunca de novo em 1000 -- o restante do diagnóstico nunca
+        # sobrevivia. Este arquivo NÃO substitui `_truncate_for_log`/`.message` (que continuam
+        # existindo para leitura rápida em logs/AuditEvent), apenas garante que o conteúdo
+        # integral fique disponível para auditoria posterior.
+        full_diagnostics_path: Path | None = None
+        if outcome in ("cancelled", "timeout") or proc.returncode != 0:
+            full_diagnostics_path = _write_full_diagnostics_file(
+                output_dir=output_dir,
+                job_id=job_id,
+                outcome=outcome if outcome != "completed" else "failed_exit_code",
+                stdout=stdout,
+                stderr=stderr,
+                tree_confirmed_terminated=tree_confirmed_terminated,
+                returncode=proc.returncode,
+            )
+
         def _diagnostic_suffix() -> str:
             tree_status = {
                 True: "árvore de processos CONFIRMADA encerrada",
                 False: "árvore de processos NÃO CONFIRMADA como encerrada -- possível processo órfão sobrevivente",
                 None: "encerramento da árvore não verificado",
             }[tree_confirmed_terminated]
+            diagnostics_note = (
+                f"; diagnóstico completo (stdout/stderr não truncado) em: {full_diagnostics_path}"
+                if full_diagnostics_path is not None
+                else ""
+            )
             return (
                 f" [{tree_status}; stdout(fim)={_truncate_for_log(stdout)!r}; "
-                f"stderr(fim)={_truncate_for_log(stderr)!r}]"
+                f"stderr(fim)={_truncate_for_log(stderr)!r}{diagnostics_note}]"
             )
 
         if outcome == "cancelled":
@@ -236,6 +313,7 @@ class DotnetPicoGkWorkerClient:
                     "stdout": stdout,
                     "stderr": stderr,
                     "process_tree_confirmed_terminated": tree_confirmed_terminated,
+                    "full_diagnostics_path": str(full_diagnostics_path) if full_diagnostics_path else None,
                 },
             )
         if outcome == "timeout":
@@ -247,11 +325,16 @@ class DotnetPicoGkWorkerClient:
                     "stdout": stdout,
                     "stderr": stderr,
                     "process_tree_confirmed_terminated": tree_confirmed_terminated,
+                    "full_diagnostics_path": str(full_diagnostics_path) if full_diagnostics_path else None,
                 },
             )
 
         if proc.returncode != 0:
-            details: dict = {"stdout": stdout, "stderr": stderr}
+            details: dict = {
+                "stdout": stdout,
+                "stderr": stderr,
+                "full_diagnostics_path": str(full_diagnostics_path) if full_diagnostics_path else None,
+            }
             try:
                 structured = json.loads(stderr.strip().splitlines()[-1]) if stderr.strip() else {}
             except (ValueError, IndexError):

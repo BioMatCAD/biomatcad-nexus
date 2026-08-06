@@ -203,6 +203,94 @@ def test_truncate_for_log_preserva_o_trecho_final_mais_relevante():
 
 
 # ---------------------------------------------------------------------------
+# Item 7 (rodada Voronoi 20260806-133141): a evidência real do Windows mostrou um JSON de
+# resultado quase completo (mesh_calibration_iterations, porosidade medida etc.) presente no
+# stdout de um WORKER_TIMEOUT real -- mas `_truncate_for_log`/`_mark_failed` preservavam apenas
+# os últimos ~300/1000 caracteres. Estes testes provam que o stdout/stderr INTEIRO agora
+# sobrevive em um arquivo próprio, fora de output_dir (que é sempre apagado em qualquer
+# caminho de falha por dispatch_job -- ver _cleanup_output_dir em geometry_job_service.py).
+# ---------------------------------------------------------------------------
+
+
+def test_execute_timeout_preserva_stdout_completo_em_arquivo_proprio(tmp_path, monkeypatch):
+    monkeypatch.setattr(worker_client_module, "STARTUP_OVERHEAD_SECONDS", 0.2)
+    monkeypatch.setattr(worker_client_module, "POLL_INTERVAL_SECONDS", 0.05)
+
+    # Stdout deliberadamente maior que os 300 caracteres preservados por _truncate_for_log --
+    # simula o JSON quase completo observado na evidência real (o essencial aqui é que o
+    # CONTEÚDO INICIAL (fora da janela final de 300 chars) também sobreviva em algum lugar).
+    marker_content = "INICIO_DO_JSON_" + ("y" * 500) + "_CONTEUDO_QUE_A_TRUNCACAO_DESCARTARIA"
+    worker_script = (
+        "import time\n"
+        f"print({marker_content!r}, flush=True)\n"
+        "time.sleep(300)\n"
+    )
+    repo_root = _make_fake_worker_repo(tmp_path / "fake-repo", worker_script)
+    client = DotnetPicoGkWorkerClient(repo_root=repo_root, dotnet_bin=sys.executable)
+
+    output_dir = tmp_path / "work" / "job-diag-1"
+    with pytest.raises(WorkerExecutionError) as excinfo:
+        client.execute(
+            recipe_canonical={"compute_limits": {"max_duration_seconds": 0.1}},
+            job_id="job-diag-1",
+            output_dir=output_dir,
+        )
+
+    err = excinfo.value
+    # A mensagem/.message continua truncada (não muda o comportamento pré-existente de log) --
+    # o conteúdo do início do JSON NÃO deve estar na mensagem embutida.
+    assert marker_content[:50] not in err.message
+
+    diagnostics_path_str = err.details.get("full_diagnostics_path")
+    assert diagnostics_path_str is not None, "full_diagnostics_path ausente em details"
+    diagnostics_path = Path(diagnostics_path_str)
+    assert diagnostics_path.exists()
+    # Preservado FORA de output_dir (irmão, não descendente) -- para sobreviver ao
+    # shutil.rmtree(output_dir) que dispatch_job sempre faz após uma falha.
+    assert output_dir not in diagnostics_path.parents
+
+    payload = json.loads(diagnostics_path.read_text(encoding="utf-8"))
+    assert payload["job_id"] == "job-diag-1"
+    assert payload["outcome"] == "timeout"
+    # O conteúdo INTEIRO (incluindo a parte que a truncação para log descartaria) está presente.
+    assert marker_content in payload["stdout_full"]
+    assert payload["stdout_char_count"] == len(payload["stdout_full"])
+
+
+def test_full_diagnostics_file_sobrevive_a_limpeza_do_output_dir(tmp_path, monkeypatch):
+    """Reproduz o exato caminho de dispatch_job: depois de _mark_failed, o chamador sempre
+    invoca _cleanup_output_dir(output_dir) (shutil.rmtree). Prova que o arquivo de diagnóstico
+    completo, por estar em um diretório IRMÃO, sobrevive a essa limpeza."""
+    monkeypatch.setattr(worker_client_module, "STARTUP_OVERHEAD_SECONDS", 0.2)
+    monkeypatch.setattr(worker_client_module, "POLL_INTERVAL_SECONDS", 0.05)
+
+    worker_script = "import time\nprint('conteudo completo relevante', flush=True)\ntime.sleep(300)\n"
+    repo_root = _make_fake_worker_repo(tmp_path / "fake-repo", worker_script)
+    client = DotnetPicoGkWorkerClient(repo_root=repo_root, dotnet_bin=sys.executable)
+
+    output_dir = tmp_path / "work" / "job-diag-2"
+    with pytest.raises(WorkerExecutionError) as excinfo:
+        client.execute(
+            recipe_canonical={"compute_limits": {"max_duration_seconds": 0.1}},
+            job_id="job-diag-2",
+            output_dir=output_dir,
+        )
+
+    diagnostics_path = Path(excinfo.value.details["full_diagnostics_path"])
+    assert diagnostics_path.exists()
+
+    # Mesma chamada de limpeza usada por dispatch_job (geometry_job_service._cleanup_output_dir).
+    import shutil as _shutil
+
+    if output_dir.exists():
+        _shutil.rmtree(output_dir, ignore_errors=True)
+
+    assert not output_dir.exists()
+    assert diagnostics_path.exists(), "diagnóstico completo não deveria ser apagado pela limpeza de output_dir"
+    assert "conteudo completo relevante" in diagnostics_path.read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
 # 3) Recuperação da ORQUESTRAÇÃO: um job que falha com WORKER_TIMEOUT não pode
 #    impedir que a PRÓXIMA invocação do dispatcher processe um job novo
 #    normalmente (a cascata real observada na rodada 20260806-112714 foi um

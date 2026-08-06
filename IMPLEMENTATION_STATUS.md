@@ -107,6 +107,49 @@ cientificamente** -- nenhuma das 6 golden recipes produziu um STL real na rodada
 `TEST_EVIDENCE.md`, seção 20, para o registro completo e honesto do que essa rodada demonstrou
 e do que não pôde demonstrar.
 
+### Validação Windows real 20260806-133141 -- cascata de processos órfãos CONFIRMADA corrigida, Voronoi ainda REPROVADO, 3 falhas backend diagnosticadas e corrigidas
+
+O usuário reexecutou a validação Windows (roteiro estagiado, commit `1cdc062`) e reportou
+resultado literal: `block-voronoi-preview-v1` reproduziu o `WORKER_TIMEOUT` em 2/2 execuções
+(66.7s e 65.5s), mas **nenhuma árvore `dotnet.exe` órfã** foi encontrada antes/depois de nenhuma
+execução, e `preview-gyroid-low-res-v1` (executado logo depois dos dois timeouts) passou 2/2 com
+determinismo confirmado (SHA-256 idêntico) -- **confirmando que a correção da cascata de
+processos órfãos da rodada anterior (20260806-112714) funcionou de verdade no Windows real**.
+
+Nova hipótese investigada (auditoria real, não suposição): o parâmetro `bEndAppWithTask` do
+Voronoi estaria no padrão `false`. **Auditoria concluída e hipótese REFUTADA**: leitura direta
+do código-fonte vivo confirma que `VoronoiScaffoldBuilder.cs` já passa `bEndAppWithTask: true`,
+de forma idêntica ao Gyroid. Decompilação real do `PicoGK.dll` 2.2.0 (via `ilspycmd`) revelou
+que `bEndAppWithTask: true` sozinho não garante o encerramento do processo -- depende também do
+estado interno do viewer nativo (`bIsIdle()`), fora do alcance de qualquer parâmetro de
+aplicação. Ver `apps/geometry-worker/WORKER_STATUS.md` seção 12 e `TEST_EVIDENCE.md` seção 21
+para o registro técnico completo. **Voronoi continua sem STL real produzido -- não pode ser
+declarado aprovado.**
+
+As 3 falhas backend (`205 passed, 3 failed` -- uma nova em relação às "2 pré-existentes"
+antigas) foram diagnosticadas como contaminação real: a suíte pytest rodava contra a MESMA
+instância Postgres da validação manual, e via linhas reais já commitadas por essa validação
+(job antigo capturado por engano no teste de cancelamento, 32 jobs reivindicados em vez de 24 no
+teste de concorrência, 10 jobs "processing" inesperados na observabilidade). Corrigido via
+schema Postgres exclusivo e efêmero para toda a suíte (`apps/api/tests/conftest.py`, nunca toca
+no schema `"public"` real) -- **provado nesta rodada, neste sandbox, contra um Postgres efêmero
+real semeado com 10 linhas contaminantes reais: 211 passed, 2 skipped, 0 failed, e as 10 linhas
+semeadas continuaram intactas depois da suíte**. `Run-VoronoiWindowsValidation.ps1` corrigido
+para nunca mais reportar `[OK]` quando o pytest falha de verdade (antes: `-Ok $true`
+incondicional + mensagem fixa "2 falhas pré-existentes esperadas", que teria escondido esta
+terceira falha nova).
+
+Suítes completas re-executadas nesta rodada: 100 C# (era 99 -- +1 regressão nova: nenhum
+`Library.Go` real sem `bEndAppWithTask: true`, escaneando TODOS os providers, não só Gyroid),
+211 pytest passed + 2 skipped + 0 failed (contra Postgres isolado -- o ambiente real de
+validação), 119 vitest passed, tsc/eslint/build/build:pages OK.
+
+**Veredito desta rodada: cascata de processos órfãos comprovadamente corrigida no Windows;
+Gyroid permanece íntegro; Voronoi ainda não aprovado (nenhum STL real produzido); E2E não
+executado nesta rodada; as 3 falhas backend eram defeitos reais de isolamento da suíte/roteiro
+contra um banco compartilhado, não bugs relacionados à ciência Voronoi/Gyroid -- corrigidos e
+comprovados nesta rodada.** Ver `TEST_EVIDENCE.md` seção 21 para o registro completo.
+
 ## Incremento 2.2 Alpha Pesquisa — resumo (branch `incremento-2.2-alpha-pesquisa`)
 
 Escopo desta rodada: observabilidade real + integração à GUI, GUI completa de pesquisa (retry,

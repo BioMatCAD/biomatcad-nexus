@@ -531,3 +531,116 @@ com execução real no Windows do usuário, na mesma sessão:
 
 **Com geometria real, interface real (E2E) e fluxo de produção completo real (gate final)
 todos provados independentemente, a vertical completa do Incremento 2.1.1 está aprovada.**
+
+## 12. Rodada Voronoi 20260806-133141 — auditoria real do WORKER_TIMEOUT (bEndAppWithTask REFUTADO como causa; hang aponta para dentro do próprio Library.Go)
+
+Contexto: a validação Windows real desta rodada (evidência em
+`C:\biomatcad-runs\voronoi-validation-staged-20260806-133141\pilot`) reproduziu o WORKER_TIMEOUT
+de `block-voronoi-preview-v1` em 2/2 execuções (66.7s e 65.5s), enquanto `preview-gyroid-low-res-v1`,
+executado imediatamente depois, passou 2/2 com determinismo confirmado (SHA-256 idêntico). A
+correção de processos órfãos da rodada anterior (20260806-112714) funcionou corretamente: nenhuma
+árvore `dotnet.exe` órfã antes/depois de nenhuma execução, e o Gyroid de controle não sofreu
+cascata.
+
+**Nova hipótese do usuário**: o stdout capturado no momento do timeout já continha um JSON de
+resultado quase completo (`mesh_calibration_iterations: 3`, `measured_porosity_within_tolerance:
+true`, `estimated_voxel_count: 15625` etc.) -- sugerindo que o cálculo terminou, mas o processo
+não encerrou. Hipótese prioritária levantada: `VoronoiScaffoldBuilder.cs` poderia estar deixando
+`bEndAppWithTask` no valor padrão `false` (ao contrário do Gyroid, corrigido na seção 10.1).
+
+**Auditoria real realizada nesta rodada** (não suposição -- comparação literal do código-fonte
+vivo + reflexão + decompilação real contra o PicoGK.dll 2.2.0 instalado via NuGet):
+
+1. `VoronoiScaffoldBuilder.cs` linha ~268: `Library.Go((float)voxelSizeEffectiveMm, () => { ... },
+   bEndAppWithTask: true);` -- **já passa `bEndAppWithTask: true` explicitamente**, de forma
+   estruturalmente IDÊNTICA à chamada em `GyroidScaffoldBuilder.cs`. A hipótese de "parâmetro
+   deixado no padrão `false`" está **REFUTADA** por leitura direta do arquivo-fonte atual (não
+   uma versão em cache/desatualizada).
+2. Dispose de `Voxels`/`Mesh`: ambos os arquivos usam `using var candidateVoxels = new
+   Voxels(...)` e `using var candidateMeshObj = new Mesh(...)` de forma idêntica -- confirmado
+   por reflexão contra `PicoGK.dll` que ambos os tipos implementam `IDisposable` com um único
+   método público `Dispose()`. Nenhuma diferença de padrão de descarte entre os dois arquivos.
+3. Nenhum dos dois arquivos referencia `Library.oViewer`/`Viewer.Add(...)` em nenhum lugar --
+   nenhuma malha/voxel é adicionada explicitamente ao viewer para exibição em nenhum dos dois
+   casos, então "quantidade de geometria renderizada" não é uma diferença de código entre eles.
+4. **Decompilação real do corpo de `PicoGK.Library.Go`** (via `ilspycmd` contra o
+   `PicoGK.dll` 2.2.0 realmente instalado -- não documentação, não suposição) revelou o mecanismo
+   exato:
+
+   ```csharp
+   public static void Go(float fVoxelSizeMM, ThreadStart fnTask, string strLogFilePath = "",
+       bool bEndAppWithTask = false, string strWindowTitle = "PicoGK", string strLightsFile = "")
+   {
+       ...
+       using GlobalInstance globalInstance = new GlobalInstance(fVoxelSizeMM, strLogFilePath, strWindowTitle, strLightsFile);
+       Thread thread = new Thread(fnTask);
+       thread.Start();
+       while (globalInstance.oViewer.bPoll())
+       {
+           Thread.Sleep(5);
+           if (bEndAppWithTask && !thread.IsAlive && globalInstance.oViewer.bIsIdle())
+           {
+               break;
+           }
+       }
+       EndTask();
+       while (thread.IsAlive)
+       {
+           globalInstance.oViewer.bPoll();
+           Thread.Sleep(5);
+           ...
+       }
+       m_bAppExit = true;
+   }
+   ```
+
+   Ou seja: mesmo com `bEndAppWithTask: true`, `Go()` só retorna quando (a) a thread da tarefa
+   (`fnTask`) realmente termina (`!thread.IsAlive`) **E** (b) o viewer nativo reporta-se `bIsIdle()`
+   dentro do primeiro laço -- e, adicionalmente, o SEGUNDO laço (`while (thread.IsAlive)`, que
+   roda incondicionalmente, independente de `bEndAppWithTask`) só sai quando a thread de fato
+   termina. `bEndAppWithTask: true` é necessário mas não suficiente por si só -- ele não
+   controla nada além de UMA das condições de saída do primeiro laço; o encerramento real do
+   processo continua dependendo do estado interno do viewer nativo (`bPoll()`/`bIsIdle()`),
+   que é código nativo (`picogk.26.2.dll`) fora do alcance de qualquer parâmetro C# que
+   possamos passar.
+
+**Evidência adicional que restringe onde o hang acontece**: o JSON parcial capturado no stdout
+do WORKER_TIMEOUT real inclui campos (`estimated_voxel_count`, `estimated_memory_mb_upper_bound`)
+que só são serializados em `Program.cs` DEPOIS que `topologyProvider.BuildAndExport(...)` (e,
+portanto, `Library.Go(...)`) já retornou -- ou seja, a evidência real sugere que TODO o cálculo,
+incluindo o retorno de `Library.Go`, a validação do STL, o hash SHA-256 e a serialização do JSON
+final já haviam ocorrido, e o processo .NET simplesmente não encerrou sozinho depois disso
+(`Main()` retornaria `0`, mas o processo do SO continua vivo até o watchdog externo confirmar
+o encerramento da árvore).
+
+**Conclusão honesta desta rodada**: a hipótese específica de "bEndAppWithTask deixado em `false`"
+está refutada -- ambos os arquivos já o configuram corretamente e de forma idêntica. A causa mais
+provável, dada a decompilação real acima, é um comportamento do PRÓPRIO PicoGK.Library.Go (ou do
+viewer nativo `picogk.26.2.dll` que ele encapsula) que não está sob controle de nenhum parâmetro
+que o código de aplicação possa ajustar -- possivelmente correlacionado com a maior
+complexidade/fragmentação da malha de voxels gerada pelo Voronoi (muitos primitivos pequenos
+unidos por smooth-min, sem estrutura de aceleração espacial, já documentado como limitação
+conhecida no cabeçalho de `VoronoiScaffoldBuilder.cs`) versus a superfície TPMS contínua e única
+do Gyroid. Isso NÃO foi provado de forma definitiva (não é possível instrumentar/depurar o
+processo nativo a partir deste sandbox Linux, que nem sequer consegue executar o PicoGK real) --
+permanece como a explicação mais bem fundamentada disponível, não uma conclusão fechada. Não é
+recomendado aumentar o timeout como "solução": se a causa for um hang genuíno (não apenas lento),
+nenhum timeout maior resolveria -- apenas adiaria a detecção.
+
+**O que FOI corrigido nesta rodada, independente da causa do hang**:
+
+- O stdout/stderr completo do worker (nunca truncado) agora é preservado em um arquivo próprio
+  (`_worker_diagnostics/<job_id>.json`, irmão de `output_dir`, sobrevive à limpeza de artefatos
+  parciais) -- ver `worker_client.py::_write_full_diagnostics_file` e
+  `test_worker_timeout_recovery.py` (2 novos testes).
+- Regressão permanente: `AllTopologyProvidersLibraryGoConfigurationTests.cs` escaneia TODOS os
+  arquivos-fonte reais de `apps/geometry-worker` (não apenas o Gyroid) e falha se qualquer
+  chamada real a `Library.Go(` for encontrada sem `bEndAppWithTask: true` -- protege contra
+  regressão em qualquer provider futuro.
+
+**Próximo passo recomendado (fora do alcance deste sandbox)**: investigar o hang diretamente no
+Windows com um profiler/depurador nativo anexado ao processo `dotnet.exe` no momento do timeout
+(ex.: Process Explorer para inspecionar threads vivas, ou um dump de memória), para confirmar se
+o thread travado é o loop de `bPoll()` do viewer nativo ou algum outro mecanismo interno do
+PicoGK -- não realizável a partir deste ambiente Linux, que não executa o runtime nativo do
+PicoGK (ver seção 4).

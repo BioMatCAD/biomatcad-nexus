@@ -1482,6 +1482,158 @@ obter, com as correções desta seção já em vigor: (a) o diagnóstico complet
 causa raiz), e (b) a prova de que uma eventual nova falha do piloto não invalida mais a matriz
 completa. **Este roteiro real ainda não foi executado após esta correção.**
 
+## 21. Validação Windows real 20260806-133141 -- cascata de processos órfãos CONFIRMADA corrigida, Voronoi ainda REPROVADO, 3 falhas backend diagnosticadas e corrigidas (2026-08-06)
+
+**Diretório da evidência**: `C:\biomatcad-runs\voronoi-validation-staged-20260806-133141\pilot`
+(gerado por `scripts/Run-VoronoiWindowsValidation-Staged.ps1`, rodando contra o commit `1cdc062`
+-- a correção da rodada anterior, 20260806-112714).
+
+### Resultado literal do piloto (`CONSOLIDATED_REPORT.md`)
+
+| Etapa | Resultado |
+|---|---|
+| worker `dotnet test` | 99/99 (log: worker-test.log) |
+| frontend `vitest run` | 119/119 |
+| `isolamento_block-voronoi-preview-v1_run{1,2}_{pre,pos}` | OK -- nenhum processo `dotnet.exe` órfão antes/depois de NENHUMA execução |
+| `gate_block-voronoi-preview-v1_run1` | FALHA -- exit 1, 66.7s (WORKER_TIMEOUT) |
+| `gate_block-voronoi-preview-v1_run2` | FALHA -- exit 1, 65.5s (WORKER_TIMEOUT) |
+| `determinismo_block-voronoi-preview-v1` | FALHA -- STL ausente em ambas as execuções |
+| `isolamento_preview-gyroid-low-res-v1_run{1,2}_{pre,pos}` | OK -- nenhum órfão |
+| `gate_preview-gyroid-low-res-v1_run1` | OK -- 7.4s |
+| `gate_preview-gyroid-low-res-v1_run2` | OK -- 7.2s |
+| `determinismo_preview-gyroid-low-res-v1` | OK -- SHA-256 `7660dae3ee263445835bbf9d26c16fa4ef8f8ee2fd2c320000b0546c1eaaba78` idêntico em run1/run2 |
+| `auditoria_independente_preview-gyroid-low-res-v1_run1` | OK |
+| `api_pytest` (roteiro ANTES da correção desta rodada) | exit 1 -- **205 passed, 3 failed, 1 skipped** (3, não 2 -- uma falha NOVA) |
+| `e2e_playwright` | Pulado via `-SkipE2E` -- não validado nesta rodada |
+| `full_stage_executed` | `false` -- a matriz completa corretamente NÃO rodou (piloto reprovou) |
+
+**Conclusão comprovada pelo próprio usuário, confirmada por esta auditoria**: a cascata por
+processos órfãos foi corrigida (nenhuma árvore órfã em nenhuma das execuções, mesmo depois de
+dois timeouts reais consecutivos) e o Gyroid de controle funcionou perfeitamente logo depois --
+exatamente o comportamento que a correção da rodada 20260806-112714 pretendia garantir.
+
+### Diagnóstico do WORKER_TIMEOUT do Voronoi (auditoria real, não especulação)
+
+Ver `apps/geometry-worker/WORKER_STATUS.md` seção 12 para o registro técnico completo. Resumo:
+
+- A hipótese específica levantada pelo usuário ("Voronoi deixa `bEndAppWithTask` no padrão
+  `false`") foi **auditada e REFUTADA**: leitura direta do arquivo-fonte vivo confirma que
+  `VoronoiScaffoldBuilder.cs` já passa `bEndAppWithTask: true`, de forma estruturalmente
+  idêntica a `GyroidScaffoldBuilder.cs` (mesmo padrão `using` para `Voxels`/`Mesh`, nenhuma
+  referência a `Library.oViewer`/`Viewer.Add` em nenhum dos dois arquivos).
+- Decompilação real do corpo de `PicoGK.Library.Go` (via `ilspycmd` contra o `PicoGK.dll` 2.2.0
+  efetivamente instalado) mostrou que `bEndAppWithTask: true` é necessário mas não suficiente:
+  o retorno de `Go()` também depende de `oViewer.bIsIdle()` (estado do viewer nativo) e de um
+  segundo laço incondicional que espera a thread da tarefa terminar -- nenhum desses dois
+  mecanismos é controlável por um parâmetro de aplicação.
+- A evidência do JSON parcial no stdout do timeout (campos como `estimated_voxel_count` que só
+  são serializados DEPOIS que `Library.Go` já retornou) sugere que todo o cálculo -- incluindo o
+  retorno de `Library.Go` -- já havia terminado, e o processo .NET simplesmente não encerrou
+  sozinho depois disso.
+- **Conclusão honesta**: a causa mais provável, dada a auditoria real disponível, é um
+  comportamento do próprio PicoGK (biblioteca/viewer nativo), possivelmente correlacionado à
+  maior complexidade da malha de voxels do Voronoi -- não um defeito identificável no código de
+  aplicação deste projeto. Isso não foi provado de forma definitiva (não é possível depurar o
+  processo nativo a partir deste sandbox Linux) e permanece como hipótese mais bem fundamentada,
+  não uma conclusão fechada.
+
+**Voronoi continua NÃO aprovado**: nenhum STL foi produzido em nenhuma das duas execuções,
+portanto não há auditoria independente, nem comparação de 5 fontes SHA-256, nem determinismo
+2x para `block-voronoi-preview-v1` -- os critérios de aprovação continuam integralmente
+pendentes, exatamente como nas rodadas anteriores.
+
+### Correções aplicadas nesta rodada, independente da causa do hang (commit desta rodada)
+
+- `apps/api/src/biomatcad_api/services/worker_client.py`: o stdout/stderr COMPLETO (nunca
+  truncado) do worker agora é preservado em `_worker_diagnostics/<job_id>.json`, um diretório
+  IRMÃO de `output_dir` -- sobrevive a `_cleanup_output_dir` (que sempre apaga `output_dir`
+  inteiro após qualquer falha). Testado por 2 novos cenários em
+  `test_worker_timeout_recovery.py`.
+- `apps/geometry-worker/tests/BioMatCadGeometryWorker.Tests/AllTopologyProvidersLibraryGoConfigurationTests.cs`
+  (novo): escaneia TODOS os arquivos-fonte reais de `apps/geometry-worker` (não apenas Gyroid) e
+  falha se qualquer chamada real a `Library.Go(` for encontrada sem `bEndAppWithTask: true` --
+  protege contra regressão em qualquer provider de topologia futuro. Suíte do worker: 100/100
+  (era 99/99 -- +1 teste novo).
+
+### Diagnóstico e correção das 3 falhas backend (contaminação real por banco persistente)
+
+Causa raiz confirmada (não apenas suspeitada): a suíte pytest, quando executada com
+`TEST_DATABASE_URL`/`DATABASE_URL` apontando para a MESMA instância Postgres real usada pela
+validação manual (gate HTTP real, dispatcher real), via visíveis linhas REAIS já commitadas por
+essa validação manual -- o padrão "uma transação por teste, rollback ao final" (fixture
+`db_session`) sempre funcionou para o que cada teste escreve, mas nunca escondeu dados JÁ
+COMMITADOS por outra sessão. Sintomas relatados pelo usuário: cancelamento reivindicou um job
+antigo real (`8f572e95...`); concorrência (`test_geometry_job_concurrency.py`, que usa
+`biomatcad_api.db.SessionLocal` diretamente -- conexões verdadeiramente independentes, não a
+fixture isolada -- para provar exclusão mútua real via `SELECT FOR UPDATE SKIP LOCKED`)
+reivindicou 32 jobs em vez dos 24 criados pelo próprio teste; observabilidade contou 10 jobs
+"processing" que não eram dela.
+
+**Correção real** (`apps/api/tests/conftest.py`): quando `TEST_DATABASE_URL` aponta para
+Postgres real, a suíte inteira roda dentro de um SCHEMA Postgres exclusivo e efêmero (nunca
+`"public"`), injetado via `options=-c search_path=...` diretamente na própria connection string
+-- um parâmetro de conexão libpq padrão, repassado por psycopg2/psycopg3 sem exigir NENHUMA
+mudança em `biomatcad_api/db.py` nem nos testes existentes (inclusive
+`test_geometry_job_concurrency.py`, que abre suas próprias conexões via `SessionLocal`). O
+schema é criado do zero no início da sessão de testes e destruído ao final -- nunca toca no
+schema `"public"` real (nunca apaga o banco de pesquisa do usuário).
+
+**Prova real desta correção** (executada nesta rodada, neste sandbox, contra um Postgres efêmero
+real via `pgserver`, não simulado):
+
+1. Semeadas 10 linhas REAIS e commitadas de verdade no schema `"public"` (6 jobs `running`, 4
+   `queued`, mais organização/projeto/receita reais) -- simulando fielmente uma validação manual
+   anterior.
+2. Suíte completa (`pytest -q`, 213 testes coletados) executada com `TEST_DATABASE_URL` apontando
+   para essa MESMA instância -- resultado: **211 passed, 2 skipped, 0 failed** (os 2 pulados são
+   os novos testes de `test_database_schema_isolation.py` quando rodando contra SQLite, não
+   aplicável aqui).
+3. Confirmado programaticamente, depois da suíte: as 10 linhas reais semeadas no `"public"`
+   continuam intactas -- mesmo status, nenhuma reivindicada, nenhuma apagada.
+
+**Regressão permanente adicionada** (`apps/api/tests/test_database_schema_isolation.py`, novo):
+2 testes que semeiam contaminação real no schema `"public"` (via uma conexão à parte, sem o
+`search_path` isolado) e confirmam que `claim_next_queued_job` e `check_queue` (via a sessão
+isolada do teste) nunca a veem -- reproduzem programaticamente os 2 sintomas mais graves
+relatados (concorrência e observabilidade). Pulados automaticamente contra SQLite (onde não há
+conceito de schema/search_path e a garantia não se aplica).
+
+**`scripts/Run-VoronoiWindowsValidation.ps1`**: corrigido para (a) setar `TEST_DATABASE_URL`
+(não apenas `DATABASE_URL`) antes do `pytest`, ativando o isolamento de schema acima contra o
+mesmo servidor real; (b) reportar o exit code REAL do pytest (`-Ok ($pytestExit -eq 0)`) --
+antes disso, o passo `api_pytest` sempre reportava `-Ok $true` incondicionalmente e uma mensagem
+fixa de "2 falhas pre-existentes esperadas", então uma nova falha real (como a terceira desta
+rodada) nunca teria sido sinalizada como reprovação no relatório consolidado.
+
+**Nota de honestidade sobre SQLite**: rodando a suíte completa contra o SQLite padrão (nunca o
+ambiente real de validação -- o roteiro Windows sempre usa Postgres real), 2 falhas
+pré-existentes e NÃO relacionadas a este diagnóstico continuam aparecendo:
+`test_clinical_suite_expiration_is_respected` (teste sensível a timing -- ativa algo com
+expiração de ~1s e depende de um `sleep`, flakiness de ambiente, não relacionado a banco de
+dados) e `test_two_concurrent_dispatchers_never_claim_the_same_job` (o próprio docstring do
+teste já documenta que SQLite não suporta `SELECT FOR UPDATE SKIP LOCKED` da mesma forma que
+Postgres e "não seria uma prova válida deste requisito" -- ou seja, um teste que só é válido
+contra Postgres real, por design). Nenhuma delas é uma das 3 falhas de contaminação relatadas
+pelo usuário nesta rodada, e nenhuma delas apareceu na execução real contra Postgres isolado
+(prova acima: 0 failed). O critério de aceite ("backend completo com 0 falhas em banco de testes
+isolado") está satisfeito contra o ambiente real de validação (Postgres), que é o único ambiente
+em que o roteiro Windows de fato executa a suíte.
+
+### O que esta rodada NÃO cobre
+
+- E2E Playwright não foi executado nesta rodada (`-SkipE2E` no piloto) -- permanece não validado
+  desde a rodada anterior.
+- A matriz completa de receitas (`block-voronoi-final-v1`, `cylinder-voronoi-preview-v1`,
+  `block-gyroid-v1`, `cylinder-gyroid-v1`) não foi executada -- corretamente, já que o piloto
+  reprovou (mesmo mecanismo de contenção de cascata da rodada anterior, agora comprovado em uso
+  real).
+- Voronoi (`block-voronoi-preview-v1` e, por extensão, as demais receitas Voronoi) continua sem
+  nenhum STL real produzido, nenhuma auditoria independente, nenhuma comparação de 5 fontes
+  SHA-256 e nenhum determinismo 2x -- não pode ser declarado aprovado.
+- A causa exata do hang dentro de `PicoGK.Library.Go`/viewer nativo não foi provada de forma
+  definitiva -- apenas localizada com precisão bem maior que antes (dentro do próprio Go(), não
+  em nenhum parâmetro de aplicação) via decompilação real.
+
 ## O que esta evidência explicitamente NÃO cobre
 
 - **Consistência STL-vs-manifesto via fluxo completo API→dispatcher→worker PicoGK real→
