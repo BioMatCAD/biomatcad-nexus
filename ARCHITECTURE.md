@@ -308,6 +308,76 @@ observabilidade real, e três preparações arquiteturais auditáveis:
   contraste no tema escuro (medida, não corrigida por redesenho) estão em
   `docs/brand/ASSETS_NOTICE.md`.
 
+## Incremento 2.2 (rodada Voronoi) — segunda topologia real (`voronoi_cell_edges_v1`)
+
+Sobre a base da rodada anterior (contrato `TopologyProvider`, ADR-0009), esta rodada implementa
+a **segunda topologia real** anunciada como "planejada": Voronoi de células com arestas
+espessadas (struts), não Delaunay e não uma aproximação mal rotulada. Continua **sem desbloquear
+o PicoGK** neste sandbox Linux (ADR-0007) — toda a matemática independente de PicoGK foi provada
+via testes unitários reais; a execução do worker completo (`Voxels`/`Mesh` reais) permanece
+dependente de execução em Windows pelo usuário.
+
+- **Auditoria matemática prévia**: decisão registrada de usar diagrama de Voronoi real (não
+  Delaunay renomeado) — sítios gerados deterministicamente por seed, tesselação 3D via
+  triangulação de Delaunay (`MIConvexHull`, MIT, única dependência nova) seguida de extração do
+  grafo dual real (nós = circuncentros dos tetraedros, arestas = faces compartilhadas entre
+  tetraedros vizinhos — convenção de adjacência do MIConvexHull verificada empiricamente, não
+  assumida da documentação). Arestas que cruzam o domínio são recortadas pelo SDF real do
+  domínio (reuso de `GyroidMath.BoxSignedDistanceMm`/`CappedCylinderSignedDistanceMm`).
+- **Schema**: `voronoi_cell_edges_v1` adicionado a `geometry-recipe-v1.schema.json` como um
+  segundo ramo do `oneOf` de `topology`, com campos próprios (`site_count`, `distribution`,
+  `strut_radius_mm`, `node_smoothing`, `node_radius_factor`, `boundary_behavior`,
+  `seed_site_min_separation_mm`, `target_porosity_pct`) e rejeição explícita de mistura com
+  campos do Gyroid (`wall_thickness_mm` etc.) em qualquer direção.
+- **Worker**: `VoronoiSiteGenerator.cs` (geração determinística por seed, distribuições
+  `uniform_random` e `jittered_grid`), `VoronoiTessellation.cs` (tesselação 3D real + grafo de
+  arestas + recorte pelo domínio + verificação de contenção com tolerância nomeada), struts
+  implícitos (cápsulas arredondadas ao redor de cada aresta) com suavização de nós via
+  smooth-union do PicoGK (`node_smoothing`, `node_radius_factor`), calibração de porosidade
+  fechada sobre a malha real (mesmo padrão do Gyroid, iterativa contra o volume medido, não
+  estimado). `VoronoiTopologyProvider` registrado no `TopologyProviderRegistry` ao lado do
+  Gyroid, sem alterar nenhum resultado das 3 golden recipes Gyroid já aprovadas
+  (`voronoi_cell_edges_v1` passa a ter `status="implemented"` nos dois lados, Python e C#).
+- **Métricas específicas**: contagens de sítios/células/nós/arestas (incluindo arestas
+  descartadas por ficarem fora do domínio), comprimento de strut (média/min/max/desvio-padrão),
+  grau de nó (média/min/max/desvio-padrão), componentes conectados, nós isolados, contenção
+  máxima no domínio e uma flag booleana de contenção verificada — tudo via o mesmo padrão
+  `[JsonExtensionData]`/`metrics.Extra` já usado pelo Gyroid, sem exigir nenhuma mudança de
+  schema no lado Python (`dict[str, Any]` genérico já suportava isso).
+- **Frontend**: `RecipeEditorPage.tsx` com formulário completo para os dois ramos da união
+  discriminada `topology` (Gyroid/Voronoi), estimativa de custo computacional client-side
+  (`computeCostEstimate.ts`, mesma fórmula de voxel/memória do servidor, independente de
+  topologia), aviso de "receita pesada" para Voronoi com muitos sítios, tabela de métricas
+  Voronoi dedicada em `JobDetailPage.tsx` com disclaimer explícito de que a conectividade
+  reportada é topológica (grafo de Voronoi), não uma alegação de conectividade biológica. O modo
+  de demonstração (`demoClient.ts`, GitHub Pages) **não fabrica** um resultado Voronoi de
+  sucesso: qualquer job Voronoi enviado no demo termina em `failed` com
+  `error_code: "DEMO_EXECUTION_UNAVAILABLE"`, reaproveitando a UI de falha já existente.
+- **3 golden recipes Voronoi** (`block-voronoi-preview-v1`, `block-voronoi-final-v1`,
+  `cylinder-voronoi-preview-v1`) — mesma convenção de nomenclatura e localização das golden
+  recipes Gyroid, cobrindo domínio bloco e cilindro, `preview` e `final`.
+- **Auditoria independente de STL** (`apps/api/scripts/audit_stl_independent.py`): parser STL e
+  reimplementação da SDF de domínio escritos do zero (não reusam o código do worker), para dar
+  uma segunda opinião real sobre watertight/manifold/contenção — desenhado para ter chance real
+  de capturar um bug no próprio cálculo de métricas do worker, e não apenas comparar o worker
+  contra si mesmo.
+- **Caderno de invenção confidencial** (`docs/private/INVENTION_NOTEBOOK_VORONOI.md`, não
+  público) — registra alternativas consideradas, decisões, experimentos e bugs reais
+  encontrados durante esta implementação, sem nenhuma linguagem de reivindicação de patente,
+  ®/™ ou declaração de registro no INPI.
+- **Roteiro único de validação Windows** (`scripts/Run-VoronoiWindowsValidation.ps1`) — orquestra
+  build/testes do worker, testes do backend/frontend, subida da API, execução das 6 golden
+  recipes (3 Gyroid + 3 Voronoi) duas vezes cada para checar determinismo por SHA-256, auditoria
+  STL independente, inspeção visual manual e E2E Playwright — para ser executado pelo usuário em
+  Windows; **nunca executado neste sandbox Linux** (sintaxe validada estaticamente apenas).
+- **O que permanece real mas não provado neste sandbox**: qualquer execução de fato do
+  `VoxelsFromImplicit`/`Mesh` do PicoGK sobre uma das 3 golden recipes Voronoi; determinismo
+  geométrico real (dois SHA-256 de STL iguais); a auditoria STL independente rodando contra um
+  STL real (hoje só provada contra fixtures sintéticas de teste); a inspeção visual no
+  visualizador 3D; o E2E Playwright completo. Todos dependem da execução do roteiro acima em
+  Windows pelo usuário — ver `TEST_EVIDENCE.md`, seção "Rodada Voronoi", para o registro
+  detalhado do que foi e não foi provado nesta sessão.
+
 ## Próximo incremento sugerido
 
 Ver `REQUIREMENTS_MATRIX.md`, `ROADMAP.md` e `docs/adr/` para prioridades. O Prompt Mestre

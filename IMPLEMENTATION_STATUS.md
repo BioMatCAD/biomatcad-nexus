@@ -1,15 +1,71 @@
 # Status de Implementação — BioMatCAD Nexus
 
-Última atualização: 2026-07-30 (Incremento 2.2 Alpha Pesquisa, branch
+Última atualização: 2026-08-06 (rodada Voronoi do Incremento 2.2, branch
 `incremento-2.2-alpha-pesquisa` — pesquisa apenas; launcher Windows formalmente DEFERIDO, não
-retomado; nenhum dado clínico/paciente real neste incremento). A seção "Incremento 2.2 Alpha
-Pesquisa", logo abaixo, é a mais atual e deve ser lida primeiro. **Bloqueio de runtime nativo do
-PicoGK em linux-x64 (ADR-0007/ADR-0008) permanece verdadeiro apenas para ESTE sandbox de
-desenvolvimento Linux** — o worker PicoGK real foi executado com sucesso no Windows do usuário
-em incrementos anteriores. Este documento existe para que ninguém — incluindo IAs de
-desenvolvimento futuras — precise adivinhar o que é real. Regra do Prompt Mestre §3.1: nada aqui
-é descrito como "completo" sem ter sido executado e testado nesta sessão. As seções sobre os
-Incrementos 1.1, 2.1 e 2.1.1 abaixo são mantidas como registro histórico.
+retomado; nenhum dado clínico/paciente real neste incremento). A seção "Rodada Voronoi
+(Incremento 2.2)", logo abaixo, é a mais atual e deve ser lida primeiro, seguida da seção
+"Incremento 2.2 Alpha Pesquisa" (rodada anterior, GUI/observabilidade/contrato TopologyProvider).
+**Bloqueio de runtime nativo do PicoGK em linux-x64 (ADR-0007/ADR-0008) permanece verdadeiro
+apenas para ESTE sandbox de desenvolvimento Linux** — o worker PicoGK real foi executado com
+sucesso no Windows do usuário em incrementos anteriores (Gyroid). A execução real do Voronoi no
+PicoGK **ainda não foi confirmada por nenhuma execução Windows nesta rodada** — ver seção
+dedicada abaixo. Este documento existe para que ninguém — incluindo IAs de desenvolvimento
+futuras — precise adivinhar o que é real. Regra do Prompt Mestre §3.1: nada aqui é descrito como
+"completo" sem ter sido executado e testado nesta sessão. As seções sobre os Incrementos 1.1,
+2.1 e 2.1.1 abaixo são mantidas como registro histórico.
+
+## Rodada Voronoi (Incremento 2.2) — segunda topologia real (`voronoi_cell_edges_v1`)
+
+Escopo desta rodada (Seções 1-14 da instrução de retomada): implementação real de uma segunda
+topologia (Voronoi de células com struts, não Delaunay renomeado), sobre a base do contrato
+`TopologyProvider` da rodada anterior. `master` e as tags `incremento-2.1-base`,
+`incremento-2.1.1-final`, `incremento-2.1.1-v2.2.1` não foram tocados. **Incremento 2.2 NÃO é
+declarado concluído nesta rodada** — ver "O que ainda depende de execução Windows real" abaixo.
+
+| Item | Status | Evidência |
+|---|---|---|
+| Auditoria matemática (Voronoi real vs. Delaunay/aproximação) | **Real, decisão registrada** | `docs/architecture/voronoi-cell-edges-v1-math-audit.md` |
+| Dependência de triangulação Delaunay 3D (`MIConvexHull` 1.1.19.1019, MIT) | **Avaliada e adotada** | `apps/geometry-worker/BioMatCadGeometryWorker.csproj`; `NOTICES.md` |
+| Schema `voronoi_cell_edges_v1` (segundo ramo do `oneOf` de `topology`) | **Real** | `schemas/biomatcem/geometry-recipe-v1.schema.json`; `apps/api/tests/test_recipe_schema_voronoi.py` (41 testes) |
+| Geração determinística de sítios (`uniform_random`, `jittered_grid`) | **Real** | `apps/geometry-worker/VoronoiSiteGenerator.cs` |
+| Tesselação 3D real + grafo de arestas (via `MIConvexHull`, recorte pelo domínio) | **Real** | `apps/geometry-worker/VoronoiTessellation.cs`; `VoronoiMathTests.cs` (22 testes) |
+| Struts implícitos + suavização de nós (smooth-union PicoGK) + calibração de porosidade sobre malha real | **Real (matemática independente de PicoGK provada; execução real do PicoGK não provada neste sandbox)** | `VoronoiImplicitMathTests.cs` (15 testes) |
+| `VoronoiTopologyProvider` registrado (`status="implemented"`, Python + C#) | **Real, sem regressão no Gyroid** | `apps/api/src/biomatcad_api/services/topology_providers.py`; `apps/geometry-worker/VoronoiTopologyProvider.cs`; `test_topology_providers.py` |
+| Métricas específicas Voronoi (sítios/células/nós/arestas/struts/grau de nó/contenção) | **Real, ponta a ponta (schema→worker→manifesto→frontend)** | `VoronoiTopologyProvider.cs` (`metrics.Extra`); `apps/web/src/pages/JobDetailPage.tsx` |
+| 3 golden recipes Voronoi (`block-voronoi-preview-v1`, `block-voronoi-final-v1`, `cylinder-voronoi-preview-v1`) | **Real (validam contra o schema; execução PicoGK real não provada neste sandbox)** | `test_golden_recipes_all_validate` (6/6 com as 3 Gyroid) |
+| Frontend: editor de receita, estimativa de custo, aviso de receita pesada, tabela de métricas Voronoi, demo honesto (`DEMO_EXECUTION_UNAVAILABLE`) | **Real** | `RecipeEditorPage.tsx`, `computeCostEstimate.ts`, `JobDetailPage.tsx`, `demoClient.ts`; `RecipeEditorPage.test.tsx` (7 testes) |
+| Auditoria STL independente (parser + SDF reimplementados do zero) | **Real, testada contra fixtures sintéticas; nunca rodada contra STL real** | `apps/api/scripts/audit_stl_independent.py`; `test_audit_stl_independent.py` (13 testes) |
+| Caderno de invenção confidencial | **Real, não público** | `docs/private/INVENTION_NOTEBOOK_VORONOI.md` |
+| Roteiro único de validação Windows | **Real (sintaxe validada estaticamente); nunca executado neste sandbox** | `scripts/Run-VoronoiWindowsValidation.ps1` |
+
+**Contagens de teste literais desta rodada** (ver `TEST_EVIDENCE.md`, seção 19, para o registro
+completo com comandos):
+
+- Worker C# (`dotnet test`): **99 passed, 0 failed** (62 Gyroid pré-existentes, sem regressão +
+  22 `VoronoiMathTests` + 15 `VoronoiImplicitMathTests`).
+- Backend (`pytest`): **194 passed, 2 failed (pré-existentes, não relacionados a Voronoi,
+  reproduzidos comparativamente contra o commit `d09a616`), 2 skipped**.
+- Frontend (`vitest run`): **118 passed, 0 failed** (23 arquivos); `tsc --noEmit` 0 erros;
+  `eslint` 0 problemas; `build` e `build:pages` com sucesso.
+
+**Commits desta rodada** (`incremento-2.2-alpha-pesquisa`, do primeiro ao último, do mais antigo
+ao mais novo): `e07a5e2`, `347289c`, `6790938`, `d09a616`, `64d243b`, `3649550`, `284d2c6`,
+`d319986`, `e6b446e`, `622c5a1`, `2f5a43f`, `bf756a4`.
+
+**O que ainda depende de execução Windows real** (não provado neste sandbox Linux, sem PicoGK):
+
+1. Execução de fato do `VoxelsFromImplicit`/`Mesh` do PicoGK sobre as 3 golden recipes Voronoi.
+2. Determinismo geométrico real: mesma receita Voronoi + mesma seed, duas execuções reais,
+   mesmo SHA-256 de STL (o roteiro `Run-VoronoiWindowsValidation.ps1` está pronto para produzir
+   essa evidência, mas ainda não foi executado).
+3. A auditoria STL independente (`audit_stl_independent.py`) rodando contra um STL Voronoi real
+   gerado pelo PicoGK (hoje só provada contra fixtures sintéticas de teste).
+4. Confirmação visual no visualizador 3D de uma malha Voronoi real.
+5. E2E Playwright cobrindo o fluxo Voronoi (bloqueado neste sandbox por falta de dependências
+   nativas do Chromium, mesma limitação de sempre).
+6. Confirmação de que as 3 golden recipes Gyroid continuam produzindo o mesmo SHA-256 de sempre
+   quando executadas lado a lado com as novas golden recipes Voronoi no mesmo ambiente Windows
+   (regressão real, não apenas testes unitários).
 
 ## Incremento 2.2 Alpha Pesquisa — resumo (branch `incremento-2.2-alpha-pesquisa`)
 

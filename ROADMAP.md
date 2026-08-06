@@ -5,7 +5,8 @@ bloqueado) e o Incremento 2.1.1 (corretivo sobre defeitos da auditoria do 2.1, t
 parcialmente bloqueado no mesmo ponto — ver `IMPLEMENTATION_STATUS.md`, ADR-0007 e ADR-0008).
 Não é uma promessa de prazos; é uma priorização técnica, atualizada a cada incremento aceito.
 Ver `REQUIREMENTS_MATRIX.md` para o mapeamento completo de requisitos e `docs/adr/` para as
-decisões que o sustentam.
+decisões que o sustentam. Atualizado em 2026-08-06 com a rodada Voronoi do
+Incremento 2.2 (segunda topologia real, `voronoi_cell_edges_v1`) — ver seção dedicada abaixo.
 
 ## Feito
 
@@ -39,7 +40,19 @@ decisões que o sustentam.
   recursos WebGL, suíte de testes de componente e correção de 4 bugs reais encontrados durante
   a auditoria/testes -- ver `docs/architecture/viewer-3d-audit.md` e a seção dedicada em
   `IMPLEMENTATION_STATUS.md`). Launcher Windows permanece formalmente **deferido** (não
-  retomado). Ainda **não concluído**: Voronoi como implementação real, empacotamento final v2.2.
+  retomado).
+- **Fase 2 (Incremento 2.2, rodada Voronoi)**: segunda topologia real implementada
+  (`voronoi_cell_edges_v1`) -- sítios determinísticos por seed, tesselação Voronoi 3D real via
+  `MIConvexHull` (não Delaunay renomeado), grafo de arestas recortado pelo domínio via SDF real,
+  struts implícitos com suavização de nós, calibração de porosidade sobre malha real, métricas
+  específicas completas, `VoronoiTopologyProvider` registrado (`status="implemented"`, sem
+  regressão no Gyroid), 3 golden recipes, frontend completo (editor, estimativa de custo, aviso
+  de receita pesada, demo honesto sem fabricar sucesso), auditoria STL independente escrita do
+  zero, caderno de invenção confidencial, roteiro único de validação Windows -- ver
+  `IMPLEMENTATION_STATUS.md` (seção "Rodada Voronoi") e `TEST_EVIDENCE.md` (seção 19). **Ainda
+  não concluído**: nenhuma execução real do PicoGK sobre as golden recipes Voronoi foi
+  confirmada nesta rodada (depende de execução Windows pelo usuário); empacotamento final v2.2
+  continua não feito.
 
 ## Próximo (prioridade, nesta ordem)
 
@@ -88,11 +101,14 @@ incremento concluído:
    continua deliberadamente fora desta rodada (item 2 abaixo). Pendência remanescente, não
    escondida: E2E Playwright em navegador real dos novos controles ainda não executado (mesmo
    bloqueio de sandbox de sempre — ver `docs/architecture/viewer-3d-audit.md`).
-2. **`VoronoiTopologyProvider` real** — a preparação técnica (`docs/architecture/
-   voronoi-topology-preparation.md`) está pronta; a implementação real (geração de sítios,
-   diagrama, grafo, struts, suavização) é trabalho de um incremento futuro, condicionado a
-   resolver antes a proveniência/licença das bibliotecas de referência citadas no documento
-   (`trimesh`, `manifold3d`, `rtree` — não auditadas nesta rodada).
+2. ~~**`VoronoiTopologyProvider` real**~~ -- **CONCLUÍDO na rodada Voronoi** (commits
+   `e07a5e2`..`bf756a4`): geração de sítios, tesselação 3D real (`MIConvexHull`, MIT, licença
+   auditada), grafo, struts, suavização de nós, calibração de porosidade, métricas, golden
+   recipes, frontend, auditoria STL independente e roteiro Windows -- todos implementados e
+   testados. Pendência remanescente, não escondida: nenhuma execução real do PicoGK sobre as
+   golden recipes Voronoi foi confirmada neste sandbox -- ver
+   `scripts/Run-VoronoiWindowsValidation.ps1` (pronto, nunca executado) e a lista "O que ainda
+   depende de execução Windows real" em `IMPLEMENTATION_STATUS.md`.
 3. **`DesignAdvisor` concreto** — hoje é só um `Protocol` sem implementação; qualquer
    implementação futura precisa registrar-se explicitamente (mesmo princípio de
    não-descoberta-automática do `TopologyProviderRegistry`) e nunca decidir sozinha sem revisão

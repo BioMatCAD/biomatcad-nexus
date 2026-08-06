@@ -18,8 +18,14 @@ licenciamento do projeto.
   matemático de `GyroidMath.cs` (independente, sem qualquer referência a `PicoGK.*`).
 - **SkiaSharp** (dependência transitiva do PicoGK) — MIT — https://github.com/mono/SkiaSharp.
 - **xunit / xunit.runner.visualstudio / Microsoft.NET.Test.Sdk** — testes do worker
-  (`tests/BioMatCadGeometryWorker.Tests`, 62 testes no Incremento 2.1.1) — Apache License 2.0
+  (`tests/BioMatCadGeometryWorker.Tests`, 99 testes após a rodada Voronoi do Incremento 2.2:
+  62 Gyroid do Incremento 2.1.1 + 37 Voronoi novos) — Apache License 2.0
   (xunit) / MIT (Test SDK).
+- **MIConvexHull 1.1.19.1019** (novo na rodada Voronoi do Incremento 2.2) — MIT —
+  https://github.com/DesignEngrLab/MIConvexHull — usado exclusivamente para triangulação de
+  Delaunay 3D, base para a extração do grafo dual de Voronoi em
+  `VoronoiTessellation.cs`/`VoronoiSiteGenerator.cs`. Sem modificação nem redistribuição de
+  binários neste repositório. Licença auditada nesta rodada, sem vulnerabilidades conhecidas.
 
 Ver `apps/geometry-worker/NOTICE` para o detalhamento local deste componente.
 
