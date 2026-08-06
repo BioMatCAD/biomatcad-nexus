@@ -7,6 +7,10 @@ Não é uma promessa de prazos; é uma priorização técnica, atualizada a cada
 Ver `REQUIREMENTS_MATRIX.md` para o mapeamento completo de requisitos e `docs/adr/` para as
 decisões que o sustentam. Atualizado em 2026-08-06 com a rodada Voronoi do
 Incremento 2.2 (segunda topologia real, `voronoi_cell_edges_v1`) — ver seção dedicada abaixo.
+Atualizado novamente em 2026-08-06 (rodada Windows real `voronoi-validation-staged-
+20260806-195638`): a matriz Voronoi/Gyroid (6 golden recipes, 2x cada) foi APROVADA no Windows
+real do usuário, com worker PicoGK genuíno, determinismo byte a byte, auditoria independente e
+zero processos órfãos -- ver seção dedicada abaixo e `TEST_EVIDENCE.md` seção 23.
 
 ## Feito
 
@@ -49,10 +53,20 @@ Incremento 2.2 (segunda topologia real, `voronoi_cell_edges_v1`) — ver seção
   regressão no Gyroid), 3 golden recipes, frontend completo (editor, estimativa de custo, aviso
   de receita pesada, demo honesto sem fabricar sucesso), auditoria STL independente escrita do
   zero, caderno de invenção confidencial, roteiro único de validação Windows -- ver
-  `IMPLEMENTATION_STATUS.md` (seção "Rodada Voronoi") e `TEST_EVIDENCE.md` (seção 19). **Ainda
-  não concluído**: nenhuma execução real do PicoGK sobre as golden recipes Voronoi foi
-  confirmada nesta rodada (depende de execução Windows pelo usuário); empacotamento final v2.2
-  continua não feito.
+  `IMPLEMENTATION_STATUS.md` (seção "Rodada Voronoi") e `TEST_EVIDENCE.md` (seção 19).
+  **CONFIRMADO na rodada Windows real `voronoi-validation-staged-20260806-195638`**: as 6
+  golden recipes (3 Voronoi + 3 Gyroid de regressão) rodaram 2x cada com o worker PicoGK real,
+  todas com `queued -> running -> succeeded`, cinco fontes de SHA-256 coerentes, determinismo
+  byte a byte entre execuções, watertight (worker + auditoria independente), zero arestas
+  non-manifold, contenção de domínio aprovada e nenhum processo `dotnet.exe` órfão -- ver
+  `TEST_EVIDENCE.md` seção 23 para os hashes literais. A investigação e correção do deadlock
+  real de pipes stdout/stderr em `DotnetPicoGkWorkerClient` (causa raiz do `WORKER_TIMEOUT`
+  historicamente relatado -- nunca foi um defeito do algoritmo Voronoi/PicoGK) também foi
+  comprovada nesta mesma execução real. **Ainda não concluído**: o E2E Playwright desta mesma
+  execução ficou inconclusivo por um defeito de infraestrutura do próprio roteiro (frontend
+  nunca iniciado antes do Playwright, `net::ERR_CONNECTION_REFUSED`) -- corrigido nesta rodada
+  (Playwright `webServer` nativo), pendente de reconfirmação real pelo usuário; empacotamento
+  final v2.2 continua não feito.
 
 ## Próximo (prioridade, nesta ordem)
 
@@ -101,14 +115,16 @@ incremento concluído:
    continua deliberadamente fora desta rodada (item 2 abaixo). Pendência remanescente, não
    escondida: E2E Playwright em navegador real dos novos controles ainda não executado (mesmo
    bloqueio de sandbox de sempre — ver `docs/architecture/viewer-3d-audit.md`).
-2. ~~**`VoronoiTopologyProvider` real**~~ -- **CONCLUÍDO na rodada Voronoi** (commits
-   `e07a5e2`..`bf756a4`): geração de sítios, tesselação 3D real (`MIConvexHull`, MIT, licença
-   auditada), grafo, struts, suavização de nós, calibração de porosidade, métricas, golden
-   recipes, frontend, auditoria STL independente e roteiro Windows -- todos implementados e
-   testados. Pendência remanescente, não escondida: nenhuma execução real do PicoGK sobre as
-   golden recipes Voronoi foi confirmada neste sandbox -- ver
-   `scripts/Run-VoronoiWindowsValidation.ps1` (pronto, nunca executado) e a lista "O que ainda
-   depende de execução Windows real" em `IMPLEMENTATION_STATUS.md`.
+2. ~~**`VoronoiTopologyProvider` real**~~ -- **CONCLUÍDO e APROVADO no Windows real** (commits
+   `e07a5e2`..`bf756a4` implementaram; execução real `voronoi-validation-staged-
+   20260806-195638` aprovou): geração de sítios, tesselação 3D real (`MIConvexHull`, MIT,
+   licença auditada), grafo, struts, suavização de nós, calibração de porosidade, métricas,
+   golden recipes, frontend, auditoria STL independente e roteiro Windows -- todos implementados,
+   testados E confirmados contra o worker PicoGK real (6/6 golden recipes, 2x cada, determinismo
+   byte a byte, zero processos órfãos -- ver `TEST_EVIDENCE.md` seção 23). Pendência
+   remanescente, não escondida: o E2E Playwright desta mesma execução ficou inconclusivo por um
+   defeito de infraestrutura do roteiro (frontend não iniciado antes do Playwright) -- corrigido
+   nesta rodada, pendente de reconfirmação real.
 3. **`DesignAdvisor` concreto** — hoje é só um `Protocol` sem implementação; qualquer
    implementação futura precisa registrar-se explicitamente (mesmo princípio de
    não-descoberta-automática do `TopologyProviderRegistry`) e nunca decidir sozinha sem revisão

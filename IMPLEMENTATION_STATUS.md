@@ -193,6 +193,45 @@ registro técnico completo.
 direta corrigido; novo piloto Windows (Voronoi 2x + Gyroid 2x) ainda pendente de execução real
 antes de declarar Voronoi aprovado.**
 
+### Rodada 4 -- Matriz Voronoi/Gyroid APROVADA no Windows real; E2E corrigido (defeito de infraestrutura, não regressão)
+
+O usuário executou o piloto estagiado completo no Windows real
+(`voronoi-validation-staged-20260806-195638`), com a correção do deadlock de pipes da rodada 3
+já aplicada: **a matriz científica e de orquestração passou integralmente**. As 6 golden
+recipes (3 Voronoi + 3 Gyroid de regressão) rodaram 2x cada com o worker PicoGK genuíno --
+`queued -> running -> succeeded`, cinco fontes de SHA-256 coerentes, determinismo byte a byte
+entre execuções, watertight (worker + auditoria independente), zero arestas non-manifold,
+contenção de domínio aprovada, zero processos `dotnet.exe` órfãos. Isso **prova
+definitivamente** que a correção do deadlock de pipes (rodada 3) resolve o `WORKER_TIMEOUT`
+historicamente relatado, sem qualquer alteração no algoritmo Voronoi/Gyroid, nas golden
+recipes ou nos limites de tempo. Ver `TEST_EVIDENCE.md` seção 23 para os 6 hashes SHA-256
+literais e `apps/geometry-worker/WORKER_STATUS.md` seção 15 para o registro técnico completo.
+
+O único ponto de falha (`full_exit_code=1`) foi isolado à etapa de E2E:
+`net::ERR_CONNECTION_REFUSED` em `http://localhost:5173/login`, porque
+`Run-VoronoiWindowsValidation.ps1` nunca iniciava o frontend antes de chamar o Playwright --
+um defeito de infraestrutura do próprio roteiro, não uma regressão da interface. Corrigido
+delegando ao Playwright a inicialização do frontend via a opção nativa `webServer`
+(`apps/web/playwright.config.ts`, com a função pura testável `shouldReuseExistingServer()` e 2
+novos testes em `apps/web/tests/playwrightWebServer.test.ts`); corrigido também o
+`API_SECRET_KEY` do roteiro (segredo sintético >= 32 caracteres, em vez de herdar
+`ENVIRONMENT=test` do passo de pytest e mascarar o valor padrão inseguro de 31 caracteres);
+adicionado o segundo projeto de testes do worker (`BioMatCadGeometryWorker.TopologyProviderTests`,
+11 testes) à matriz Windows; corrigidas as contagens textuais fixas do relatório (99->100,
+118->119); criado `scripts/Run-E2EOnly.ps1` para reexecutar somente o E2E sem repetir a matriz
+geométrica completa.
+
+Suítes nesta rodada (sandbox Linux, sem PicoGK real): frontend -- typecheck limpo, lint limpo,
+vitest 121/121 (119 pré-existentes + 2 novos), build de produção OK; scripts PowerShell
+sintaticamente validados.
+
+**Veredito desta rodada**: matriz Voronoi/Gyroid **APROVADA** no Windows real; correção do
+deadlock de pipes **COMPROVADA** no Windows real; E2E desta execução **INCONCLUSIVO** por
+defeito de infraestrutura do roteiro (frontend não iniciado), não uma regressão; resultado
+global do roteiro falhou **somente** por esse defeito, já corrigido nesta rodada. A
+reconfirmação do E2E corrigido ainda depende de uma nova execução real do usuário -- não
+declarada aprovada até essa confirmação.
+
 ## Incremento 2.2 Alpha Pesquisa — resumo (branch `incremento-2.2-alpha-pesquisa`)
 
 Escopo desta rodada: observabilidade real + integração à GUI, GUI completa de pesquisa (retry,

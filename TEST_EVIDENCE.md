@@ -1678,6 +1678,42 @@ Validação desta sessão (sandbox Linux, sem PicoGK real): sintaxe verificada v
 - **Backend (pytest)**: rodado primeiro contra SQLite (default sem `TEST_DATABASE_URL`), resultando em 211 passed, 4 skipped, **2 failed** -- `test_two_concurrent_dispatchers_never_claim_the_same_job` (o próprio docstring do teste documenta que SQLite não suporta `FOR UPDATE SKIP LOCKED` da mesma forma e "não seria uma prova válida deste requisito") e `test_clinical_suite_expiration_is_respected` (teste sensível a tempo real, `sleep(1.2s)` contra expiração de 1s, sob CPU do sandbox compartilhado). Nenhum dos dois arquivos foi tocado nesta rodada. Re-executado contra Postgres real isolado (via `pgserver`, mesmo padrão de isolamento por schema da rodada 2): **215 passed, 2 skipped, 0 failed** em 41,49s -- confirmando que as 2 falhas eram artefatos do ambiente SQLite/timing, não regressões desta rodada.
 - **Frontend**: `npm run typecheck` limpo; `npm run lint` limpo (`--max-warnings=0`); `npm run test` (vitest) -- **119 passed (119)**, 23 arquivos; `npm run build` -- sucesso (aviso apenas de tamanho de chunk, pré-existente, não relacionado a esta rodada).
 
+## 23. Matriz Voronoi/Gyroid APROVADA no Windows real (`voronoi-validation-staged-20260806-195638`) -- E2E corrigido (defeito de infraestrutura, não regressão) (2026-08-06)
+
+**Evidência real do usuário**: `C:\biomatcad-runs\voronoi-validation-staged-20260806-195638`, com a correção do deadlock de pipes (seção 22 acima) já aplicada. Relatório literal: "A MATRIZ CIENTÍFICA E DE ORQUESTRAÇÃO PASSOU INTEGRALMENTE."
+
+As seis golden recipes (3 Voronoi + 3 Gyroid de regressão) passaram 2x cada, todas com `queued -> running -> succeeded`, worker PicoGK real, cinco fontes de SHA-256 coerentes, determinismo byte a byte entre `run1`/`run2`, watertight no worker E na auditoria independente, zero arestas non-manifold, contenção de domínio independente aprovada, nenhum processo `dotnet.exe` órfão, e artefato/manifesto/banco/download/auditoria coerentes entre si.
+
+SHA-256 do STL (`run1`, idêntico a `run2` por determinismo comprovado em cada receita):
+
+| Receita | SHA-256 |
+|---|---|
+| `block-voronoi-preview-v1` | `fd4647de0a1547d6e1939a96e4d3db237b7326a1e5ca5309ebddb1916f5b6a64` |
+| `block-voronoi-final-v1` | `7ac71ec7afd58943311b620decad08607e8d82a318a6b3ab1c41eace87c4ac4b` |
+| `cylinder-voronoi-preview-v1` | `fe17676a09883d5c3f97a912860b20d23e8035978b03d5285808ede42196b9ae` |
+| `block-gyroid-v1` | `cd97e3c2be2029fe54bb4743217254a7ecb769ba24b81bf737d76e73bbc1565d` |
+| `cylinder-gyroid-v1` | `2cb8cbdf9acbff579c838d8bf3cc2e2a688bcd33a3c475945174272cb278445e` |
+| `preview-gyroid-low-res-v1` | `7660dae3ee263445835bbf9d26c16fa4ef8f8ee2fd2c320000b0546c1eaaba78` |
+
+Suítes Windows nesta execução: geometry-worker principal 100/100; backend 216 passed, 1 skipped, 0 failed; frontend 119/119; tsc/eslint/build/build:pages aprovados.
+
+**Extensão da auditoria independente de `run1` para `run2`**: `audit_stl_independent.py` rodou sobre o STL real de `run1` de cada receita. `run2` não foi reauditado separadamente pelo script -- mas como seu SHA-256 é byte a byte idêntico ao de `run1` (mesmo arquivo binário produzido de forma determinística), a conclusão da auditoria de `run1` (watertight, zero non-manifold, contenção aprovada) se estende a `run2` por identidade comprovada do conteúdo, não por suposição.
+
+### 23.1 O único ponto de falha: defeito de infraestrutura do roteiro no E2E, não regressão
+
+`full_exit_code=1` ocorreu SOMENTE na etapa de E2E: `net::ERR_CONNECTION_REFUSED` em `http://localhost:5173/login`. O seed E2E concluiu com sucesso, `E2E_PYTHON_BIN` apontou corretamente para o venv, e a API estava disponível -- o roteiro simplesmente nunca iniciava o frontend antes de chamar o Playwright (dependia de um passo manual não realizado nesta execução). **Não é uma regressão da interface nem da matriz geométrica.**
+
+Correções aplicadas nesta rodada:
+
+1. **`apps/web/playwright.config.ts`**: opção nativa `webServer` do Playwright -- inicia o frontend rastreado, aguarda a URL responder via polling HTTP antes de qualquer teste, encaminha stdout/stderr para o log já capturado pelo roteiro, encerra apenas o processo que ele mesmo iniciou. `reuseExistingServer` é `false` sob `CI=true` (função pura testável `shouldReuseExistingServer()`), garantindo que a validação sempre inicia um frontend novo.
+2. **`apps/web/tests/playwrightWebServer.test.ts`** (novo, 2 testes): prova a configuração do `webServer` e o comportamento de `shouldReuseExistingServer()`.
+3. **`scripts/Run-VoronoiWindowsValidation.ps1`**: `API_SECRET_KEY` sintético (>= 32 caracteres) + `ENVIRONMENT=development` para o servidor real (antes herdava `ENVIRONMENT=test` do passo de pytest, mascarando que o segredo padrão inseguro tem exatamente 31 caracteres); contagens textuais corrigidas (99->100, 118->119); adicionado o segundo projeto de testes do worker (`BioMatCadGeometryWorker.TopologyProviderTests`, 11 testes), antes ausente da matriz Windows.
+4. **`scripts/Run-E2EOnly.ps1`** (novo): reexecuta somente o E2E (API + frontend via Playwright webServer), sem repetir a matriz geométrica completa.
+
+Validação desta sessão (sandbox Linux): `apps/web` -- typecheck limpo, lint limpo, vitest 121/121 (119 pré-existentes + 2 novos), build de produção OK; ambos os `.ps1` sintaticamente válidos.
+
+**Veredito documental desta rodada**: matriz Voronoi/Gyroid **APROVADA**; correção do deadlock de pipes **COMPROVADA no Windows**; E2E desta execução **INCONCLUSIVO** por defeito de infraestrutura do roteiro (frontend não iniciado), não uma regressão; resultado global do roteiro falhou **somente** por esse defeito, já corrigido. A reconfirmação do E2E corrigido ainda depende de uma execução real do usuário.
+
 ## O que esta evidência explicitamente NÃO cobre
 
 - **Consistência STL-vs-manifesto via fluxo completo API→dispatcher→worker PicoGK real→

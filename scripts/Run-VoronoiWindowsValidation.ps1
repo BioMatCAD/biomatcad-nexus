@@ -22,7 +22,10 @@
     Ordem de execucao:
       0. Atualiza (ou clona, se ainda nao existir) o repositorio local a partir do bundle
          informado em -BundlePath, na branch -Branch, e confirma HEAD/tags.
-      1. Compila o worker (dotnet build, Release) e roda dotnet test (99 testes esperados).
+      1. Compila o worker (dotnet build, Release) e roda dotnet test nos DOIS projetos de
+         teste (BioMatCadGeometryWorker.Tests: 100 testes esperados; BioMatCadGeometryWorker.
+         TopologyProviderTests: 11 testes esperados -- item corrigido nesta rodada, antes
+         ausente da matriz Windows).
       2. Prepara/atualiza o venv da API (pip install -e ".[dev]") e roda pytest completo.
       3. Prepara o frontend (npm ci) e roda tsc/eslint/vitest/build/build:pages.
       4. Preflight real (driver Postgres/porta/conexao) + alembic upgrade head + inicia a API.
@@ -288,7 +291,21 @@ finally {
 Push-Location (Join-Path $workerDir "tests\BioMatCadGeometryWorker.Tests")
 try {
     dotnet test 2>&1 | Tee-Object -FilePath (Join-Path $OutputDir "worker-test.log") | Write-Host
-    Add-Step -Name "worker_dotnet_test" -Ok ($LASTEXITCODE -eq 0) -Detail "dotnet test -> exit $LASTEXITCODE (esperado: 99 testes, log: worker-test.log)"
+    Add-Step -Name "worker_dotnet_test" -Ok ($LASTEXITCODE -eq 0) -Detail "dotnet test -> exit $LASTEXITCODE (esperado: 100 testes, log: worker-test.log)"
+}
+finally {
+    Pop-Location
+}
+# Correcao real (rodada Windows 20260806-195638, item 9 do usuario): o segundo projeto de
+# testes do worker (BioMatCadGeometryWorker.TopologyProviderTests, 11 testes -- cobre o
+# contrato de TopologyBuildResult.DescribeEffectiveParameters/PopulateMetricsExtra para
+# Gyroid/Voronoi e a resolucao do TopologyProviderRegistry) estava AUSENTE da matriz Windows --
+# so o projeto principal (BioMatCadGeometryWorker.Tests) era executado. Corrigido: roda os
+# dois projetos.
+Push-Location (Join-Path $workerDir "tests\BioMatCadGeometryWorker.TopologyProviderTests")
+try {
+    dotnet test 2>&1 | Tee-Object -FilePath (Join-Path $OutputDir "worker-topology-provider-test.log") | Write-Host
+    Add-Step -Name "worker_topology_provider_dotnet_test" -Ok ($LASTEXITCODE -eq 0) -Detail "dotnet test (BioMatCadGeometryWorker.TopologyProviderTests) -> exit $LASTEXITCODE (esperado: 11 testes, log: worker-topology-provider-test.log)"
 }
 finally {
     Pop-Location
@@ -346,7 +363,7 @@ try {
     Add-Step -Name "web_eslint" -Ok ($LASTEXITCODE -eq 0) -Detail "eslint -> exit $LASTEXITCODE"
 
     npx vitest run 2>&1 | Tee-Object -FilePath (Join-Path $OutputDir "web-vitest.log") | Write-Host
-    Add-Step -Name "web_vitest" -Ok ($LASTEXITCODE -eq 0) -Detail "vitest run -> exit $LASTEXITCODE (esperado: 118 testes)"
+    Add-Step -Name "web_vitest" -Ok ($LASTEXITCODE -eq 0) -Detail "vitest run -> exit $LASTEXITCODE (esperado: 119 testes)"
 
     npm run build 2>&1 | Tee-Object -FilePath (Join-Path $OutputDir "web-build.log") | Write-Host
     Add-Step -Name "web_build" -Ok ($LASTEXITCODE -eq 0) -Detail "npm run build -> exit $LASTEXITCODE"
@@ -386,6 +403,26 @@ try {
 finally {
     Pop-Location
 }
+
+# Correcao real (rodada Windows 20260806-195638, item 8 do usuario): ate aqui, $env:ENVIRONMENT
+# ainda esta como "test" (setado na Etapa 2 para o pytest) e $env:API_SECRET_KEY nunca foi
+# definida -- ou seja, o servidor uvicorn real abaixo herdaria ENVIRONMENT=test do processo pai
+# do PowerShell, o que faz Settings.assert_secure_for_environment() retornar cedo SEM checar o
+# segredo (ver apps/api/src/biomatcad_api/config.py). Na pratica, o app entao subia com o valor
+# padrao inseguro "dev-only-insecure-key-change-me" -- que tem exatamente 31 caracteres, 1 a
+# menos que o minimo de 32 exigido fora de ENVIRONMENT=test. Isso NUNCA foi pego porque o
+# bypass de "test" mascarava o problema. Corrigido: geramos um segredo SINTETICO (nunca um
+# segredo real de producao) com >= 32 bytes explicitamente, e trocamos ENVIRONMENT para
+# "development" so para o processo do servidor real (a suite pytest ja rodou e nao e afetada),
+# de forma que assert_secure_for_environment() de fato EXERCITE o caminho de codigo real em vez
+# de ser contornado pelo bypass de teste.
+$syntheticApiSecretKey = "synthetic-e2e-validation-secret-" + [guid]::NewGuid().ToString("N")
+if ($syntheticApiSecretKey.Length -lt 32) {
+    throw "Segredo sintetico gerado tem menos de 32 caracteres (bug no proprio roteiro) -- length=$($syntheticApiSecretKey.Length)"
+}
+$env:API_SECRET_KEY = $syntheticApiSecretKey
+$env:ENVIRONMENT = "development"
+Add-Step -Name "api_secret_key_sintetico_valido" -Ok $true -Detail "API_SECRET_KEY sintetico definido com $($syntheticApiSecretKey.Length) caracteres (>= 32 exigidos); ENVIRONMENT=development para o servidor real (nao mais herdando o bypass 'test' do passo de pytest)."
 
 $apiLogFile = Join-Path $OutputDir "api-runtime.log"
 $apiProcess = Start-Process -FilePath $venvPython `
@@ -538,7 +575,7 @@ try {
     }
     try {
         Start-Process "http://localhost:5173/app"
-        Add-Step -Name "navegador_aberto" -Ok $true -Detail "Navegador aberto em http://localhost:5173/app (frontend precisa estar rodando via 'npm run dev' em outro terminal para este passo ter efeito real)."
+        Add-Step -Name "navegador_aberto" -Ok $true -Detail "Navegador aberto em http://localhost:5173/app (passo de inspecao visual MANUAL, distinto do E2E automatizado abaixo -- precisa de um 'npm run dev' rodando manualmente em outro terminal para ter efeito real; o E2E da Etapa 8 gerencia seu proprio frontend automaticamente via Playwright webServer, nao depende deste passo)."
     }
     catch {
         Add-Step -Name "navegador_aberto" -Ok $false -Detail "Nao foi possivel abrir o navegador automaticamente: $_ (abra manualmente)."
@@ -562,15 +599,33 @@ try {
         $env:E2E_PYTHON_BIN = $venvPython
         Add-Step -Name "e2e_python_bin_definido" -Ok $true -Detail "E2E_PYTHON_BIN=$venvPython (venv real, nunca o Python global do sistema)."
 
+        # Correcao real (rodada Windows 20260806-195638, itens 1-5 do usuario): a versao
+        # anterior deste roteiro NUNCA iniciava o frontend antes de rodar o Playwright -- o
+        # comentario antigo da Etapa 7 dizia literalmente que o frontend "precisa estar
+        # rodando via 'npm run dev' em outro terminal", ou seja, dependia de um passo manual
+        # que nesta execucao real nao tinha sido feito, causando
+        # "net::ERR_CONNECTION_REFUSED em http://localhost:5173/login". Corrigido delegando ao
+        # proprio Playwright via a opcao nativa `webServer` (ver apps/web/playwright.config.ts):
+        # ele agora inicia o frontend de forma RASTREADA, aguarda a URL responder via polling
+        # HTTP antes de rodar qualquer teste, encaminha o stdout/stderr do frontend para o
+        # stdout/stderr do proprio processo do Playwright (capturado abaixo por
+        # Tee-Object -FilePath e2e-output.log, sem infraestrutura adicional), e encerra SOMENTE
+        # o processo que ele mesmo iniciou ao final -- nunca um taskkill global. $env:CI="true"
+        # forca `reuseExistingServer: false` (ver shouldReuseExistingServer() em
+        # playwright.config.ts), garantindo que esta validacao SEMPRE inicia um frontend novo e
+        # nunca reaproveita silenciosamente algo ja ouvindo na porta 5173.
+        $previousCiEnv = $env:CI
+        $env:CI = "true"
         Push-Location $webDir
         try {
             npx playwright install chromium 2>&1 | Tee-Object -FilePath (Join-Path $OutputDir "e2e-install.log") | Write-Host
             npm run test:e2e 2>&1 | Tee-Object -FilePath (Join-Path $OutputDir "e2e-output.log") | Write-Host
-            Add-Step -Name "e2e_playwright" -Ok ($LASTEXITCODE -eq 0) -Detail "npm run test:e2e -> exit $LASTEXITCODE (log: e2e-output.log)"
+            Add-Step -Name "e2e_playwright" -Ok ($LASTEXITCODE -eq 0) -Detail "npm run test:e2e -> exit $LASTEXITCODE (log: e2e-output.log; frontend iniciado/encerrado automaticamente pelo Playwright via webServer, com reuseExistingServer=false)."
         }
         finally {
             Pop-Location
             Remove-Item Env:\E2E_PYTHON_BIN -ErrorAction SilentlyContinue
+            if ($null -eq $previousCiEnv) { Remove-Item Env:\CI -ErrorAction SilentlyContinue } else { $env:CI = $previousCiEnv }
         }
     }
     else {

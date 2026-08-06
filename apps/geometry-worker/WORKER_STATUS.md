@@ -735,3 +735,84 @@ Três correções aplicadas ao roteiro, em resposta direta ao achado colateral d
 
 Validação desta sessão (sandbox Linux, sem PicoGK real): sintaxe verificada via `[System.Management.Automation.Language.Parser]::ParseFile` (OK); lógica de build+localização de DLL+construção de job.json exercida com sucesso contra um ambiente fictício (git repo vazio + "dotnet" fake que simula build e execução); rejeição de `OutputDir` relativo confirmada (lança exceção com mensagem clara). A etapa de verificação de processos órfãos (`Get-CimInstance Win32_Process`) é exclusiva do Windows e não pôde ser exercida neste sandbox Linux — validação completa depende da execução real do usuário.
 
+
+## 15. Matriz Voronoi/Gyroid APROVADA no Windows real (`voronoi-validation-staged-20260806-195638`) e correção de infraestrutura do E2E
+
+Execução real do usuário, roteiro estagiado (piloto + matriz completa), com a correção do
+deadlock de pipes da seção 14 já aplicada. Resultado literal reportado: **a matriz científica e
+de orquestração passou integralmente**. As seis golden recipes (3 Voronoi + 3 Gyroid de
+regressão) passaram 2x cada, todas com `queued -> running -> succeeded`, worker PicoGK real,
+cinco fontes de SHA-256 coerentes, determinismo byte a byte entre `run1`/`run2`, watertight
+(worker e auditoria independente), zero arestas non-manifold, contenção de domínio independente
+aprovada, nenhum processo `dotnet.exe` órfão, e artefato/manifesto/banco/download/auditoria
+coerentes entre si.
+
+SHA-256 do STL de `run1` (idêntico ao de `run2` de cada receita, por determinismo comprovado):
+
+| Receita | SHA-256 |
+|---|---|
+| `block-voronoi-preview-v1` | `fd4647de0a1547d6e1939a96e4d3db237b7326a1e5ca5309ebddb1916f5b6a64` |
+| `block-voronoi-final-v1` | `7ac71ec7afd58943311b620decad08607e8d82a318a6b3ab1c41eace87c4ac4b` |
+| `cylinder-voronoi-preview-v1` | `fe17676a09883d5c3f97a912860b20d23e8035978b03d5285808ede42196b9ae` |
+| `block-gyroid-v1` | `cd97e3c2be2029fe54bb4743217254a7ecb769ba24b81bf737d76e73bbc1565d` |
+| `cylinder-gyroid-v1` | `2cb8cbdf9acbff579c838d8bf3cc2e2a688bcd33a3c475945174272cb278445e` |
+| `preview-gyroid-low-res-v1` | `7660dae3ee263445835bbf9d26c16fa4ef8f8ee2fd2c320000b0546c1eaaba78` |
+
+Suítes Windows nesta mesma execução: geometry-worker principal 100/100; backend 216 passed, 1
+skipped, 0 failed; frontend 119/119; tsc/eslint/build/build:pages aprovados.
+
+**Auditoria independente run1 -> run2**: `audit_stl_independent.py` rodou sobre o STL real de
+`run1` de cada receita (watertight, zero non-manifold, contenção aprovados). `run2` não foi
+reauditado separadamente pelo script -- mas como seu SHA-256 é byte a byte idêntico ao de
+`run1` (mesmo arquivo binário), a conclusão da auditoria de `run1` se estende a `run2` por
+identidade comprovada, não por suposição.
+
+### 15.1 O único ponto de falha: defeito de infraestrutura do próprio roteiro no E2E, não regressão
+
+`full_exit_code=1` ocorreu SOMENTE na etapa de E2E: `net::ERR_CONNECTION_REFUSED` em
+`http://localhost:5173/login`. O seed E2E concluiu com sucesso, `E2E_PYTHON_BIN` apontou
+corretamente para o venv, e a API estava disponível -- **o roteiro simplesmente nunca iniciava
+o frontend antes de chamar o Playwright** (o comentário antigo da Etapa 7 dizia literalmente que
+o frontend "precisa estar rodando via 'npm run dev' em outro terminal", ou seja, dependia de um
+passo manual que não tinha sido feito nesta execução real). Isto **não é uma regressão da
+interface nem da matriz geométrica** -- é um defeito de infraestrutura do script de validação,
+isolado e corrigido nesta rodada:
+
+1. **`apps/web/playwright.config.ts`**: adicionada a opção nativa `webServer` do Playwright em
+   vez de reimplementar manualmente start/wait/log/kill em PowerShell. O Playwright agora
+   inicia o frontend de forma rastreada, faz polling HTTP na URL configurada ANTES de rodar
+   qualquer teste (eliminando a corrida que causou o `ERR_CONNECTION_REFUSED`), encaminha
+   stdout/stderr do frontend para o próprio log do Playwright (já capturado integralmente pelo
+   roteiro via `Tee-Object`), e encerra somente o processo que ele mesmo iniciou.
+   `reuseExistingServer` é `false` sempre que `CI=true` (via a função pura testável
+   `shouldReuseExistingServer()`) -- os dois roteiros PowerShell agora definem `CI=true` apenas
+   ao redor da chamada de `npm run test:e2e`, garantindo que a validação SEMPRE inicia um
+   frontend novo e rastreado, nunca reaproveitando silenciosamente algo já ouvindo na porta.
+2. **`apps/web/tests/playwrightWebServer.test.ts`** (novo, 2 testes): prova que a configuração
+   `webServer` tem comando/URL/timeout/captura de stdout-stderr corretos, e que
+   `shouldReuseExistingServer()` retorna `false` sob `CI=true` e `true` caso contrário.
+3. **`scripts/Run-VoronoiWindowsValidation.ps1`**: corrigido para definir `API_SECRET_KEY`
+   sintético (>= 32 caracteres, nunca um segredo real) e `ENVIRONMENT=development` para o
+   servidor da API real, em vez de herdar `ENVIRONMENT=test` do passo de pytest anterior. Sem
+   essa correção, `Settings.assert_secure_for_environment()` (ver `apps/api/src/biomatcad_api/
+   config.py`) retornava cedo por causa do bypass de `ENVIRONMENT=test`, mascarando o fato de
+   que o valor padrão inseguro (`"dev-only-insecure-key-change-me"`) tem exatamente 31
+   caracteres -- 1 a menos que o mínimo de 32 exigido fora de testes. Também corrigidas as
+   contagens textuais fixas do relatório (99 -> 100 testes do worker principal; 118 -> 119
+   testes do frontend) e adicionado o segundo projeto de testes do worker
+   (`BioMatCadGeometryWorker.TopologyProviderTests`, 11 testes), antes ausente da matriz
+   Windows.
+4. **`scripts/Run-E2EOnly.ps1`** (novo): roteiro dedicado para reexecutar SOMENTE o E2E (API +
+   frontend via Playwright webServer), sem repetir a matriz geométrica completa -- evita
+   desperdiçar tempo/risco revalidando o que já foi comprovado.
+
+Validação desta sessão (sandbox Linux, sem PicoGK real): `apps/web` -- typecheck limpo, lint
+limpo, vitest 121/121 (119 pré-existentes + 2 novos), build de produção OK; ambos os `.ps1`
+sintaticamente válidos (`[System.Management.Automation.Language.Parser]::ParseFile`).
+
+**Veredito documental correto desta rodada**: matriz Voronoi/Gyroid **APROVADA**; correção do
+deadlock de pipes **COMPROVADA no Windows**; E2E desta execução **INCONCLUSIVO** por defeito de
+infraestrutura do próprio roteiro (frontend não iniciado), não uma regressão; resultado global
+do roteiro falhou **somente** por esse defeito de infraestrutura. A reconfirmação do E2E
+corrigido (via `Run-E2EOnly.ps1` ou uma nova execução de `Run-VoronoiWindowsValidation.ps1`)
+ainda depende de uma execução real do usuário -- não declarada aprovada até essa confirmação.
