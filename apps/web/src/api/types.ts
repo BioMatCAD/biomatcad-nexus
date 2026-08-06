@@ -280,6 +280,7 @@ export interface GeometryMetrics {
   site_count?: number;
   delaunay_cell_count?: number;
   degenerate_cell_count?: number;
+  valid_cell_count?: number;
   node_count?: number;
   edge_count?: number;
   internal_edge_count?: number;
@@ -297,6 +298,8 @@ export interface GeometryMetrics {
   min_node_degree?: number;
   max_node_degree?: number;
   node_degree_stddev?: number;
+  max_node_containment_violation_mm?: number;
+  domain_containment_verified?: boolean;
 }
 
 export interface GeometryJobResponse {

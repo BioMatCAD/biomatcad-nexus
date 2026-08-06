@@ -76,6 +76,11 @@ public sealed class VoronoiTopologyProvider : ITopologyProvider
                 ["node_smoothing_requested"] = topology.NodeSmoothing,
                 ["node_smoothing_length_mm"] = buildResult.NodeSmoothingLengthMm,
                 ["boundary_behavior_used"] = topology.BoundaryBehavior ?? "clip",
+                // Estratégia de suavização fixa desta rodada (Incremento 2.2, Seção 6 da
+                // auditoria matemática) -- exposta como string explícita no manifesto em vez de
+                // deixar implícita apenas na documentação do schema. Catmull-Clark é apenas uma
+                // alternativa FUTURA documentada, nunca implementada nem equivalente.
+                ["smoothing_strategy"] = "implicit_smooth_union",
             },
         };
     }
@@ -129,6 +134,18 @@ public sealed class VoronoiTopologyProvider : ITopologyProvider
             ["min_node_degree"] = minNodeDegree,
             ["max_node_degree"] = maxNodeDegree,
             ["node_degree_stddev"] = nodeDegreeStdDev,
+            // Contagem de células REALMENTE válidas (Delaunay total menos as descartadas por
+            // degenerescência quase-coplanar) -- item "células válidas" da lista de métricas
+            // pedida (Incremento 2.2, Seção 9), derivado por subtração exata (nunca uma segunda
+            // contagem independente que poderia divergir).
+            ["valid_cell_count"] = tessellation.DelaunayCellCount - tessellation.DegenerateCellCount,
+            // Auditoria real de contenção no domínio (item "domain containment" da mesma lista):
+            // maior violação de SDF observada entre os nós finais (0.0 = todos estritamente
+            // dentro ou exatamente na superfície, dentro da tolerância de bissecção usada para
+            // localizar recortes de fronteira -- ver VoronoiTessellation.DomainContainmentToleranceMm).
+            ["max_node_containment_violation_mm"] = tessellation.MaxNodeContainmentViolationMm,
+            ["domain_containment_verified"] =
+                tessellation.MaxNodeContainmentViolationMm <= VoronoiTessellation.DomainContainmentToleranceMm,
         };
     }
 }

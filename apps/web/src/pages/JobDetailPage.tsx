@@ -225,6 +225,7 @@ export function JobDetailPage() {
                   <tr><td style={styles.td}><strong>Sítios</strong></td><td style={styles.td}>{job.metrics.site_count}</td></tr>
                   <tr><td style={styles.td}><strong>Células de Delaunay</strong></td><td style={styles.td}>{job.metrics.delaunay_cell_count}</td></tr>
                   <tr><td style={styles.td}><strong>Células degeneradas</strong></td><td style={styles.td}>{job.metrics.degenerate_cell_count}</td></tr>
+                  <tr><td style={styles.td}><strong>Células válidas</strong></td><td style={styles.td}>{job.metrics.valid_cell_count}</td></tr>
                   <tr><td style={styles.td}><strong>Nós</strong></td><td style={styles.td}>{job.metrics.node_count}</td></tr>
                   <tr><td style={styles.td}><strong>Arestas (total)</strong></td><td style={styles.td}>{job.metrics.edge_count}</td></tr>
                   <tr><td style={styles.td}><strong>Arestas internas</strong></td><td style={styles.td}>{job.metrics.internal_edge_count}</td></tr>
@@ -240,6 +241,13 @@ export function JobDetailPage() {
                   <tr><td style={styles.td}><strong>Grau médio dos nós</strong></td><td style={styles.td}>{job.metrics.mean_node_degree}</td></tr>
                   <tr><td style={styles.td}><strong>Grau mín./máx. dos nós</strong></td><td style={styles.td}>{job.metrics.min_node_degree} / {job.metrics.max_node_degree}</td></tr>
                   <tr><td style={styles.td}><strong>Desvio-padrão do grau</strong></td><td style={styles.td}>{job.metrics.node_degree_stddev}</td></tr>
+                  <tr>
+                    <td style={styles.td}><strong>Contenção no domínio</strong></td>
+                    <td style={styles.td} data-testid="voronoi-domain-containment">
+                      {job.metrics.domain_containment_verified ? "verificada" : "VIOLAÇÃO DETECTADA"} (violação máx.:{" "}
+                      {job.metrics.max_node_containment_violation_mm}mm)
+                    </td>
+                  </tr>
                 </tbody>
               </table>
             </>

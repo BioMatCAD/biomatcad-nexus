@@ -68,6 +68,17 @@ public sealed class VoronoiTessellationResult
     public int ConnectedComponentCount { get; init; }
     public int IsolatedNodeCount { get; init; }
     public string NodesAndEdgesSha256 { get; init; } = "";
+
+    /// <summary>Auditoria real de contenção no domínio (Incremento 2.2, Seção 9 -- item
+    /// "domain containment" da lista de métricas pedida): maior valor, entre todos os nós
+    /// finais (internos + pontos de recorte de raio de fronteira), da SDF do domínio avaliada
+    /// naquele nó, restrita a >= 0 (nós estritamente internos têm SDF negativa e não contam
+    /// aqui). Um nó verdadeiramente interno ou exatamente na superfície contribui 0 (ou um valor
+    /// próximo de 0 vindo apenas do erro de ponto flutuante da bissecção que localizou o recorte,
+    /// ver DomainContainmentToleranceMm); qualquer valor MAIOR que essa tolerância indica um nó
+    /// genuinamente fora do domínio -- um bug real, nunca esperado por construção, e nunca
+    /// escondido ou arredondado para zero.</summary>
+    public double MaxNodeContainmentViolationMm { get; init; }
 }
 
 public static class VoronoiTessellation
@@ -84,6 +95,13 @@ public static class VoronoiTessellation
     /// se não for alcançada, é tratado como um caso degenerado estruturado, nunca como loop
     /// infinito.</summary>
     private const double BoundaryRayMaxLengthSafetyFactor = 3.0;
+
+    /// <summary>Tolerância (mm) usada apenas para AUDITORIA pós-hoc de contenção no domínio
+    /// (MaxNodeContainmentViolationMm) -- mesma ordem de grandeza de nodeDedupeToleranceMm, uma
+    /// margem pequena e explícita para o erro de ponto flutuante acumulado da bissecção que
+    /// localiza pontos de recorte na superfície (bisectionToleranceMm=1e-6 por passo, múltiplos
+    /// passos por raio). Não afeta nenhum cálculo geométrico -- só rotula o resultado.</summary>
+    public const double DomainContainmentToleranceMm = 1e-4;
 
     private static Vec3 Add(Vec3 a, Vec3 b) => new(a.X + b.X, a.Y + b.Y, a.Z + b.Z);
     private static Vec3 Scale(Vec3 a, double s) => new(a.X * s, a.Y * s, a.Z * s);
@@ -550,6 +568,10 @@ public static class VoronoiTessellation
 
         string checksum = ComputeNodesAndEdgesSha256(canonicalNodes, canonicalEdges);
 
+        double maxContainmentViolationMm = canonicalNodes.Count > 0
+            ? canonicalNodes.Max(n => Math.Max(0.0, SignedDistanceToDomain(n, domain)))
+            : 0.0;
+
         return new VoronoiTessellationResult
         {
             Nodes = canonicalNodes,
@@ -564,6 +586,7 @@ public static class VoronoiTessellation
             ConnectedComponentCount = componentCount,
             IsolatedNodeCount = isolatedNodeCount,
             NodesAndEdgesSha256 = checksum,
+            MaxNodeContainmentViolationMm = maxContainmentViolationMm,
         };
     }
 
