@@ -644,3 +644,49 @@ Windows com um profiler/depurador nativo anexado ao processo `dotnet.exe` no mom
 o thread travado é o loop de `bPoll()` do viewer nativo ou algum outro mecanismo interno do
 PicoGK -- não realizável a partir deste ambiente Linux, que não executa o runtime nativo do
 PicoGK (ver seção 4).
+
+## 13. Rodada de prova direta (pós-commit `d13c691`) -- roteiro `Run-VoronoiDirectWorkerProbe.ps1`
+
+O usuário instruiu explicitamente que a hipótese "está fora do alcance da aplicação" (seção 12)
+não deve ser aceita como conclusão final: mesmo que a thread persistente seja interna ao
+PicoGK, o `geometry-worker` é um processo CLI de job único e deve garantir término
+determinístico. Antes de qualquer correção de código (que só faz sentido se a causa for
+confirmada por prova direta, não apenas pela evidência indireta já disponível), esta rodada
+prepara uma **prova direta e isolada**, sem API, sem dispatcher e sem o mecanismo de
+`WORKER_TIMEOUT` externo:
+
+- `apps/api/scripts/build_worker_job_json.py` (novo): constrói um `job.json` real usando a
+  MESMA canonicalização (`validate_and_canonicalize`) que a API de produção usa -- nenhuma
+  golden recipe é alterada, apenas processada como sempre foi.
+- `scripts/Run-VoronoiDirectWorkerProbe.ps1` (novo): invoca `dotnet BioMatCadGeometryWorker.dll
+  job.json` diretamente, redireciona stdout/stderr completos (UTF-8, nunca truncados) para
+  arquivos, e monitora em paralelo: aparecimento do marcador `[DIAG_MARKER]
+  library_go_returned_at_utc=...` (novo, ver `Program.cs`, emitido em stderr imediatamente após
+  `topologyProvider.BuildAndExport(...)` retornar -- isola o tempo gasto dentro de
+  `Library.Go`/PicoGK do tempo gasto depois), aparecimento de um JSON final válido em stdout,
+  existência e tamanho do `scaffold.stl`, e uma tentativa real de reabrir esse STL para leitura
+  (prova de que o arquivo está de fato fechado/legível, não apenas "existe"). Quando um
+  resultado completo (JSON + STL) é detectado, aguarda mais 15s (parametrizável) SEM matar nada,
+  e só então -- se o processo ainda estiver vivo -- captura uma amostra de threads do SO
+  (melhor esforço) e encerra APENAS a árvore de processos que ele mesmo iniciou (nunca um
+  `taskkill` global, nunca processos não rastreados). Grava um relatório JSON estruturado com
+  todos os tempos/estados medidos.
+
+**Validação da lógica de detecção/temporização feita nesta sessão** (sem PicoGK real, que não
+roda neste sandbox Linux): a lógica central de polling (regex de detecção do marcador em
+stderr, parsing da última linha de stdout como JSON, detecção de resultado completo, espera
+extra, e encerramento controlado com confirmação) foi extraída e testada contra um processo
+fictício controlável (Python, mesmo contrato de stdout/stderr do worker real) em dois cenários:
+(1) processo que produz o resultado completo e sai sozinho logo depois -- detectado
+corretamente, sem encerramento forçado; (2) processo que produz o resultado completo e
+permanece vivo indefinidamente -- detectado corretamente após a espera extra, e encerrado de
+forma controlada e confirmada, sem deixar processos órfãos. Isso prova que a MECÂNICA do
+roteiro funciona; a EXECUÇÃO real contra o worker/PicoGK genuíno só pode acontecer no Windows do
+usuário (ver seção 4) -- ainda não foi executada.
+
+**Próximo passo**: o usuário deve rodar `Run-VoronoiDirectWorkerProbe.ps1` no Windows contra
+`block-voronoi-preview-v1`. Se o relatório resultante confirmar `still_alive_after_extra_wait:
+true` (resultado completo + processo vivo por tempo adicional sem nenhum watchdog externo), a
+FASE B (implementação de um `WorkerProcessExitCoordinator` explícito no limite externo do
+processo) será iniciada com essa prova direta em mãos -- não antes, por instrução explícita do
+usuário.

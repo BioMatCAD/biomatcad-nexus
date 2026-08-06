@@ -147,6 +147,17 @@ try
     string stlPath = Path.Combine(job.OutputDir, "scaffold.stl");
 
     var buildResult = topologyProvider.BuildAndExport(job, stlPath);
+    // Marcador de diagnostico puro (rodada Voronoi 20260806-*, prova direta sem dispatcher) --
+    // NAO altera nenhum algoritmo/parametro cientifico, apenas emite em stderr o instante exato
+    // (UTC, ISO 8601) em que BuildAndExport (que envolve, de forma sincrona, a chamada real a
+    // PicoGK.Library.Go) RETORNOU ao chamador -- permite a um roteiro externo medir com
+    // precisao o tempo decorrido ate o retorno de Library.Go, distinto do tempo ate o JSON
+    // final ser impresso (que so acontece depois de metrics/validacao/hash abaixo) e do tempo
+    // adicional durante o qual o processo eventualmente continua vivo apos ambos ja terem
+    // ocorrido -- ver scripts/Run-VoronoiDirectWorkerProbe.ps1 e
+    // apps/geometry-worker/WORKER_STATUS.md secao 13.
+    Console.Error.WriteLine($"[DIAG_MARKER] library_go_returned_at_utc={DateTime.UtcNow:O}");
+    Console.Error.Flush();
     var metrics = GeometryMetricsCalculator.ComputeAll(buildResult.Mesh, job.Recipe.Domain);
 
     // --- Item 2: validar o STL após a gravação (não apenas confiar na malha em memória) ---
