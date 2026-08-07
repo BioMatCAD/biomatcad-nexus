@@ -1899,3 +1899,130 @@ visualizador aprovada**. O roteiro `scripts/Run-E2EOnly.ps1` (já existente, apr
 test:e2e` já executa todos os arquivos `*.spec.ts` dentro de `apps/web/e2e/`, então a próxima
 execução real deste MESMO roteiro no Windows exercitará os 14 testes automaticamente. A
 aprovação real desta cobertura depende dessa execução.
+
+## 26. Execução Windows real `e2e-only-20260807-001756` (commit `1be54e3`): 2 aprovados, 12 REPROVADOS -- causa raiz confirmada e corrigida (2026-08-07)
+
+**Este registro NÃO substitui nem apaga a seção 25** -- o trabalho relatado ali (escrita do
+`viewer.spec.ts`, verificações de sandbox) permanece verdadeiro exatamente como aconteceu.
+Esta seção documenta a PRIMEIRA execução real no Windows da suíte completa (14 testes) e a
+causa raiz real das 12 falhas, confirmada por reprodução controlada neste sandbox antes de
+qualquer edição.
+
+**Evidência literal relatada pelo usuário**:
+
+- Script: `scripts/Run-E2EOnly.ps1`, commit `1be54e3`.
+- `OutputDir`: `C:\biomatcad-runs\e2e-only-20260807-001756`.
+- 14 testes executados: 2 de `vertical.spec.ts` **aprovados**; 12 de `viewer.spec.ts`
+  **REPROVADOS**.
+- `E2EExitCode=1`.
+- API, frontend, autenticação e o próprio Playwright funcionaram normalmente (a falha não é de
+  infraestrutura do roteiro, ao contrário das rodadas anteriores).
+- As 12 falhas compartilham a mesma causa observável: `viewer-triangle-count` nunca encontrado
+  (o `StlViewer` nunca chega ao estado "ready"); os testes de cancelamento também não
+  encontraram `viewer-cancel-button` (consistente com o componente já estar em "error" antes
+  mesmo de qualquer interação).
+- `global-setup` reportou literalmente: `{"status":"already_seeded","email":"e2e-playwright@biomatcad.example"}`.
+
+**Diagnóstico confirmado** (nota de transparência: os artefatos brutos desta execução --
+`E2E_ONLY_REPORT.json/md`, `e2e-output.log`, traces do Playwright -- existem apenas na máquina
+Windows do usuário, não neste sandbox; o diagnóstico abaixo foi confirmado por leitura do
+código-fonte da rodada anterior e por reprodução controlada equivalente neste sandbox, descrita
+logo adiante, não pela abertura literal desses arquivos):
+
+O script `apps/api/scripts/seed_e2e_user.py`, como entregue no commit `1be54e3`, tinha
+`if existing_user is not None: return` logo no início de `main()`. O Postgres real do usuário
+já continha o usuário `e2e-playwright@biomatcad.example` de execuções aprovadas em rodadas
+ANTERIORES a esta (seções 23/24) -- ou seja, ANTES da correção do STL vazio/hash fake
+introduzida no commit `1be54e3`. Como o `global-setup.ts` do Playwright roda este script antes
+de toda a suíte, e o usuário já existia, o script retornava imediatamente com
+`status=already_seeded` -- o job/Artifact/Manifest LEGADOS (STL ASCII vazio, `stl_sha256`
+fake `"0"*64`, gravados por uma execução anterior à correção) nunca eram tocados, nunca
+substituídos pelo tetraedro sintético corrigido. O `StlViewer`, ao carregar esse job legado,
+recalcula o SHA-256 real dos bytes baixados (vazios) e o compara contra o
+`Artifact.sha256="0"*64` persistido -- nunca bate, então o componente entra em estado "error"
+(`ArtifactChecksumMismatchError`) e nunca chega a "ready". Isso explica exatamente as 12
+falhas: todas dependem de `viewer-triangle-count` (só existe em "ready"), e o cancelamento
+também falha porque `viewer-cancel-button` só existe em "loading" -- um estado que o
+componente já passou (rapidamente, para "error") antes do teste conseguir interagir.
+
+**Reprodução controlada neste sandbox (antes de qualquer edição)**: o cenário foi reproduzido
+byte a byte -- rodar o script uma vez (cria o fixture correto), corromper manualmente
+`Artifact.sha256` para `"0"*64` e o arquivo STL para o conteúdo vazio legado (simulando
+precisamente o que uma execução ANTES da correção do commit `1be54e3` teria deixado no banco),
+e então confirmar que uma reexecução do script ANTIGO (com o early-return) preservava a
+corrupção intacta -- provando a causa raiz antes de escrever qualquer correção. Este cenário
+agora é um teste de regressão permanente (`test_fixture_legado_stl_vazio_e_hash_fake_e_reparado`
+em `apps/api/tests/test_e2e_seed_fixture.py`).
+
+**Correção aplicada**: `apps/api/scripts/seed_e2e_user.py` foi reescrito como uma sequência de
+passos "get-or-create" totalmente idempotentes e reconciliáveis. Cada camada (organização,
+usuário, projeto, receita, design_run, job, Artifact STL, ArtifactManifest/Artifact MANIFEST) é
+localizada exclusivamente pelo fixture E2E -- nunca por heurística de nome -- via duas âncoras
+determinísticas e únicas no schema: o e-mail único do usuário (`users.email`) e a
+`idempotency_key` única do design_run por organização (restrição
+`uq_design_run_org_idempotency`). Cada componente é criado apenas se ausente, ou reparado
+apenas se o conteúdo persistido divergir byte a byte do fixture esperado -- nunca duplicado.
+
+Correção de segurança adicional confirmada durante a reescrita: a versão anterior chamava
+`claim_next_queued_job()`, que reivindica o job MAIS ANTIGO DE TODA A FILA do sistema (via
+`SELECT ... FOR UPDATE SKIP LOCKED` sem filtro de job específico) -- em um Postgres real de
+pesquisa (não um banco exclusivo de testes), isso arriscaria roubar e fake-executar (com o
+worker FALSO deste script) um job real de outro usuário, caso houvesse algum na fila no
+momento do seed. Corrigido para reivindicar exclusivamente `job.id` (o job já identificado como
+pertencente ao fixture E2E) via `WHERE id = :job_id AND status = 'queued'`.
+
+**Reconciliação de `ArtifactManifest`**: implementada como um patch cirúrgico -- apenas o campo
+`stl_sha256` de topo e a entrada `kind="stl"` dentro de `artifacts` são corrigidos; todo o
+restante do manifesto (git_commit, topology_provider, métricas, etc.) é preservado
+integralmente, e a linha `ArtifactManifest`/`Artifact(MANIFEST)` existente é ATUALIZADA no
+lugar (mesmo `id`), nunca recriada -- evitando duplicação e preservando referências.
+
+**Saída do script**: agora distingue, por componente, `created` / `already_valid` / `repaired`
+(e um status agregado de topo com a mesma prioridade), sem expor a senha sintética em nenhum
+campo além do já existente (inalterado).
+
+**Testes de regressão novos** (`apps/api/tests/test_e2e_seed_fixture.py`, reescrito, 7 casos,
+todos rodando o script real via subprocesso contra SQLite efêmero, exatamente como
+`global-setup.ts` o invoca):
+
+1. Banco vazio -> fixture criado corretamente (`status=created`).
+2. Reexecução sobre fixture já correto -> `already_valid`, sem duplicar nenhuma linha
+   (usuário/design_run/job/Artifact STL/ArtifactManifest -- contagem verificada via SQL puro).
+3. Fixture legado reproduzido byte a byte (STL vazio + `stl_sha256="0"*64`) -> `repaired`,
+   restaurando o MESMO hash real original.
+4. Arquivo físico do STL apagado do storage (Artifact no banco continua correto) -> arquivo
+   recriado com os bytes corretos.
+5. Artifact STL correto mas `ArtifactManifest` com `stl_sha256`/entrada obsoletos -> reconciliado
+   SEM recriar a linha (mesmo `id` antes/depois), preservando o restante do conteúdo
+   (`git_commit` inalterado, verificado explicitamente).
+6. Um usuário/organização/projeto "alheio" ao fixture E2E, inserido diretamente via SQL puro
+   (simulando dado real de pesquisa) -> permanece byte a byte e linha a linha intacto após a
+   reconciliação.
+7. Os bytes servidos pelo endpoint de download (lidos diretamente do `storage_key`, exatamente
+   como `routers/artifacts.py:download_artifact` faz) batem com o SHA-256 persistido, inclusive
+   após uma reconciliação de fixture legado.
+
+Todos os 7 passam neste sandbox.
+
+**Verificação completa nesta rodada**: `mypy` limpo (mesmos 4 erros pré-existentes e não
+relacionados, confirmados idênticos antes/depois); `pytest` backend **222 passed, 2 skipped**
+contra Postgres real via `pgserver` (215 + 7 novos, substituindo os 2 testes anteriores do
+fixture); frontend inalterado nesta rodada -- `tsc`/`eslint`/`vitest` (**124 passed**, sem
+mudança)/`build` reconfirmados limpos para garantir que nada foi afetado; `playwright test
+--list` confirma os mesmos 14 testes; `npx playwright test` continua **BLOQUEADO neste
+sandbox** pela mesma limitação recorrente (`libXdamage.so.1` ausente, sem `sudo`) -- reportado
+honestamente, sem alterar o veredito.
+
+**`scripts/Run-E2EOnly.ps1` não precisou de nenhuma alteração** -- a correção é inteiramente no
+script de seed consumido por `global-setup.ts`; o roteiro Windows continua o mesmo comando já
+entregue.
+
+### Veredito -- cobertura do visualizador CONTINUA NÃO aprovada
+
+Consistente com a instrução do usuário ("Não declare o visualizador E2E aprovado até uma nova
+execução Windows retornar 14/14 e exit code 0"), este documento **não declara** a cobertura E2E
+do visualizador aprovada. A causa raiz real das 12 falhas foi identificada e corrigida, e
+provada por 7 testes de regressão permanentes neste sandbox -- mas a prova definitiva depende
+de uma nova execução real do usuário no Windows, com o banco Postgres real já contaminado pelo
+fixture legado (o mesmo banco da execução `20260807-001756`), retornando 14/14 aprovados e
+`exit code 0`.

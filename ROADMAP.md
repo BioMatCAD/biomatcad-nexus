@@ -117,12 +117,14 @@ incremento concluído:
    painel de proveniência com detecção de divergência API-vs-manifesto, cancelamento, descarte
    completo de recursos WebGL, fallback sem WebGL. Voronoi real continua deliberadamente fora
    desta rodada (item 2 abaixo). **Cobertura E2E dos controles (`apps/web/e2e/viewer.spec.ts`,
-   12 testes) ESCRITA e verificada por todos os meios disponíveis no sandbox nesta rodada**
-   (typecheck/eslint/vitest/build limpos; corrigido de quebra um bug real no fixture do job
-   pré-semeado que impedia o `StlViewer` de chegar a "ready" -- ver `TEST_EVIDENCE.md` seção
-   25) -- mas a execução REAL em Chromium continua bloqueada neste sandbox (mesmo motivo de
+   12 testes) ESCRITA** -- primeira execução real no Windows (`e2e-only-20260807-001756`,
+   commit `1be54e3`) reprovou 12/12 por um bug real no fixture do job pré-semeado
+   (`seed_e2e_user.py` retornava `already_seeded` sem reconciliar o job legado já persistido no
+   banco Windows de rodadas anteriores) -- causa raiz confirmada e corrigida (script reescrito
+   como sequência idempotente/reconciliável; 7 testes de regressão novos; ver `TEST_EVIDENCE.md`
+   seção 26). A execução REAL em Chromium continua bloqueada neste sandbox (mesmo motivo de
    sempre, `libXdamage.so.1` ausente) e **NÃO foi declarada aprovada** até o usuário confirmar
-   0 falhas no Windows real com `scripts/Run-E2EOnly.ps1`.
+   14/14 e exit code 0 em uma NOVA execução no Windows com `scripts/Run-E2EOnly.ps1`.
 2. ~~**`VoronoiTopologyProvider` real**~~ -- **CONCLUÍDO e APROVADO no Windows real** (commits
    `e07a5e2`..`bf756a4` implementaram; execução real `voronoi-validation-staged-
    20260806-195638` aprovou): geração de sítios, tesselação 3D real (`MIConvexHull`, MIT,

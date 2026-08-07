@@ -290,6 +290,41 @@ sem repetir a matriz geométrica. **Consistente com a regra 17 do usuário, esta
 visualizador NÃO é declarada aprovada nesta rodada** -- a aprovação depende da execução real do
 usuário retornando 0 falhas. Ver `TEST_EVIDENCE.md` seção 25 para o registro completo.
 
+### Rodada 7 -- Execução Windows real `e2e-only-20260807-001756` reprovou 12/14 (viewer); causa raiz confirmada (fixture legado não reconciliado) e corrigida
+
+A primeira execução real do Windows da suíte de 14 testes (`Run-E2EOnly.ps1`, commit `1be54e3`)
+retornou 2 aprovados (`vertical.spec.ts`) e **12 reprovados** (`viewer.spec.ts`), todos pela
+mesma causa: `viewer-triangle-count` nunca encontrado (o `StlViewer` nunca chega a "ready").
+`global-setup` reportou `status=already_seeded`.
+
+Causa raiz confirmada: `seed_e2e_user.py` tinha um `if existing_user is not None: return` --
+como o Postgres real do usuário já continha o fixture de rodadas ANTERIORES à correção do STL
+vazio/hash fake (seções 23-25), essa saída antecipada nunca corrigia o job/Artifact legado.
+Reproduzido byte a byte neste sandbox antes de qualquer edição (corromper manualmente
+`Artifact.sha256` para `"0"*64` + STL vazio, confirmar que a versão antiga preservava a
+corrupção).
+
+Corrigido: `seed_e2e_user.py` reescrito como uma sequência "get-or-create" totalmente
+idempotente e reconciliável, localizando o fixture exclusivamente por âncoras únicas (e-mail do
+usuário, `idempotency_key` do design_run) e reparando qualquer componente (Artifact STL,
+ArtifactManifest) cujo conteúdo divirja do esperado -- sem duplicar e sem tocar em dados
+alheios ao fixture. Corrigido também um risco de segurança real descoberto durante a reescrita:
+o script antigo usava `claim_next_queued_job()` (reivindica o job mais antigo de TODA a fila do
+sistema), que em um Postgres real de pesquisa arriscaria roubar e fake-executar um job real de
+outro usuário -- agora reivindica exclusivamente o `job.id` do fixture.
+
+7 testes de regressão novos (`test_e2e_seed_fixture.py`, reescrito) provam: banco vazio->criado;
+reexecução->already_valid sem duplicar; fixture legado (STL vazio+hash fake)->reparado; arquivo
+físico ausente->recriado; Artifact correto+Manifest incorreto->reconciliado preservando IDs;
+dados alheios ao fixture->intactos; bytes servidos pelo endpoint de download batem com o SHA
+persistido. `pytest` backend: **222 passed, 2 skipped** contra Postgres real (215+7). Frontend
+reconfirmado inalterado (124 passed, tsc/eslint/build limpos). Playwright real continua
+bloqueado neste sandbox (mesma limitação de sempre). `Run-E2EOnly.ps1` não precisou de nenhuma
+alteração (a correção é só no script de seed). Ver `TEST_EVIDENCE.md` seção 26.
+
+**Cobertura E2E do visualizador continua NÃO aprovada** -- depende de nova execução real do
+usuário no Windows retornando 14/14 e exit code 0.
+
 ## Incremento 2.2 Alpha Pesquisa — resumo (branch `incremento-2.2-alpha-pesquisa`)
 
 Escopo desta rodada: observabilidade real + integração à GUI, GUI completa de pesquisa (retry,

@@ -325,3 +325,28 @@ roda todos os `*.spec.ts` de `apps/web/e2e/`, então a próxima execução real 
 no Windows exercitará os 14 testes automaticamente, sem repetir a matriz geométrica. **Esta
 cobertura E2E do visualizador só pode ser considerada aprovada depois que essa execução real
 retornar 0 falhas** -- não antes.
+
+## Execução Windows real `e2e-only-20260807-001756`: 2 aprovados, 12 REPROVADOS -- causa raiz corrigida (2026-08-07)
+
+A primeira execução real do Windows dos 14 testes (`Run-E2EOnly.ps1`, commit `1be54e3`) reprovou
+todos os 12 testes de `viewer.spec.ts` -- `viewer-triangle-count` nunca encontrado, o
+`StlViewer` nunca chegava a "ready". `global-setup` reportou `status=already_seeded`.
+
+Causa raiz: o Postgres real do usuário já continha o fixture de rodadas anteriores (seções 23-
+24 do `TEST_EVIDENCE.md`), semeado ANTES da correção do STL vazio/hash fake. Como
+`seed_e2e_user.py` tinha `if existing_user is not None: return`, essa reexecução nunca corrigia
+o job/Artifact legado já persistido -- o `StlViewer` rejeitava por checksum incompatível contra
+o hash fake antigo, exatamente como nas 12 falhas relatadas.
+
+Corrigido: `seed_e2e_user.py` agora é uma sequência idempotente e reconciliável -- localiza o
+fixture exclusivamente pelas âncoras únicas (e-mail do usuário, `idempotency_key` do design_run)
+e repara qualquer componente (Artifact STL, ArtifactManifest) cujo conteúdo divirja do esperado,
+sem duplicar e sem tocar em dados alheios ao fixture. 7 testes de regressão novos em
+`apps/api/tests/test_e2e_seed_fixture.py` provam cada cenário (banco vazio, reexecução,
+fixture legado, arquivo ausente, manifesto obsoleto, dados alheios intactos, consistência do
+download) -- ver `TEST_EVIDENCE.md` seção 26 para o detalhamento completo.
+
+`scripts/Run-E2EOnly.ps1` não precisou de nenhuma alteração -- a correção está inteiramente no
+script de seed consumido por `global-setup.ts`. **Esta cobertura E2E do visualizador continua
+NÃO aprovada** até uma nova execução real no Windows (com o mesmo banco Postgres, agora já
+contaminado pelo fixture legado da execução anterior) retornar 14/14 e exit code 0.
