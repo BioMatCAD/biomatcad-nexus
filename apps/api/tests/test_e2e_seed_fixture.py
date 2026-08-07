@@ -323,6 +323,46 @@ def test_registros_alheios_ao_fixture_permanecem_intactos(tmp_path):
     assert after == before, "A reconciliação do fixture E2E alterou dados de uma organização/usuário/projeto alheios."
 
 
+def test_saida_do_seed_nunca_expoe_a_senha_sintetica_em_texto_claro(tmp_path):
+    """Regressão real (2a execução Windows, e2e-output.log, commit f8490d9 -- ver
+    TEST_EVIDENCE.md): a linha de log do global-setup continha
+    `"password": "e2e-synthetic-password-123"` em texto plano -- mesmo sendo uma senha
+    sintética/hardcoded (nunca usada para nenhum dado real), ela não deveria ter sido impressa
+    de forma alguma; o relatório deve informar apenas identificação não secreta (email/ids) e o
+    estado reconciliado de cada componente. Este teste roda o script real via subprocesso (como
+    e2e/global-setup.ts o invoca) e verifica, a partir do stdout bruto e não só do JSON já
+    parseado, que nenhuma variação da senha sintética aparece em nenhum lugar da saída."""
+    env, _db_path, _storage_dir = _make_env(tmp_path, "no-password-leak")
+    seed_env = dict(os.environ)
+    seed_env.update(env)
+    seed_env.setdefault("ENVIRONMENT", "test")
+    seed_env.setdefault("API_SECRET_KEY", "test-secret-key-not-for-production-not-for-production")
+    result = subprocess.run(
+        [sys.executable, str(SEED_SCRIPT)], cwd=API_ROOT, env=seed_env, capture_output=True, text=True, timeout=120
+    )
+    assert result.returncode == 0, (
+        f"seed_e2e_user.py falhou (rc={result.returncode}).\nstdout={result.stdout}\nstderr={result.stderr}"
+    )
+
+    synthetic_password = "e2e-synthetic-password-123"
+    assert synthetic_password not in result.stdout, "A senha sintética vazou em texto plano no stdout do seed."
+    assert synthetic_password not in result.stderr, "A senha sintética vazou em texto plano no stderr do seed."
+
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert "password" not in payload, "A saída JSON do seed ainda contém a chave 'password'."
+    # A identificação não secreta continua presente (não é um teste de "não informar nada").
+    assert payload["email"]
+    assert set(payload["components"]) == {
+        "user",
+        "project",
+        "recipe",
+        "design_run",
+        "job",
+        "stl_artifact",
+        "manifest",
+    }
+
+
 def test_download_endpoint_serviria_exatamente_os_bytes_cujo_sha_esta_persistido(tmp_path):
     """Cenário 8: prova, ao nível dos bytes reais em disco (o mesmo que
     routers/artifacts.py:download_artifact serve via storage.get(artifact.storage_key), sem

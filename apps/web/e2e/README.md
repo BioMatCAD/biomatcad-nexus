@@ -350,3 +350,37 @@ download) -- ver `TEST_EVIDENCE.md` seção 26 para o detalhamento completo.
 script de seed consumido por `global-setup.ts`. **Esta cobertura E2E do visualizador continua
 NÃO aprovada** até uma nova execução real no Windows (com o mesmo banco Postgres, agora já
 contaminado pelo fixture legado da execução anterior) retornar 14/14 e exit code 0.
+
+## Execução Windows real `viewer-e2e-evidence-20260807-012919` (commit `f8490d9`): seed CONFIRMADO reparado, mesmas 12 falhas por causa raiz DIFERENTE -- corrigida (2026-08-07)
+
+A segunda execução real do Windows (`Run-E2EOnly.ps1`, commit `f8490d9`) confirmou, com
+evidência bruta literal (`error-context.md`/`trace.zip` dos 12 testes, anexada pelo usuário),
+que a correção da rodada anterior funcionou: `global-setup` reportou `status=repaired`,
+`stl_artifact: repaired`, `manifest: repaired` -- o fixture legado do Postgres real foi
+genuinamente reconciliado. Mesmo assim, as mesmas 12 falhas de `viewer.spec.ts` persistiram.
+
+Lendo os 12 `error-context.md` e os 12 `trace.zip` antes de qualquer edição: todos os 12 mostram
+o usuário autenticado, na página correta (`/app/jobs/<id>`, "Concluído"), refutando a hipótese
+de perda de sessão via `page.goto()` pós-login. O ponto comum real: todos mostram "Nenhum
+artefato disponível" ao lado de uma lista "Artefatos" que lista corretamente o STL. O `trace.zip`
+confirmou requisições de rede corretas (`GET .../artifacts` -> 200 OK, `kind: "stl"`, hash/tamanho
+certos) e nenhum erro de console.
+
+Causa raiz real: `JobDetailPage.tsx` monta o `<StlViewer artifactUrl={null}>` na primeira
+renderização do job "succeeded" (antes do `Promise.all` de artifacts/manifest resolver), e só
+recebe um `artifactUrl` válido um instante depois via atualização de props. Em `StlViewer.tsx`,
+o estado `"empty"` ainda tinha um `return` antecipado que nunca montava a `<div
+ref={containerRef}>` -- quando `artifactUrl` chegava depois, o efeito de carregamento sempre
+abortava no guard `!containerRef.current` (a div nunca existia). Deadlock permanente: preso em
+"empty" para sempre.
+
+Corrigido removendo o `return` antecipado de `"empty"` em `StlViewer.tsx` (mesmo padrão já usado
+para `"loading"`/`"size-warning"`). Novo teste de regressão em `StlViewer.test.tsx` reproduz
+exatamente essa sequência (mount sem artefato, `rerender()` com artefato válido) e comprovadamente
+falha sem a correção (verificado via `git stash` isolando só a correção). Corrigido também:
+`seed_e2e_user.py` não imprime mais a senha sintética no log do `global-setup` -- ver
+`TEST_EVIDENCE.md` seção 27 para o detalhamento completo.
+
+`scripts/Run-E2EOnly.ps1` não precisou de nenhuma alteração. **Esta cobertura E2E do
+visualizador continua NÃO aprovada** até uma TERCEIRA execução real no Windows retornar 14/14 e
+exit code 0.

@@ -373,29 +373,35 @@ export function StlViewer({
     }
   };
 
-  if (status === "empty") {
-    return <EmptyState title="Nenhum artefato disponível" description="Este job ainda não gerou um STL para visualização." />;
-  }
-
   const isHeavyMesh = triangleCount > maxTrianglesForDirectRender;
 
-  // "size-warning" PRECISA continuar montando a div do container mais abaixo (mesmo padrão do
-  // bug corrigido para "loading"): quando o usuário clica em "Carregar mesmo assim", o efeito
-  // de carregamento roda no mesmo ciclo de commit em que `status` ainda é "size-warning" --
-  // se a div do container não existisse no DOM nesse momento, `containerRef.current` seria
-  // null e o carregamento nunca começaria. Por isso "size-warning" NÃO tem mais um `return`
-  // antecipado -- vira só mais um overlay condicional, como os demais estados pós-decisão.
+  // "empty" e "size-warning" PRECISAM continuar montando a div do container mais abaixo (mesmo
+  // padrão do bug corrigido para "loading"): um bug real foi encontrado na 2a execução Windows
+  // real deste E2E (viewer.spec.ts, commit f8490d9, ver TEST_EVIDENCE.md) -- "empty" ainda tinha
+  // um `return` antecipado (igual ao que já havia sido corrigido para "loading"), o que impedia a
+  // div de containerRef de existir enquanto o job ainda não tinha artefato carregado (mount
+  // inicial, artifactUrl=null). Quando o artefato chegava um instante depois (JobDetailPage
+  // primeiro renderiza com `artifacts=[]` e só popula via setArtifacts após um round-trip HTTP
+  // assíncrono), o efeito que reage a `[artifactUrl]` disparava corretamente e incrementava
+  // `loadToken`, mas o efeito de carregamento abortava sempre no guard `!containerRef.current`,
+  // porque a div nunca tinha sido montada (o componente ainda retornava só o EmptyState) --
+  // deadlock permanente: preso em "empty" para sempre, mesmo com artefato válido. Corrigido
+  // removendo o `return` antecipado de "empty" também, mantendo a div sempre presente e usando
+  // overlays condicionais, como já era feito para "size-warning"/"loading". Coberto por teste de
+  // regressão em StlViewer.test.tsx ("transição empty -> ready quando artifactUrl chega depois
+  // do mount").
 
-  // IMPORTANTE: a partir daqui (loading/ready/error/cancelled/webgl-unavailable/context-lost),
-  // a div referenciada por containerRef precisa continuar montada em TODOS esses estados --
-  // o efeito de carregamento só consegue anexar o WebGLRenderer a ela se `containerRef.current`
-  // já existir no momento em que o efeito roda (logo após o commit deste render). Um bug real
-  // encontrado durante os testes desta rodada: uma versão anterior deste componente usava
-  // `return` antecipado para o estado "loading" SEM renderizar a div do container, deixando
-  // `containerRef.current` nulo e o carregamento nunca progredia (preso em "loading" para
-  // sempre). Corrigido mantendo a div sempre presente e usando overlays condicionais.
+  // IMPORTANTE: a partir daqui (empty/size-warning/loading/ready/error/cancelled/
+  // webgl-unavailable/context-lost), a div referenciada por containerRef precisa continuar
+  // montada em TODOS esses estados -- o efeito de carregamento só consegue anexar o
+  // WebGLRenderer a ela se `containerRef.current` já existir no momento em que o efeito roda
+  // (logo após o commit deste render).
   return (
     <div>
+      {status === "empty" && (
+        <EmptyState title="Nenhum artefato disponível" description="Este job ainda não gerou um STL para visualização." />
+      )}
+
       {status === "size-warning" && (() => {
         const mb = ((declaredSizeBytes ?? 0) / (1024 * 1024)).toFixed(1);
         const limitMb = (maxBytes / (1024 * 1024)).toFixed(0);

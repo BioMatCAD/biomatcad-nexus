@@ -2026,3 +2026,167 @@ provada por 7 testes de regressão permanentes neste sandbox -- mas a prova defi
 de uma nova execução real do usuário no Windows, com o banco Postgres real já contaminado pelo
 fixture legado (o mesmo banco da execução `20260807-001756`), retornando 14/14 aprovados e
 `exit code 0`.
+
+## 27. Execução Windows real `viewer-e2e-evidence-20260807-012919` (commit `f8490d9`): reconciliação do seed CONFIRMADA funcionando, mas as mesmas 12 falhas persistem -- causa raiz REAL diferente encontrada e corrigida (2026-08-07)
+
+**Este registro NÃO substitui nem apaga a seção 26** -- o diagnóstico e a correção relatados ali
+(bug do `already_seeded`/reconciliação do seed) permanecem verdadeiros e, nesta rodada, foram
+literalmente CONFIRMADOS pela evidência real do Windows. Esta seção documenta a SEGUNDA execução
+real no Windows da suíte completa (14 testes) e uma causa raiz DIFERENTE e adicional das mesmas
+12 falhas, desta vez diagnosticada a partir dos artefatos brutos reais (`error-context.md` e
+`trace.zip` de cada um dos 12 testes), não por reprodução equivalente em sandbox.
+
+**Evidência literal fornecida pelo usuário**: arquivo `viewer-e2e-evidence-20260807-012919.zip`,
+contendo `E2E_ONLY_REPORT.json/.md`, `alembic.log`, `api-runtime.log(.err)`, `e2e-output.log`,
+`web-npm-ci.log`, e `test-results/` com 12 subpastas (uma por teste falho), cada uma com
+`error-context.md` (snapshot de acessibilidade no momento exato da falha) e `trace.zip`
+(requisições/respostas de rede reais, console do navegador, stacks).
+
+- `E2E_ONLY_REPORT.json`: HEAD confirmado `f8490d9`; todos os passos de preparação (venv, alembic
+  upgrade head, `API_SECRET_KEY` sintético válido, API disponível em 127.0.0.1:8000, `npm ci`)
+  **ok**; apenas `e2e_playwright`: `ok=false`, `"npm run test:e2e -> exit 1"`.
+- `e2e-output.log` (linha do `global-setup`, reproduzida aqui SEM a senha -- ver correção
+  abaixo): `{"status": "repaired", "email": "e2e-playwright@biomatcad.example", "project_id":
+  "6e454533-...", "recipe_id": "985a9312-...", "succeeded_job_id": "ad812bdc-...", "components":
+  {"user": "already_valid", "project": "already_valid", "recipe": "already_valid", "design_run":
+  "already_valid", "job": "already_valid", "stl_artifact": "repaired", "manifest": "repaired"}}`
+  -- **prova real e literal de que a correção da seção 26 funcionou em produção**: o fixture
+  legado (STL vazio, hash fake) persistido no Postgres real do usuário desde as rodadas
+  anteriores foi genuinamente reparado nesta execução, sem duplicar nenhum registro.
+- Mesmo assim: 14 testes executados, 2 de `vertical.spec.ts` **aprovados**, os mesmos 12 de
+  `viewer.spec.ts` **REPROVADOS**, `E2EExitCode=1`.
+
+### Metodologia -- evidência antes de qualquer edição
+
+Antes de tocar em qualquer arquivo, segui exatamente a ordem exigida: (1) li os 12
+`error-context.md` na íntegra; (2) inspecionei os 12 `trace.zip` (extraídos e lidos via script,
+já que não há display real neste sandbox para `npx playwright show-trace` interativo); (3)
+identifiquei a página/URL/DOM de cada um dos 12 no momento da falha; (4) verifiquei
+especificamente a hipótese prioritária levantada pelo usuário (perda do token do `AuthContext`
+via `page.goto()` pós-login, a mesma classe de regressão já corrigida em `vertical.spec.ts` em
+uma rodada anterior) contra a evidência real, não por suposição.
+
+**Hipótese do `AuthContext`/`page.goto()`: REFUTADA pela evidência.** Nos 12 `error-context.md`,
+o `banner` mostra, em TODOS os casos, "Usuário E2E Playwright" e o botão "Sair" -- ou seja, a
+sessão nunca foi perdida, o usuário nunca foi redirecionado ao login. `gotoPreseededJobPage()` em
+`viewer.spec.ts` já segue exatamente o mesmo padrão aprovado em `vertical.spec.ts` (só usa
+`page.goto("/login")` antes de autenticar; toda navegação pós-login é via `getByRole("link",
+...).click()`) -- confirmado por leitura do código e agora também pela evidência real: nenhum dos
+12 testes jamais retornou ao `/login`.
+
+**O primeiro ponto comum real, confirmado nos 12 `error-context.md`**: todos os 12 mostram a
+mesma página (`/app/jobs/<id>`, `Status: Concluído`, tabela de métricas e proveniência
+completas e corretas -- inclusive o SHA-256 real do STL na proveniência batendo com o hash
+esperado do fixture) e, sob "Visualização 3D", o MESMO texto: `Nenhum artefato disponível` /
+`Este job ainda não gerou um STL para visualização.` -- o estado "empty" do `StlViewer`,
+paradoxalmente ao lado de uma seção "Artefatos" que lista corretamente `stl (489 bytes, sha256:
+4e583513a9df...)` na MESMA renderização.
+
+Seguindo a ordem exigida para a hipótese não confirmada (endpoint do job -> associação do
+Artifact -> URL/status/bytes do download -> SHA -> console -> WebGL -> erro interno do
+`StlViewer` -> montagem condicional), inspecionei o `trace.zip` de um dos 12 testes
+(`viewer-Visualizador-3D-Stl-a8c94`, o mesmo do "chega a 'ready' com contagens reais do
+fixture"): as requisições reais capturadas mostram `GET
+/api/v1/jobs/<id>/artifacts` retornando **200 OK** com corpo JSON exatamente
+`[{"kind": "stl", "sha256": "4e583513a9df9046efd1d1f8c2ccfda264118b7274dd00c48608c95716cede9f",
+"size_bytes": 489, ...}, {"kind": "manifest", ...}]` -- dado correto, sem nenhuma divergência de
+case ou de conteúdo. O console do navegador (também capturado no trace) não mostra NENHUM erro
+-- apenas os 2 avisos padrão e inofensivos do React Router sobre flags futuras. Isso refuta,
+nesta ordem, as hipóteses de: resposta do endpoint incorreta, associação errada do Artifact,
+erro de rede/status/bytes no download, divergência de SHA, exceção de runtime, e indisponibilidade
+de WebGL (nenhum erro de criação de contexto WebGL apareceu no console -- diferente do
+comportamento genuíno reproduzido em `StlViewer.test.tsx` quando o mock de `WebGLRenderer` é
+deliberadamente omitido).
+
+### Causa raiz real (confirmada por leitura do código-fonte à luz da evidência acima)
+
+`JobDetailPage.tsx` faz polling do job (`poll()`, a cada 2s) e, ao detectar `status ===
+"succeeded"`, primeiro chama `setJob(current)` (fazendo a seção "Visualização 3D" aparecer pela
+primeira vez, com `artifacts` ainda `[]` do estado inicial) e SÓ DEPOIS, após um `await
+Promise.all([listJobArtifacts, getJobManifest])` (um round-trip de rede real, não instantâneo),
+chama `setArtifacts(artifactList)`. Ou seja: o `<StlViewer>` sempre monta pela PRIMEIRA vez com
+`artifactUrl=null` (porque `stlArtifact = artifacts.find(a => a.kind === "stl")` ainda não
+encontra nada), e só recebe um `artifactUrl` válido um instante depois, via atualização de props
+no mesmo componente já montado (sem remontar).
+
+Em `StlViewer.tsx`, o estado `"empty"` ainda tinha um `return` antecipado (linha ~375, antes da
+correção desta rodada) que saía do componente ANTES de renderizar a `<div ref={containerRef}>`
+compartilhada por todos os demais estados. Isso é exatamente a MESMA classe de bug que um
+comentário já existente no próprio arquivo documenta ter sido corrigida anteriormente para os
+estados `"loading"` e `"size-warning"` -- mas o estado `"empty"` ficou de fora dessa correção
+anterior. Resultado: quando `artifactUrl` passava de `null` para uma URL válida (a sequência real
+descrita acima), o efeito que reage a `[artifactUrl]` disparava corretamente e incrementava
+`loadToken`, mas o efeito de carregamento (`[artifactUrl, loadToken]`) sempre abortava no guard
+`if (loadToken === 0 || !artifactUrl || !containerRef.current) return;` -- porque
+`containerRef.current` era `null` para sempre (a div nunca tinha sido montada, já que o
+componente ainda retornava só o `<EmptyState>`). Deadlock permanente: uma vez que o componente
+montasse com `artifactUrl=null`, ele nunca mais conseguia sair do estado `"empty"`, mesmo que um
+artefato válido chegasse depois -- exatamente o que os 12 `error-context.md` mostram.
+
+### Correção aplicada
+
+`apps/web/src/components/viewer/StlViewer.tsx`: removido o `return` antecipado do estado
+`"empty"`; a `<EmptyState>` correspondente agora é só mais um overlay condicional (como já era
+`"size-warning"`/`"loading"`), e a `<div ref={containerRef}>` compartilhada passa a estar sempre
+montada também durante `"empty"` (com `display: none`, já que o estilo já condicionava a
+visibilidade a `status === "ready"`). Isso quebra o deadlock: quando `artifactUrl` chega depois
+do mount, `containerRef.current` já existe, e o efeito de carregamento consegue prosseguir
+normalmente até `"ready"`.
+
+**Teste de regressão específico** (`apps/web/tests/StlViewer.test.tsx`, describe "StlViewer --
+estado vazio"): `"transição empty -> ready quando artifactUrl chega depois do mount (mesma
+sequência do JobDetailPage real)"` -- monta o componente com `artifactUrl={null}` (confirma o
+estado vazio), depois usa `rerender()` do Testing Library para simular exatamente a sequência
+real do `JobDetailPage` (props atualizadas com um `artifactUrl` válido no componente JÁ montado,
+sem desmontar), e verifica que o componente chega a `"ready"` (`viewer-triangle-count` visível).
+**Prova de que o teste captura genuinamente o bug**: rodado via `git stash` isolando só a
+correção do `StlViewer.tsx` (mantendo o teste novo), o teste **falha** exatamente como esperado
+(preso em "Nenhum artefato disponível", nunca alcança `viewer-triangle-count`, timeout do
+`findByTestId`) -- confirmando que o teste reproduz o bug real e não é um teste vazio.
+
+### Correção adicional -- exposição da senha sintética no log do seed
+
+`e2e-output.log` (linha do `global-setup`, citada acima) continha `"password":
+"e2e-synthetic-password-123"` em texto plano -- mesmo sendo uma senha sintética/hardcoded, sem
+nenhum uso real, ela não deveria aparecer na saída do script. Confirmado que nenhum consumidor
+real depende deste campo: `viewer.spec.ts` e `vertical.spec.ts` já têm sua própria cópia
+hardcoded de `E2E_PASSWORD`, e `global-setup.ts` nunca faz parse do campo `"password"` da saída
+JSON do seed (só verifica o exit code do processo). Corrigido `apps/api/scripts/seed_e2e_user.py`
+removendo a chave `"password"` do JSON impresso -- o relatório agora informa apenas identificação
+não secreta (email, ids de projeto/receita/job) e o estado reconciliado de cada componente.
+Coberto por um novo teste de regressão permanente,
+`test_saida_do_seed_nunca_expoe_a_senha_sintetica_em_texto_claro` (roda o script real via
+subprocesso e verifica, no `stdout`/`stderr` BRUTOS -- não só no JSON já parseado -- que nenhuma
+variação da senha sintética aparece em lugar nenhum da saída).
+
+### Verificação completa nesta rodada
+
+- **Backend (`apps/api`)**: `pytest` contra PostgreSQL real via `pgserver` (instância nova,
+  diretório de dados vazio, dentro da mesma chamada de shell) -- **223 passed, 2 skipped** em
+  160,23s (222+1 da seção 26, mais o novo teste de não vazamento da senha; os 2 skips são os
+  mesmos já documentados, sensíveis a timing/SQLite, não afetados por esta rodada).
+- **Frontend (`apps/web`)**: `tsc --noEmit` limpo; `eslint .` limpo; `vitest run` -- **125
+  passed** (124 da seção 26 + 1 novo teste de regressão do `StlViewer`); `npm run build`
+  concluído sem erros (mesmo aviso pré-existente de chunk >500kB, não relacionado).
+- **Playwright**: `npx playwright test --list` confirma os mesmos 14 testes nos mesmos 2
+  arquivos; `npx playwright test` (com `E2E_PYTHON_BIN` apontando para o venv real da API)
+  **continua BLOQUEADO neste sandbox** pela mesma limitação recorrente e já documentada desde o
+  Incremento 2.1.1 (`chrome-headless-shell: error while loading shared libraries:
+  libXdamage.so.1: cannot open shared object file`, sem `sudo` disponível para instalar a
+  biblioteca) -- os 14 testes falham por essa causa de AMBIENTE, não por regressão de código;
+  reportado honestamente, sem alterar o veredito.
+- **`scripts/Run-E2EOnly.ps1`**: não precisou de nenhuma alteração -- as correções desta rodada
+  são inteiramente em `StlViewer.tsx` e `seed_e2e_user.py`; o roteiro Windows continua o mesmo
+  comando já entregue.
+
+### Veredito -- cobertura do visualizador CONTINUA NÃO aprovada
+
+Consistente com a instrução do usuário ("Não declare o viewer aprovado até 14/14 no Windows"),
+este documento **não declara** a cobertura E2E do visualizador aprovada. Nesta rodada:
+(1) confirmou-se literalmente, pela primeira vez com os artefatos brutos reais do Windows, que a
+correção da seção 26 (reconciliação do seed) funciona em produção; (2) identificou-se e
+corrigiu-se uma causa raiz REAL e DIFERENTE (deadlock de montagem do `StlViewer` no estado
+"empty"), provada por um teste de regressão que genuinamente falha sem a correção; (3)
+corrigiu-se o vazamento da senha sintética no log do seed. A prova definitiva de que os 14
+testes passam de ponta a ponta no ambiente real do usuário depende de uma TERCEIRA execução no
+Windows, ainda pendente.

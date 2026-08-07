@@ -325,6 +325,55 @@ alteração (a correção é só no script de seed). Ver `TEST_EVIDENCE.md` seç
 **Cobertura E2E do visualizador continua NÃO aprovada** -- depende de nova execução real do
 usuário no Windows retornando 14/14 e exit code 0.
 
+### Rodada 8 -- Execução Windows real `viewer-e2e-evidence-20260807-012919` (commit `f8490d9`): seed CONFIRMADO reparado, mas as mesmas 12 falhas persistem -- causa raiz real DIFERENTE (deadlock de montagem do `StlViewer`) encontrada e corrigida
+
+A segunda execução real do Windows (`Run-E2EOnly.ps1`, commit `f8490d9`) confirmou, pela
+primeira vez com evidência bruta literal (`error-context.md`/`trace.zip` dos 12 testes), que a
+correção da Rodada 7 funciona em produção: `global-setup` reportou `status=repaired`,
+`stl_artifact: repaired`, `manifest: repaired` -- o fixture legado do Postgres real do usuário
+foi genuinamente reconciliado. Mesmo assim, as mesmas 12 falhas de `viewer.spec.ts` persistiram
+(`E2EExitCode=1`).
+
+Seguindo a ordem exigida (ler os 12 `error-context.md` -> inspecionar os 12 `trace.zip` -> só
+então editar), a hipótese prioritária levantada (perda do token do `AuthContext` via
+`page.goto()` pós-login, mesma classe de regressão já corrigida em `vertical.spec.ts`) foi
+**refutada pela evidência**: os 12 `banner` mostram o usuário sempre autenticado, sempre na
+página correta (`/app/jobs/<id>`, "Concluído"). O ponto comum real, confirmado nos 12
+`error-context.md`: todos mostram "Nenhum artefato disponível" sob "Visualização 3D", ao lado de
+uma lista "Artefatos" que lista corretamente o STL (mesma renderização). O `trace.zip` de um dos
+12 testes confirmou `GET .../artifacts` -> 200 OK com `kind: "stl"` e hash/tamanho corretos, e
+nenhum erro de console -- refutando também as hipóteses de rede, checksum, WebGL e exceção
+interna do `StlViewer`.
+
+**Causa raiz real**: `JobDetailPage.tsx` monta `<StlViewer artifactUrl={null}>` na primeira
+renderização em que o job aparece como "succeeded" (o `setJob` acontece antes do
+`Promise.all(listJobArtifacts, getJobManifest)` resolver), e só recebe um `artifactUrl` válido
+via atualização de props um instante depois. Em `StlViewer.tsx`, o estado `"empty"` ainda tinha
+um `return` antecipado que nunca montava a `<div ref={containerRef}>` -- a MESMA classe de bug
+que um comentário já existente no arquivo documenta ter sido corrigida anteriormente para
+`"loading"`/`"size-warning"`, mas que ficou de fora daquela correção para `"empty"`. Resultado:
+deadlock permanente -- o efeito de carregamento sempre abortava no guard `!containerRef.current`
+porque a div nunca existia, preso em "empty" para sempre mesmo com artefato válido.
+
+Corrigido removendo o `return` antecipado de `"empty"` em `StlViewer.tsx`, mantendo a div sempre
+montada (como já era para os demais estados pós-decisão). Novo teste de regressão em
+`StlViewer.test.tsx` reproduz exatamente a sequência real (mount com `artifactUrl=null`, depois
+`rerender()` com URL válida) e chega a "ready" -- confirmado, via `git stash` isolando só a
+correção, que o teste genuinamente falha sem ela.
+
+Corrigido também: `seed_e2e_user.py` imprimia a senha sintética em texto plano no log do
+`global-setup` -- removida da saída (nenhum consumidor real dependia dela), com novo teste de
+regressão permanente verificando o `stdout`/`stderr` brutos do processo.
+
+Verificação completa: `pytest` backend **223 passed, 2 skipped** contra Postgres real via
+`pgserver` (222+1); frontend `tsc`/`eslint` limpos, `vitest` **125 passed** (124+1), `build`
+limpo; `playwright test --list` confirma os mesmos 14 testes; execução real continua bloqueada
+neste sandbox pela mesma limitação recorrente (`libXdamage.so.1`). `Run-E2EOnly.ps1` não
+precisou de alteração. Ver `TEST_EVIDENCE.md` seção 27.
+
+**Cobertura E2E do visualizador continua NÃO aprovada** -- depende de uma TERCEIRA execução real
+do usuário no Windows retornando 14/14 e exit code 0.
+
 ## Incremento 2.2 Alpha Pesquisa — resumo (branch `incremento-2.2-alpha-pesquisa`)
 
 Escopo desta rodada: observabilidade real + integração à GUI, GUI completa de pesquisa (retry,

@@ -457,8 +457,7 @@ def main() -> None:
 
     # Status agregado de topo -- prioridade: qualquer componente precisando revisão manual >
     # qualquer componente reparado > qualquer componente criado > tudo já válido. O detalhe
-    # completo, por componente, vai em "components" (nunca expõe segredo -- a senha sintética
-    # já era, e continua sendo, impressa separadamente, como antes).
+    # completo, por componente, vai em "components".
     component_values = set(components.values())
     if "missing_requires_manual_review" in component_values:
         overall_status = "needs_manual_review"
@@ -469,12 +468,19 @@ def main() -> None:
     else:
         overall_status = "already_valid"
 
+    # NUNCA imprimir a senha sintética (nem qualquer outro segredo) na saída deste script --
+    # bug real encontrado na 2a execução Windows real (e2e-output.log, ver TEST_EVIDENCE.md):
+    # a senha (mesmo sendo sintética/hardcoded, e_PASSWORD = "e2e-synthetic-password-123")
+    # aparecia em texto plano no log do global-setup do E2E. Nenhum consumidor real depende
+    # deste campo -- viewer.spec.ts e vertical.spec.ts já têm sua própria cópia hardcoded de
+    # E2E_PASSWORD, e global-setup.ts não faz parse do campo "password" desta saída (apenas
+    # verifica o exit code / lê "status" para log). O relatório informa somente identificação
+    # não secreta (email/ids) e o estado reconciliado de cada componente.
     print(
         json.dumps(
             {
                 "status": overall_status,
                 "email": E2E_EMAIL,
-                "password": E2E_PASSWORD,
                 "project_id": project.id,
                 "recipe_id": recipe.id,
                 "succeeded_job_id": job.id,

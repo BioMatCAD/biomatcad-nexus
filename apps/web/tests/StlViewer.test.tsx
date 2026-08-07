@@ -73,6 +73,33 @@ describe("StlViewer -- estado vazio (sem depender de WebGL/jsdom)", () => {
     render(<StlViewer artifactUrl={null} />);
     expect(screen.getByText(/nenhum artefato disponível/i)).toBeInTheDocument();
   });
+
+  // Regressão real (2a execução Windows do E2E, viewer.spec.ts, commit f8490d9 -- ver
+  // TEST_EVIDENCE.md): o componente montava com artifactUrl=null (job ainda sem artefato
+  // carregado no state do pai) e ficava preso em "empty" para sempre, mesmo quando o pai
+  // (JobDetailPage) re-renderizava um instante depois com um artifactUrl válido -- porque o
+  // `return` antecipado do estado "empty" nunca montava a div de containerRef, e o efeito de
+  // carregamento sempre abortava no guard `!containerRef.current`. Este teste reproduz
+  // exatamente essa sequência (mount sem artefato, artefato chega via rerender) e falha sem a
+  // correção (fica preso em "Nenhum artefato disponível" em vez de chegar a "ready").
+  it("transição empty -> ready quando artifactUrl chega depois do mount (mesma sequência do JobDetailPage real)", async () => {
+    const buffer = buildBinaryStlBuffer(4);
+    vi.stubGlobal("fetch", mockFetchReturning(buffer));
+
+    const { rerender } = render(<StlViewer artifactUrl={null} token="tok" />);
+    expect(screen.getByText(/nenhum artefato disponível/i)).toBeInTheDocument();
+
+    // Simula o JobDetailPage real: `artifacts` chega via setState assíncrono após o mount
+    // inicial (Promise.all de listJobArtifacts/getJobManifest), não no primeiro render.
+    rerender(<StlViewer artifactUrl="https://api/artifacts/1/download" token="tok" />);
+
+    const indicator = await screen.findByTestId("viewer-triangle-count");
+    expect(indicator).toHaveTextContent("STL binário");
+    expect(indicator).toHaveTextContent("4");
+    expect(screen.queryByText(/nenhum artefato disponível/i)).not.toBeInTheDocument();
+
+    vi.unstubAllGlobals();
+  });
 });
 
 describe("StlViewer -- STL binário válido (formato/controles/proveniência)", () => {
