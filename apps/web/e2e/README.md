@@ -252,3 +252,44 @@ escrito exercitando os `data-testid`s introduzidos em `StlViewer.tsx` (`viewer-w
 `viewer-transparency-toggle`, `viewer-axes-toggle`, `viewer-grid-toggle`,
 `viewer-bbox-toggle`, `viewer-clipping-toggle`, `viewer-reset-camera`, `viewer-screenshot`,
 `viewer-fullscreen`, `viewer-cancel-button`) -- não fabricado como concluído nesta rodada.
+
+## Rodada Voronoi (Incremento 2.2) -- E2E real reexecutado e APROVADO no Windows (2026-08-06, commit `84f46fc`)
+
+Uma execução real da matriz completa (`Run-VoronoiWindowsValidation.ps1`,
+`voronoi-validation-staged-20260806-195638`) tinha reportado `net::ERR_CONNECTION_REFUSED` em
+`http://localhost:5173/login` na etapa de E2E -- não por regressão da interface, mas porque o
+roteiro nunca iniciava o frontend antes de chamar o Playwright. **Esse registro histórico não é
+apagado nem reescrito** (ver `TEST_EVIDENCE.md` seção 23 para o detalhamento completo daquela
+execução).
+
+A correção aplicada foi delegar a inicialização do frontend ao próprio Playwright, via a opção
+nativa `webServer` (ver `playwright.config.ts`): ele agora inicia o `npm run dev` de forma
+rastreada, aguarda a URL responder via polling HTTP antes de rodar qualquer teste, encaminha
+stdout/stderr para o log do próprio processo, e encerra apenas o processo que ele mesmo
+iniciou. `reuseExistingServer` é sempre `false` quando `CI=true` (função pura testável
+`shouldReuseExistingServer()`, coberta por `apps/web/tests/playwrightWebServer.test.ts`).
+
+O usuário então reexecutou SOMENTE o E2E, no mesmo ambiente Windows, via o novo
+`scripts/Run-E2EOnly.ps1` (que não repete a matriz geométrica completa) -- e obteve **APROVADO**:
+
+```text
+2 passed (24.9s)
+E2EExitCode=0
+```
+
+API disponível em `127.0.0.1:8000`; frontend Vite iniciado automaticamente pelo Playwright em
+`localhost:5173`; `global-setup` executado com o Python real do venv; os dois testes
+(`vertical.spec.ts`) passaram -- login/criação de projeto/receita, e a página de job `succeeded`
+pré-semeado exibindo status/métricas/download; processos encerrados de forma controlada, sem
+órfãos. Relatórios em `C:\biomatcad-runs\e2e-only-20260806-222320\E2E_ONLY_REPORT.{json,md}`;
+detalhamento completo em `TEST_EVIDENCE.md` seção 24.
+
+**O que isto prova**: o defeito era exclusivamente de infraestrutura do roteiro de validação,
+não da interface, autenticação, seed ou geometria -- confirmado por uma reexecução real e
+isolada no mesmo ambiente onde a falha original ocorreu.
+
+**O que isto continua NÃO cobrindo** (ressalva preservada das rodadas anteriores): os novos
+controles do visualizador 3D (wireframe, transparência, eixos, grade, bounding box, clipping,
+screenshot, fullscreen, cancelamento) continuam sem cobertura E2E em navegador real -- essa
+cobertura existe apenas em nível de componente (`StlViewer.test.tsx`, jsdom). Nenhum novo
+`*.spec.ts` foi escrito nesta rodada para esses controles.

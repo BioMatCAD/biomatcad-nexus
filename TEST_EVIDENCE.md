@@ -1714,6 +1714,50 @@ Validação desta sessão (sandbox Linux): `apps/web` -- typecheck limpo, lint l
 
 **Veredito documental desta rodada**: matriz Voronoi/Gyroid **APROVADA**; correção do deadlock de pipes **COMPROVADA no Windows**; E2E desta execução **INCONCLUSIVO** por defeito de infraestrutura do roteiro (frontend não iniciado), não uma regressão; resultado global do roteiro falhou **somente** por esse defeito, já corrigido. A reconfirmação do E2E corrigido ainda depende de uma execução real do usuário.
 
+## 24. E2E real reexecutado e APROVADO no Windows (`Run-E2EOnly.ps1`, commit `84f46fc`) (2026-08-06)
+
+**Este registro NÃO substitui nem apaga a seção 23** -- a execução original da matriz
+(`voronoi-validation-staged-20260806-195638`) permanece registrada exatamente como aconteceu:
+`full_exit_code=1` por `net::ERR_CONNECTION_REFUSED` na etapa de E2E, causado pelo defeito de
+infraestrutura do roteiro (frontend nunca iniciado antes do Playwright). Esse fato histórico
+continua verdadeiro e não é reescrito. O que muda aqui é que, **depois** da correção aplicada no
+commit `84f46fc` (Playwright `webServer` nativo + `Run-E2EOnly.ps1`), o usuário reexecutou
+SOMENTE o E2E, no mesmo ambiente Windows, contra a API e o frontend reais -- e essa reexecução
+foi **APROVADA**.
+
+**Evidência real do usuário**:
+
+- Script: `scripts/Run-E2EOnly.ps1`.
+- `OutputDir`: `C:\biomatcad-runs\e2e-only-20260806-222320`.
+- API disponível em `127.0.0.1:8000`.
+- Frontend Vite iniciado automaticamente pelo Playwright em `localhost:5173` (via `webServer`,
+  conforme corrigido no commit `84f46fc` -- prova direta de que a correção funciona no Windows
+  real, não apenas na configuração/testes unitários feitos no sandbox).
+- `global-setup` executado com o Python real do venv (`E2E_PYTHON_BIN` correto).
+- Teste 1 aprovado: login, criação de projeto e receita pela UI real.
+- Teste 2 aprovado: job `succeeded` pré-semeado exibiu status, métricas e link de download do
+  STL.
+- Resultado literal: `2 passed (24.9s)`.
+- `E2EExitCode=0`.
+- Processos iniciados pelo roteiro (API + frontend gerenciado pelo Playwright) foram encerrados
+  de forma controlada -- nenhum processo órfão.
+- Relatórios: `C:\biomatcad-runs\e2e-only-20260806-222320\E2E_ONLY_REPORT.json` e
+  `E2E_ONLY_REPORT.md`.
+
+### Veredito consolidado e honesto (não confundir os dois eventos)
+
+- A execução original da matriz completa (`voronoi-validation-staged-20260806-195638`, seção
+  23) permanece **INCONCLUSIVA especificamente naquele E2E** -- por um defeito de
+  infraestrutura do roteiro naquele momento, já identificado e corrigido, nunca por uma
+  regressão científica ou de interface.
+- A reexecução isolada **posterior**, no mesmo ambiente Windows, com o roteiro já corrigido
+  (`Run-E2EOnly.ps1`, commit `84f46fc`), foi **APROVADA** -- 2/2 testes reais, exit code 0, sem
+  processos órfãos.
+- Com isto, **tanto a matriz real de 12 execuções Voronoi/Gyroid (6 golden recipes x 2 cada,
+  seção 23) quanto o E2E real (esta seção) estão agora APROVADOS** no Windows real do usuário.
+  Nenhuma das duas provas foi obtida na mesma execução única -- e isso está registrado aqui
+  exatamente como aconteceu, sem retrofit da evidência histórica.
+
 ## O que esta evidência explicitamente NÃO cobre
 
 - **Consistência STL-vs-manifesto via fluxo completo API→dispatcher→worker PicoGK real→

@@ -232,6 +232,29 @@ global do roteiro falhou **somente** por esse defeito, já corrigido nesta rodad
 reconfirmação do E2E corrigido ainda depende de uma nova execução real do usuário -- não
 declarada aprovada até essa confirmação.
 
+### Rodada 5 -- E2E real reexecutado e APROVADO no Windows (`Run-E2EOnly.ps1`, commit `84f46fc`)
+
+O usuário reexecutou SOMENTE o E2E (`scripts/Run-E2EOnly.ps1`, sem repetir a matriz geométrica)
+no mesmo ambiente Windows, contra a API real e o frontend real iniciado automaticamente pelo
+Playwright via `webServer` (correção do commit `84f46fc`): **APROVADO**. Evidência literal --
+API disponível em `127.0.0.1:8000`; frontend Vite iniciado em `localhost:5173` pelo próprio
+Playwright; `global-setup` executado com o Python real do venv; teste 1 (login, criação de
+projeto e receita pela UI real) e teste 2 (job `succeeded` pré-semeado exibindo status,
+métricas e download do STL) ambos aprovados; `2 passed (24.9s)`; `E2EExitCode=0`; processos
+encerrados de forma controlada, sem órfãos. Relatórios em
+`C:\biomatcad-runs\e2e-only-20260806-222320\E2E_ONLY_REPORT.{json,md}`. Ver `TEST_EVIDENCE.md`
+seção 24 para o registro completo.
+
+**Importante -- não confundir os dois eventos**: a execução original da matriz
+(`voronoi-validation-staged-20260806-195638`, rodada 4 acima) permanece registrada como
+inconclusiva especificamente naquele E2E, por aquele defeito de infraestrutura já corrigido --
+esse registro histórico não foi reescrito nem apagado. Esta rodada 5 documenta uma reexecução
+**posterior e separada**, já com a correção aplicada.
+
+**Com isto, tanto a matriz real de 12 execuções Voronoi/Gyroid (6 golden recipes x 2 cada)
+quanto o E2E real estão agora ambos APROVADOS no Windows real do usuário.** Nesta rodada não
+foi alterada geometria, receita, API, frontend ou contrato científico -- apenas documentação.
+
 ## Incremento 2.2 Alpha Pesquisa — resumo (branch `incremento-2.2-alpha-pesquisa`)
 
 Escopo desta rodada: observabilidade real + integração à GUI, GUI completa de pesquisa (retry,

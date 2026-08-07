@@ -62,11 +62,15 @@ zero processos órfãos -- ver seção dedicada abaixo e `TEST_EVIDENCE.md` seç
   `TEST_EVIDENCE.md` seção 23 para os hashes literais. A investigação e correção do deadlock
   real de pipes stdout/stderr em `DotnetPicoGkWorkerClient` (causa raiz do `WORKER_TIMEOUT`
   historicamente relatado -- nunca foi um defeito do algoritmo Voronoi/PicoGK) também foi
-  comprovada nesta mesma execução real. **Ainda não concluído**: o E2E Playwright desta mesma
-  execução ficou inconclusivo por um defeito de infraestrutura do próprio roteiro (frontend
-  nunca iniciado antes do Playwright, `net::ERR_CONNECTION_REFUSED`) -- corrigido nesta rodada
-  (Playwright `webServer` nativo), pendente de reconfirmação real pelo usuário; empacotamento
-  final v2.2 continua não feito.
+  comprovada nesta mesma execução real. O E2E Playwright DESSA execução específica ficou
+  inconclusivo por um defeito de infraestrutura do próprio roteiro (frontend nunca iniciado
+  antes do Playwright, `net::ERR_CONNECTION_REFUSED`) -- esse registro histórico permanece
+  como aconteceu, não foi apagado nem reescrito. A correção (Playwright `webServer` nativo) foi
+  aplicada e **CONFIRMADA em uma reexecução real separada e posterior** no mesmo Windows
+  (`Run-E2EOnly.ps1`, commit `84f46fc`): 2/2 testes aprovados, `E2EExitCode=0`, sem processos
+  órfãos -- ver `TEST_EVIDENCE.md` seção 24. **Com isto, tanto a matriz Voronoi/Gyroid (12
+  execuções) quanto o E2E real estão hoje ambos aprovados no Windows real do usuário.** Ainda
+  não feito: empacotamento final v2.2.
 
 ## Próximo (prioridade, nesta ordem)
 
@@ -121,10 +125,15 @@ incremento concluído:
    licença auditada), grafo, struts, suavização de nós, calibração de porosidade, métricas,
    golden recipes, frontend, auditoria STL independente e roteiro Windows -- todos implementados,
    testados E confirmados contra o worker PicoGK real (6/6 golden recipes, 2x cada, determinismo
-   byte a byte, zero processos órfãos -- ver `TEST_EVIDENCE.md` seção 23). Pendência
-   remanescente, não escondida: o E2E Playwright desta mesma execução ficou inconclusivo por um
-   defeito de infraestrutura do roteiro (frontend não iniciado antes do Playwright) -- corrigido
-   nesta rodada, pendente de reconfirmação real.
+   byte a byte, zero processos órfãos -- ver `TEST_EVIDENCE.md` seção 23). O E2E Playwright
+   DESSA mesma execução ficou inconclusivo por um defeito de infraestrutura do roteiro
+   (frontend não iniciado antes do Playwright) -- registro histórico preservado sem alteração.
+   A correção foi **CONFIRMADA em uma reexecução real separada e posterior**
+   (`Run-E2EOnly.ps1`, commit `84f46fc`): 2/2 testes E2E aprovados, `E2EExitCode=0`, sem
+   processos órfãos -- ver `TEST_EVIDENCE.md` seção 24. Nota de escopo: esse E2E cobre
+   login/projeto/receita e a página de job com download do STL -- não exercita especificamente
+   os controles novos do visualizador 3D (item 1 acima), que continuam pendentes de E2E
+   próprio.
 3. **`DesignAdvisor` concreto** — hoje é só um `Protocol` sem implementação; qualquer
    implementação futura precisa registrar-se explicitamente (mesmo princípio de
    não-descoberta-automática do `TopologyProviderRegistry`) e nunca decidir sozinha sem revisão
