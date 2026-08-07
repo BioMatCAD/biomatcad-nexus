@@ -255,6 +255,41 @@ esse registro histórico não foi reescrito nem apagado. Esta rodada 5 documenta
 quanto o E2E real estão agora ambos APROVADOS no Windows real do usuário.** Nesta rodada não
 foi alterada geometria, receita, API, frontend ou contrato científico -- apenas documentação.
 
+### Rodada 6 -- Cobertura E2E real do visualizador 3D escrita e verificada no sandbox; execução real no Windows AINDA PENDENTE
+
+Partindo do commit `3c61b3d`, esta rodada fechou exclusivamente a cobertura E2E
+(Playwright/Chromium) dos controles do visualizador 3D já implementados (`StlViewer.tsx`) --
+carregamento do STL, wireframe, transparência, eixos, grade, bounding box, clipping,
+screenshot, fullscreen, cancelamento real e descarte de recursos -- sem alterar geometria,
+receitas, TopologyProviders ou contratos científicos.
+
+A auditoria obrigatória (regra 1 do usuário) revelou um bug real no fixture de teste usado pelo
+job pré-semeado (`apps/api/scripts/seed_e2e_user.py`): o STL gravado estava vazio (zero facets)
+e o `stl_sha256` retornado era um placeholder fake (`"0"*64`) sem relação com os bytes reais --
+isso fazia o `StlViewer` nunca chegar a "ready" para esse job (checksum mismatch + STL sem
+facets), um defeito nunca detectado porque `vertical.spec.ts` só verifica o botão de download,
+nunca o estado do visualizador. Corrigido com um tetraedro sintético ASCII válido (4 facets) e o
+SHA-256 real desses bytes (via `hashlib`, sem dependência nova) -- provado por 2 testes de
+regressão novos em `apps/api/tests/test_e2e_seed_fixture.py` que rodam o script real via
+subprocesso contra um SQLite efêmero e verificam a persistência de fora.
+
+`apps/web/e2e/viewer.spec.ts` (12 testes novos) e 3 testes de regressão de componente novos em
+`apps/web/tests/StlViewer.test.tsx` (screenshot: nome/formato do arquivo; fullscreen: contrato
+suportado/não-suportado) foram escritos e verificados por todos os meios disponíveis no
+sandbox: `tsc --noEmit` limpo, `eslint` limpo, `vitest run` **124 passed** (121 + 3 novos),
+`npm run build` com sucesso, `pytest` backend **217 passed, 2 skipped** contra Postgres real
+(215 + 2 novos), e `playwright test --list` confirmando a sintaxe/config dos 14 testes totais.
+A execução REAL do Playwright continua **bloqueada neste sandbox** pela mesma limitação
+recorrente desde o Incremento 2.1.1 (`libXdamage.so.1` ausente, sem `sudo`) -- documentado
+honestamente, não fabricado como aprovado.
+
+`scripts/Run-E2EOnly.ps1` (já existente e aprovado nas rodadas 4/5) não precisou de nenhuma
+alteração funcional: `npm run test:e2e` já roda todos os `*.spec.ts` de `apps/web/e2e/`, então a
+próxima execução real deste mesmo roteiro no Windows exercitará os 14 testes automaticamente,
+sem repetir a matriz geométrica. **Consistente com a regra 17 do usuário, esta cobertura E2E do
+visualizador NÃO é declarada aprovada nesta rodada** -- a aprovação depende da execução real do
+usuário retornando 0 falhas. Ver `TEST_EVIDENCE.md` seção 25 para o registro completo.
+
 ## Incremento 2.2 Alpha Pesquisa — resumo (branch `incremento-2.2-alpha-pesquisa`)
 
 Escopo desta rodada: observabilidade real + integração à GUI, GUI completa de pesquisa (retry,

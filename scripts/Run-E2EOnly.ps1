@@ -44,6 +44,19 @@
     NUNCA altera geometria, receitas, worker cientifico ou hashes -- este roteiro nao os toca
     de forma alguma.
 
+    Atualizacao (rodada "cobertura E2E do visualizador 3D", 2026-08-06): apps/web/e2e/ agora
+    tambem contem viewer.spec.ts (12 testes novos: carregamento do STL, wireframe,
+    transparencia, eixos, grade, bounding box, clipping, screenshot, fullscreen, cancelamento
+    real via requisicao interceptada, retomada apos cancelamento, e descarte de recursos ao
+    sair da pagina -- ver apps/web/e2e/README.md). Este script NAO precisou de nenhuma mudanca
+    para cobri-los: 'npm run test:e2e' roda 'playwright test', que por sua vez roda TODOS os
+    arquivos '*.spec.ts' dentro de testDir ("./e2e", ver apps/web/playwright.config.ts) --
+    logo, a proxima execucao real deste MESMO roteiro no Windows ja exercitara os 14 testes
+    (2 de vertical.spec.ts + 12 de viewer.spec.ts) automaticamente, sem repetir a matriz
+    geometrica completa (worker C#/PicoGK, golden recipes) em nenhum momento. A cobertura do
+    visualizador so pode ser considerada aprovada apos essa reexecucao real retornar 0 falhas
+    -- nao antes.
+
 .PARAMETER RepoPath
     Caminho local do repositorio JA clonado/atualizado no commit correto.
 

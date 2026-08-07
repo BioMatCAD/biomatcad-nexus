@@ -293,3 +293,35 @@ controles do visualizador 3D (wireframe, transparência, eixos, grade, bounding 
 screenshot, fullscreen, cancelamento) continuam sem cobertura E2E em navegador real -- essa
 cobertura existe apenas em nível de componente (`StlViewer.test.tsx`, jsdom). Nenhum novo
 `*.spec.ts` foi escrito nesta rodada para esses controles.
+
+## Rodada "cobertura E2E do visualizador 3D" -- viewer.spec.ts escrito; execução real no Windows AINDA PENDENTE (2026-08-06)
+
+**A ressalva da seção anterior está desatualizada e não é apagada, apenas superada aqui**: um
+novo arquivo `apps/web/e2e/viewer.spec.ts` (12 testes) foi escrito nesta rodada, exercitando em
+Chromium real todos os controles do visualizador listados naquela ressalva (wireframe,
+transparência, eixos, grade, bounding box, clipping, screenshot, fullscreen, cancelamento) mais
+o carregamento do STL, a retomada após cancelamento e o descarte de recursos ao sair da página.
+
+**Pré-requisito corrigido nesta mesma rodada**: `scripts/seed_e2e_user.py` gravava um STL vazio
+(zero facets) com um `stl_sha256` fake (`"0"*64`) para o job pré-semeado -- o `StlViewer` nunca
+chegava a "ready" para esse job (checksum sempre incompatível, e mesmo que fosse compatível, o
+STL não tinha nenhum facet). Isso nunca foi percebido porque os testes de `vertical.spec.ts`
+acima só verificam o botão de download, nunca o estado do visualizador. Corrigido para um
+tetraedro sintético válido (4 facets) com o SHA-256 real dos bytes -- provado por 2 testes novos
+em `apps/api/tests/test_e2e_seed_fixture.py` (rodam o script real via subprocesso e verificam a
+persistência de fora). Ver `TEST_EVIDENCE.md` seção 25 para o detalhamento completo.
+
+**O que foi verificado neste sandbox**: `tsc --noEmit`, `eslint .` e `npm run build` limpos;
+`vitest run` com **124 passed** (121 pré-existentes + 3 novos de regressão em
+`StlViewer.test.tsx`, cobrindo o contrato exato de nome/formato do arquivo de screenshot e o
+contrato suportado/não-suportado da Fullscreen API); `npx playwright test --list` confirma a
+sintaxe e a configuração dos 14 testes totais (2 + 12).
+
+**O que isto NÃO prova**: a suíte `viewer.spec.ts` nunca rodou de fato em um Chromium real neste
+sandbox -- a mesma limitação de sempre (`libXdamage.so.1` ausente, sem `sudo`) bloqueia a
+execução real do Playwright aqui, exatamente como bloqueava antes. `scripts/Run-E2EOnly.ps1`
+(já aprovado nas rodadas anteriores) não precisou de nenhuma alteração: `npm run test:e2e` já
+roda todos os `*.spec.ts` de `apps/web/e2e/`, então a próxima execução real deste mesmo roteiro
+no Windows exercitará os 14 testes automaticamente, sem repetir a matriz geométrica. **Esta
+cobertura E2E do visualizador só pode ser considerada aprovada depois que essa execução real
+retornar 0 falhas** -- não antes.

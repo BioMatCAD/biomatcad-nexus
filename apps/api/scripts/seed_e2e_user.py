@@ -12,6 +12,7 @@ Uso:
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
@@ -116,7 +117,55 @@ def main() -> None:
         def execute(self, *, recipe_canonical, job_id, output_dir, cancel_check=None, on_process_started=None):
             output_dir.mkdir(parents=True, exist_ok=True)
             stl_path = output_dir / "e2e-seed.stl"
-            stl_path.write_bytes(b"solid e2e-seed\nendsolid e2e-seed\n")
+            # Correção real (rodada "cobertura E2E do visualizador 3D", 2026-08-06): a versão
+            # anterior escrevia um STL ASCII VAZIO ("solid e2e-seed\nendsolid e2e-seed\n", zero
+            # facets) E um stl_sha256 FAKE ("0"*64, sem nenhuma relação com o conteúdo real do
+            # arquivo). Isso nunca foi percebido porque o E2E existente (vertical.spec.ts) só
+            # verifica a VISIBILIDADE do link de download, nunca se o StlViewer chega ao estado
+            # "ready" -- mas os dois defeitos, JUNTOS, garantiam que o StlViewer NUNCA
+            # conseguiria renderizar este job: (1) fetchArtifactBuffer() compara o SHA-256 real
+            # dos bytes baixados contra `Artifact.sha256` (que geometry_job_service.py grava como
+            # `result.stl_sha256 or sha256_of_file(...)` -- como "0"*64 é uma string truthy, o
+            # `or` nunca cai para o hash real) e rejeitaria por ArtifactChecksumMismatchError; (2)
+            # mesmo se o checksum batesse, parseStl()/parseAsciiStl() lança
+            # "nenhum facet encontrado" para um STL com zero triângulos. Corrigido: um tetraedro
+            # sintético válido (4 facets, coordenadas simples, SEM nenhuma relação com PicoGK/
+            # TopologyProviders -- é apenas um fixture de teste manual) com o SHA-256 calculado
+            # de verdade a partir dos bytes escritos.
+            stl_bytes = (
+                b"solid e2e-seed-tetrahedron\n"
+                b"facet normal 0 0 -1\n"
+                b"  outer loop\n"
+                b"    vertex 0 0 0\n"
+                b"    vertex 10 0 0\n"
+                b"    vertex 0 10 0\n"
+                b"  endloop\n"
+                b"endfacet\n"
+                b"facet normal 0 -1 0\n"
+                b"  outer loop\n"
+                b"    vertex 0 0 0\n"
+                b"    vertex 10 0 0\n"
+                b"    vertex 0 0 10\n"
+                b"  endloop\n"
+                b"endfacet\n"
+                b"facet normal -1 0 0\n"
+                b"  outer loop\n"
+                b"    vertex 0 0 0\n"
+                b"    vertex 0 10 0\n"
+                b"    vertex 0 0 10\n"
+                b"  endloop\n"
+                b"endfacet\n"
+                b"facet normal 0.577 0.577 0.577\n"
+                b"  outer loop\n"
+                b"    vertex 10 0 0\n"
+                b"    vertex 0 10 0\n"
+                b"    vertex 0 0 10\n"
+                b"  endloop\n"
+                b"endfacet\n"
+                b"endsolid e2e-seed-tetrahedron\n"
+            )
+            stl_path.write_bytes(stl_bytes)
+            real_sha256 = hashlib.sha256(stl_bytes).hexdigest()
             return WorkerResult(
                 stl_path=stl_path,
                 thumbnail_path=None,
@@ -134,7 +183,7 @@ def main() -> None:
                 dotnet_version="9.0.0",
                 picogk_version="2.2.0",
                 duration_seconds=0.1,
-                stl_sha256="0" * 64,
+                stl_sha256=real_sha256,
                 platform="fake-platform-for-e2e-seed",
             )
 

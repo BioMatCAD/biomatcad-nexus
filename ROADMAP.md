@@ -110,15 +110,19 @@ Registradas aqui para não perder o fio entre sessões — nenhuma delas foi dec
 sem confirmação do usuário, apenas listadas como o que falta para poder declarar este
 incremento concluído:
 
-1. ~~**Visualizador 3D consolidado**~~ -- **CONCLUÍDO nesta rodada** (branch
-   `incremento-2.2-alpha-pesquisa`, commits `32f4969`..`4180a67`): STL real (binário e ASCII),
-   download autenticado com checksum e limite de tamanho, todos os controles do checklist
-   (órbita/pan/zoom, wireframe, transparência/opacidade, eixos, grade, bounding box, clipping,
-   screenshot, fullscreen), painel de proveniência com detecção de divergência API-vs-manifesto,
-   cancelamento, descarte completo de recursos WebGL, fallback sem WebGL. Voronoi real
-   continua deliberadamente fora desta rodada (item 2 abaixo). Pendência remanescente, não
-   escondida: E2E Playwright em navegador real dos novos controles ainda não executado (mesmo
-   bloqueio de sandbox de sempre — ver `docs/architecture/viewer-3d-audit.md`).
+1. ~~**Visualizador 3D consolidado**~~ -- **CONCLUÍDO** (branch `incremento-2.2-alpha-pesquisa`,
+   commits `32f4969`..`4180a67`): STL real (binário e ASCII), download autenticado com checksum
+   e limite de tamanho, todos os controles do checklist (órbita/pan/zoom, wireframe,
+   transparência/opacidade, eixos, grade, bounding box, clipping, screenshot, fullscreen),
+   painel de proveniência com detecção de divergência API-vs-manifesto, cancelamento, descarte
+   completo de recursos WebGL, fallback sem WebGL. Voronoi real continua deliberadamente fora
+   desta rodada (item 2 abaixo). **Cobertura E2E dos controles (`apps/web/e2e/viewer.spec.ts`,
+   12 testes) ESCRITA e verificada por todos os meios disponíveis no sandbox nesta rodada**
+   (typecheck/eslint/vitest/build limpos; corrigido de quebra um bug real no fixture do job
+   pré-semeado que impedia o `StlViewer` de chegar a "ready" -- ver `TEST_EVIDENCE.md` seção
+   25) -- mas a execução REAL em Chromium continua bloqueada neste sandbox (mesmo motivo de
+   sempre, `libXdamage.so.1` ausente) e **NÃO foi declarada aprovada** até o usuário confirmar
+   0 falhas no Windows real com `scripts/Run-E2EOnly.ps1`.
 2. ~~**`VoronoiTopologyProvider` real**~~ -- **CONCLUÍDO e APROVADO no Windows real** (commits
    `e07a5e2`..`bf756a4` implementaram; execução real `voronoi-validation-staged-
    20260806-195638` aprovou): geração de sítios, tesselação 3D real (`MIConvexHull`, MIT,
@@ -131,9 +135,11 @@ incremento concluído:
    A correção foi **CONFIRMADA em uma reexecução real separada e posterior**
    (`Run-E2EOnly.ps1`, commit `84f46fc`): 2/2 testes E2E aprovados, `E2EExitCode=0`, sem
    processos órfãos -- ver `TEST_EVIDENCE.md` seção 24. Nota de escopo: esse E2E cobre
-   login/projeto/receita e a página de job com download do STL -- não exercita especificamente
-   os controles novos do visualizador 3D (item 1 acima), que continuam pendentes de E2E
-   próprio.
+   login/projeto/receita e a página de job com download do STL -- os controles novos do
+   visualizador 3D (item 1 acima) agora têm um spec E2E próprio escrito
+   (`apps/web/e2e/viewer.spec.ts`), já incluído automaticamente na próxima execução do mesmo
+   `Run-E2EOnly.ps1` (roda todos os `*.spec.ts` de `apps/web/e2e/`), mas ainda pendente de
+   confirmação real no Windows (ver item 1 e `TEST_EVIDENCE.md` seção 25).
 3. **`DesignAdvisor` concreto** — hoje é só um `Protocol` sem implementação; qualquer
    implementação futura precisa registrar-se explicitamente (mesmo princípio de
    não-descoberta-automática do `TopologyProviderRegistry`) e nunca decidir sozinha sem revisão

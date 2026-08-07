@@ -1775,3 +1775,127 @@ foi **APROVADA**.
   lido).
 
 Estes itens são o que falta para declarar o Incremento 2.1.1 concluído.
+
+## 25. Cobertura E2E real do visualizador 3D (`apps/web/e2e/viewer.spec.ts`) -- escrita e verificada no sandbox; execução real no Windows AINDA PENDENTE (2026-08-06)
+
+**Escopo desta rodada** (pedido explícito do usuário, partindo do commit `3c61b3d`): fechar
+exclusivamente a cobertura E2E real (Playwright/Chromium) dos controles do visualizador 3D
+(`StlViewer.tsx`) que, até aqui, só tinham cobertura em nível de componente (jsdom,
+`StlViewer.test.tsx`) -- ver a ressalva registrada nas seções 23/24 e em `e2e/README.md`.
+Geometria, receitas, TopologyProviders e contratos científicos **não foram tocados**.
+
+### Bug real descoberto e corrigido: fixture do job pré-semeado nunca chegava a "ready"
+
+Auditoria obrigatória (regra 1 do usuário) antes de escrever qualquer teste novo revelou que
+`apps/api/scripts/seed_e2e_user.py` -- usado pelo `global-setup.ts` do Playwright para criar o
+job `succeeded` pré-semeado que `vertical.spec.ts` e agora `viewer.spec.ts` dependem -- tinha
+DOIS defeitos reais, nunca detectados porque `vertical.spec.ts` só verifica a visibilidade do
+botão de download, nunca se o `StlViewer` chega ao estado "ready":
+
+1. O `_FakeWorkerClientForE2ESeed` gravava um STL ASCII **vazio** (`"solid e2e-seed\nendsolid
+   e2e-seed\n"`, zero facets).
+2. Retornava `stl_sha256="0"*64` -- um placeholder sem nenhuma relação com os bytes reais do
+   arquivo.
+
+Como `geometry_job_service.dispatch_job()` faz `sha256=result.stl_sha256 or
+sha256_of_file(...)`, e a string fake é truthy, o hash fake era persistido tal qual em
+`Artifact.sha256`. O frontend (`fetchArtifactBuffer` em `artifactDownload.ts`) recalcula o
+SHA-256 real dos bytes baixados e lança `ArtifactChecksumMismatchError` se não bater -- então o
+`StlViewer` **nunca** chegava a "ready" para este job; e mesmo que o checksum batesse,
+`parseAsciiStl()` rejeitaria o STL vazio por "nenhum facet encontrado".
+
+**Correção aplicada** (fixture de teste, não geometria/receita/TopologyProvider): o script agora
+grava um tetraedro sintético ASCII válido (4 facets, coordenadas simples e manuais -- SEM
+nenhuma relação com PicoGK) e calcula o SHA-256 REAL desses bytes via `hashlib.sha256` (stdlib,
+nenhuma dependência nova), substituindo o placeholder `"0"*64`.
+
+**Prova de que a correção funciona de verdade** (não só "parece corrigido"): dois testes de
+regressão novos em `apps/api/tests/test_e2e_seed_fixture.py` rodam o script real via
+subprocesso (exatamente como `global-setup.ts` o invoca) contra um SQLite efêmero e um storage
+local efêmero, e verificam de fora -- via SQL puro, sem reusar nenhuma lógica do próprio script
+-- que: (a) o `Artifact.sha256` persistido é o hash REAL dos bytes gravados (nunca mais
+`"0"*64`); (b) o tamanho persistido bate com os bytes reais; (c) o conteúdo tem pelo menos um
+facet reconhecível pelas MESMAS expressões regulares que `stlParser.ts` usa no frontend; e (d)
+o script continua idempotente (reexecução retorna `status=already_seeded`, sem duplicar dados).
+Rodados neste sandbox: **2 passed**.
+
+### `apps/web/e2e/viewer.spec.ts` -- 12 testes novos
+
+Escritos exercitando exclusivamente os controles já implementados em `StlViewer.tsx` (nenhuma
+funcionalidade nova de produção foi criada), usando os `data-testid` já existentes (nenhum novo
+testid precisou ser adicionado ao componente) e o fixture corrigido acima:
+
+1. Carregamento do STL -- chega a "ready" com formato ("STL ASCII"), contagem de triângulos
+   ("4") e de vértices não-indexados ("12") reais do fixture; `<canvas>` real com dimensões > 0.
+2. Wireframe -- alterna o `checked` do checkbox e mantém a malha renderizada.
+3. Transparência -- o slider de opacidade só existe no DOM quando a transparência está ativa
+   (renderização condicional real); slider funcional (`fill` + valor refletido).
+4. Eixos e grade -- alternam `checked` real, sem quebrar a renderização.
+5. Bounding box -- alterna `checked` real.
+6. Clipping -- o controle de posição só aparece quando o corte está ativo; slider funcional.
+7. Screenshot -- captura o EVENTO real de download (`page.waitForEvent("download")`), confirma
+   o nome de arquivo (`biomatcad-scaffold-screenshot.png`) e a assinatura binária PNG real (magic
+   bytes `89 50 4E 47 0D 0A 1A 0A`) -- **sem** comparação de pixels (regra 5 do usuário).
+8. Fullscreen -- só interage com o botão se `StlViewer` o renderizar (`fullscreenSupported`);
+   observa honestamente qual dos dois desfechos ocorre sob Chromium headless (concedido vs.
+   recusado sem gesto de usuário real via CDP) sem forçar um resultado específico (regra 6).
+9. Cancelamento -- intercepta a requisição de download via `page.route` e a segura
+   indefinidamente (sem sleep arbitrário); clica em "Cancelar"; prova tanto o efeito de UI
+   (estado "cancelled", sem canvas) quanto o abort real de rede (`requestfailed` com
+   `net::ERR_ABORTED`, disparado pelo `AbortController` do próprio componente) -- regra 7.
+10. Retomada após cancelamento -- "Carregar novamente" após um cancelamento real consegue
+    chegar a "ready".
+11. Descarte de recursos ao sair da página -- navega para outra rota via UI real (nunca
+    `page.goto()`, que apagaria a sessão) e prova que o `<canvas>` é removido (cleanup do
+    `useEffect` rodou) e que nenhum erro de console/página ocorre durante a transição.
+12. Reset de câmera -- clique não gera erro e mantém a malha renderizada.
+
+### Testes de regressão de componente adicionados (sustentam o E2E, regra 12)
+
+Em `apps/web/tests/StlViewer.test.tsx` (21 → 24 casos):
+
+- **Screenshot**: o teste existente só provava que `click()` foi chamado; um teste novo captura
+  o próprio elemento `<a>` e confirma `download === "biomatcad-scaffold-screenshot.png"` e
+  `href` começando com `"data:image/png"` -- o mesmo contrato que o E2E confirma em navegador
+  real, agora também coberto em nível de componente.
+- **Fullscreen**: nenhum teste cobria esta API antes desta rodada. Dois testes novos cobrem os
+  dois lados do contrato: com `requestFullscreen`/`exitFullscreen` mockados (suporte simulado),
+  o botão alterna rótulo corretamente; sem mock (comportamento genuíno do jsdom, que não
+  implementa a API), o componente não renderiza o botão -- nunca um estado inconsistente.
+
+### Verificação executada neste sandbox (honesta, sem inflar resultado)
+
+- `tsc --noEmit`: limpo (frontend e novo spec E2E).
+- `eslint .`: limpo (0 avisos/erros em todo o projeto, incluindo `viewer.spec.ts`).
+- `vitest run`: **124 passed** (121 pré-existentes + 3 novos em `StlViewer.test.tsx`), 0
+  falhas -- nenhum teste existente foi enfraquecido ou teve timeout aumentado.
+- `npm run build`: sucesso (`tsc --noEmit && vite build`).
+- `pytest` (backend, contra Postgres real via `pgserver` efêmero, mesma prática das rodadas
+  anteriores): **217 passed, 2 skipped** (215 pré-existentes + 2 novos em
+  `test_e2e_seed_fixture.py`) -- confirmado que os 2 "failures" observados em uma execução
+  contra SQLite (`test_clinical_suite_expiration_is_respected` e
+  `test_two_concurrent_dispatchers_never_claim_the_same_job`) são artefatos conhecidos do
+  SQLite (que não replica o `SELECT FOR UPDATE SKIP LOCKED` real do Postgres nem o timing
+  exato que esses dois testes assumem) -- não regressões desta rodada; ambos passam limpos
+  contra Postgres real.
+- `npx playwright test --list`: lista corretamente os 14 testes (2 de `vertical.spec.ts` + 12
+  de `viewer.spec.ts`) -- confirma que a suíte e a configuração (`webServer`) estão sintaticamente
+  corretas.
+- `npx playwright test`: **BLOQUEADO neste sandbox** pela mesma limitação recorrente e já
+  documentada desde o Incremento 2.1.1 -- `chrome-headless-shell: error while loading shared
+  libraries: libXdamage.so.1: cannot open shared object file` -- sem `sudo` disponível para
+  instalar as bibliotecas nativas do Chromium. Isto é reportado honestamente como BLOQUEADO, não
+  como aprovado nem como reprovado por defeito de lógica.
+
+### Veredito -- explicitamente NÃO aprovado ainda (regra 17 do usuário)
+
+Esta rodada entrega código e testes ESCRITOS e verificados por todos os meios disponíveis neste
+sandbox (typecheck, lint, testes unitários/componente reais, build, e listagem sintática do
+Playwright) -- mas a suíte `viewer.spec.ts` em si **nunca rodou de verdade em um Chromium real**
+neste ambiente. Consistente com a regra 17 ("não declare esta cobertura E2E aprovada até minha
+execução real no Windows retornar 0 falhas"), **este documento NÃO declara a cobertura E2E do
+visualizador aprovada**. O roteiro `scripts/Run-E2EOnly.ps1` (já existente, aprovado nas seções
+23/24) não precisou de nenhuma alteração funcional para rodar estes 12 testes novos -- `npm run
+test:e2e` já executa todos os arquivos `*.spec.ts` dentro de `apps/web/e2e/`, então a próxima
+execução real deste MESMO roteiro no Windows exercitará os 14 testes automaticamente. A
+aprovação real desta cobertura depende dessa execução.

@@ -181,6 +181,84 @@ describe("StlViewer -- STL binário válido (formato/controles/proveniência)", 
     clickSpy.mockRestore();
     vi.unstubAllGlobals();
   });
+
+  // Regressão adicionada para sustentar o E2E do visualizador (viewer.spec.ts, teste
+  // "screenshot"): o teste acima só provava QUE click() foi chamado, nunca O QUE seria
+  // baixado -- o E2E real confirma nome de arquivo e assinatura binária PNG; este teste prova
+  // o mesmo contrato (nome do arquivo + formato do data URL) em nível de componente/jsdom.
+  it("screenshot: o link de download tem o nome de arquivo e o formato PNG esperados", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", mockFetchReturning(buildBinaryStlBuffer(2)));
+    render(<StlViewer artifactUrl="https://api/artifacts/1/download" token="tok" />);
+    await screen.findByTestId("viewer-triangle-count");
+
+    let capturedHref = "";
+    let capturedDownload = "";
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        capturedHref = this.href;
+        capturedDownload = this.download;
+      });
+    await user.click(screen.getByTestId("viewer-screenshot"));
+
+    expect(capturedDownload).toBe("biomatcad-scaffold-screenshot.png");
+    expect(capturedHref.startsWith("data:image/png")).toBe(true);
+
+    clickSpy.mockRestore();
+    vi.unstubAllGlobals();
+  });
+});
+
+// Regressão adicionada para sustentar o E2E do visualizador (viewer.spec.ts, teste
+// "fullscreen"): a suíte de componente nunca cobria a Fullscreen API antes desta rodada. jsdom
+// não implementa `requestFullscreen` nativamente -- os dois testes abaixo cobrem os dois lados
+// do contrato real: (1) quando o navegador SUPORTA a API (mockada explicitamente aqui), o botão
+// alterna rótulo corretamente; (2) quando não suporta (comportamento genuíno e não-mockado do
+// jsdom, mesmo espírito do teste "webgl-unavailable" já existente), o componente nem renderiza
+// o botão -- nunca um estado quebrado/inconsistente.
+describe("StlViewer -- fullscreen", () => {
+  it("alterna entre 'Tela cheia' e 'Sair de tela cheia' quando o navegador suporta a Fullscreen API", async () => {
+    const user = userEvent.setup();
+    const requestFullscreenMock = vi.fn().mockResolvedValue(undefined);
+    const exitFullscreenMock = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(document, "fullscreenEnabled", { value: true, configurable: true });
+    HTMLDivElement.prototype.requestFullscreen = requestFullscreenMock;
+    document.exitFullscreen = exitFullscreenMock;
+
+    try {
+      vi.stubGlobal("fetch", mockFetchReturning(buildBinaryStlBuffer(2)));
+      render(<StlViewer artifactUrl="https://api/artifacts/1/download" token="tok" />);
+      await screen.findByTestId("viewer-triangle-count");
+
+      const button = screen.getByTestId("viewer-fullscreen");
+      expect(button).toHaveTextContent("Tela cheia");
+
+      await user.click(button);
+      expect(requestFullscreenMock).toHaveBeenCalledTimes(1);
+      await waitFor(() => expect(button).toHaveTextContent("Sair de tela cheia"));
+
+      await user.click(button);
+      expect(exitFullscreenMock).toHaveBeenCalledTimes(1);
+      await waitFor(() => expect(button).toHaveTextContent("Tela cheia"));
+
+      vi.unstubAllGlobals();
+    } finally {
+      // @ts-expect-error -- limpeza do mock adicionado manualmente ao protótipo/document
+      delete HTMLDivElement.prototype.requestFullscreen;
+      // @ts-expect-error -- idem
+      delete document.exitFullscreen;
+    }
+  });
+
+  it("não renderiza o botão de tela cheia quando o navegador não suporta a API (contrato honesto)", async () => {
+    vi.stubGlobal("fetch", mockFetchReturning(buildBinaryStlBuffer(2)));
+    render(<StlViewer artifactUrl="https://api/artifacts/1/download" token="tok" />);
+    await screen.findByTestId("viewer-triangle-count");
+
+    expect(screen.queryByTestId("viewer-fullscreen")).not.toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
 });
 
 describe("StlViewer -- STL ASCII", () => {
