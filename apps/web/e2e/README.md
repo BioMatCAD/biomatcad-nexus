@@ -421,3 +421,23 @@ falham exatamente como esperado, confirmando que detectam as regressões de verd
 `scripts/Run-E2EOnly.ps1` não precisou de nenhuma alteração. A suíte cresceu de 14 para 15 testes
 (divisão de "eixos e grade"). **Esta cobertura E2E do visualizador continua NÃO aprovada** até
 uma QUARTA execução real no Windows retornar 15/15 e exit code 0.
+
+## Execução Windows real `e2e-only-20260807-201720` (commit `7719aeb`): 15/15 APROVADOS, exit code 0 -- cobertura E2E completa do visualizador 3D APROVADA (2026-08-07)
+
+A quarta execução real do Windows (`Run-E2EOnly.ps1`, commit `7719aeb`, árvore de trabalho
+limpa) retornou **15/15 aprovados, 0 falhas, `E2EExitCode=0`**, em 2,1 min de Playwright real
+(Chromium real, PowerShell 7.6.4). Confirma, com prova real, que as 3 correções da rodada
+anterior (eixos/grade, fullscreen, cancelamento) funcionam de ponta a ponta -- os controles
+aprovados incluem explicitamente "fullscreen com entrada e saída", "cancelamento real do
+download" e "retomada após cancelamento".
+
+Nenhum código foi alterado nesta rodada (rodada exclusivamente documental). `npm ci` reportou 11
+avisos de `npm audit` que não causaram falha na execução; `npm audit fix`/`--force`
+deliberadamente NÃO foram executados -- registrado como pendência de triagem separada antes do
+empacotamento final (ver `ROADMAP.md`). Ver `TEST_EVIDENCE.md` seção 29 para o detalhamento
+completo.
+
+**Cobertura E2E completa do visualizador 3D: APROVADA no Windows real.** As seções 26-28
+(2/14 -> 2/14 -> 11/14, com as respectivas causas raiz reais diagnosticadas e corrigidas)
+permanecem registradas exatamente como aconteceram -- este resultado é a confirmação final de
+que todas aquelas correções funcionam de ponta a ponta.

@@ -110,7 +110,7 @@ Registradas aqui para não perder o fio entre sessões — nenhuma delas foi dec
 sem confirmação do usuário, apenas listadas como o que falta para poder declarar este
 incremento concluído:
 
-1. ~~**Visualizador 3D consolidado**~~ -- **CONCLUÍDO** (branch `incremento-2.2-alpha-pesquisa`,
+1. ~~**Visualizador 3D consolidado**~~ -- **CONCLUÍDO e APROVADO no Windows real (E2E completo 15/15)** (branch `incremento-2.2-alpha-pesquisa`,
    commits `32f4969`..`4180a67`): STL real (binário e ASCII), download autenticado com checksum
    e limite de tamanho, todos os controles do checklist (órbita/pan/zoom, wireframe,
    transparência/opacidade, eixos, grade, bounding box, clipping, screenshot, fullscreen),
@@ -140,10 +140,17 @@ incremento concluído:
    tela cheia real -- corrigido chamando `requestFullscreen()` no `<div>` mais externo (controles
    + canvas juntos), sem z-index manual nem `click({force:true})`. Testes de regressão
    confirmados via mutation testing (`git stash` isolando a correção). Ver `TEST_EVIDENCE.md`
-   seção 28. A execução REAL em Chromium continua bloqueada neste sandbox (mesmo motivo de
-   sempre, `libXdamage.so.1` ausente) e **NÃO foi declarada aprovada** até o usuário confirmar
-   15/15 (a suíte cresceu de 14 para 15 testes nesta rodada) e exit code 0 em uma NOVA (quarta)
-   execução no Windows com `scripts/Run-E2EOnly.ps1`.
+   seção 28. **Quarta execução real** (`e2e-only-20260807-201720`, commit `7719aeb`, árvore de
+   trabalho limpa) retornou **15/15 aprovados, 0 falhas, `E2EExitCode=0`**, em Chromium real no
+   Windows (2,1 min de Playwright) -- confirma as 3 correções da rodada anterior funcionando de
+   ponta a ponta: "fullscreen com entrada e saída", "cancelamento real do download" e "retomada
+   após cancelamento" aparecem explicitamente entre os controles aprovados. Ver
+   `TEST_EVIDENCE.md` seção 29. **Cobertura E2E completa do visualizador 3D: APROVADA.** Nenhuma
+   alteração de código foi necessária nesta rodada documental -- as suítes completas já haviam
+   sido confirmadas na rodada anterior. Pendência separada registrada (não bloqueia esta
+   aprovação): 11 avisos de `npm audit` observados no `npm ci` desta execução (sem causar
+   falha) exigem TRIAGEM antes do empacotamento final do Incremento 2.2 -- `npm audit fix`/
+   `--force` deliberadamente NÃO executados nesta rodada (ver item 5 abaixo).
 2. ~~**`VoronoiTopologyProvider` real**~~ -- **CONCLUÍDO e APROVADO no Windows real** (commits
    `e07a5e2`..`bf756a4` implementaram; execução real `voronoi-validation-staged-
    20260806-195638` aprovou): geração de sítios, tesselação 3D real (`MIConvexHull`, MIT,
@@ -167,6 +174,15 @@ incremento concluído:
    humana registrada.
 4. **Empacotamento final v2.2** — explicitamente NÃO feito nesta rodada, por instrução: nenhum
    pacote final foi gerado, e o incremento não foi declarado concluído.
+5. **Triagem dos 11 avisos de `npm audit` observados na quarta execução Windows real**
+   (`e2e-only-20260807-201720`, ver `TEST_EVIDENCE.md` seção 29) — não causaram falha na
+   execução, e `npm audit fix`/`npm audit fix --force` deliberadamente NÃO foram executados (por
+   instrução explícita, para não arriscar breaking change indiscriminado, mesmo princípio já
+   aplicado às 17 vulnerabilidades de tooling documentadas em
+   `docs/security/DEPENDENCY_AUDIT_2.1.1.md` -- ver seção "Dependências deferidas" abaixo).
+   Pendente: avaliar item a item se são as mesmas 17 já conhecidas (tooling de desenvolvimento,
+   risco nulo/baixo no `dist/` de produção) ou achados novos, e decidir upgrades seguros --
+   ANTES do empacotamento final v2.2 (item 4 acima).
 
 ## Dependências deferidas (Incremento 2.1.1)
 

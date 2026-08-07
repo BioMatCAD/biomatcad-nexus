@@ -417,6 +417,39 @@ Postgres real (idêntico à Rodada 8). Ver `TEST_EVIDENCE.md` seção 28.
 **Cobertura E2E do visualizador continua NÃO aprovada** -- depende de uma QUARTA execução real
 do usuário no Windows retornando 15/15 e exit code 0.
 
+### Rodada 10 -- Execução Windows real `e2e-only-20260807-201720` (commit `7719aeb`): 15/15 APROVADOS, exit code 0 -- cobertura E2E completa do visualizador 3D APROVADA (rodada exclusivamente documental)
+
+A quarta execução real do Windows (`Run-E2EOnly.ps1`, commit `7719aeb`, árvore de trabalho
+limpa) retornou **15/15 aprovados, 0 falhas, `E2EExitCode=0`**, em 2,1 min de Playwright real
+(Chromium real, PowerShell 7.6.4). Relatório em
+`C:\biomatcad-runs\e2e-only-20260807-201720\E2E_ONLY_REPORT.md`. Confirma, com prova real, que
+as 3 correções da Rodada 9 (eixos/grade, fullscreen, cancelamento) funcionam de ponta a ponta:
+"fullscreen com entrada e saída" e "cancelamento real do download" + "retomada após
+cancelamento" aparecem explicitamente entre os controles aprovados.
+
+Nenhum código foi alterado nesta rodada (rodada exclusivamente documental, por instrução
+explícita) -- as suítes completas já haviam sido rodadas e confirmadas na Rodada 9 sem nenhuma
+mudança de código desde então.
+
+**Diferenciação explícita de escopos já registrados** (para não confundir validações reais
+distintas): a matriz Voronoi/Gyroid (worker PicoGK real, golden recipes) já estava aprovada
+desde a seção 23 do `TEST_EVIDENCE.md` e não foi reexecutada (nem precisava); o E2E principal
+(`vertical.spec.ts`) já estava aprovado desde a Rodada 5/seção 24 e seguiu aprovado em todas as
+execuções desde então; o item que esta rodada aprova pela primeira vez é especificamente a
+cobertura E2E COMPLETA do visualizador 3D (`viewer.spec.ts`, 13 testes), que vinha reprovando
+desde a seção 26 (12/12 -> 12/12 por causa diferente -> 3/14 -> agora 0/14, ou seja, 15/15
+somando os 2 do vertical).
+
+**`npm audit` -- 11 avisos observados, não corrigidos nesta rodada.** O `npm ci` do frontend
+reportou 11 avisos de vulnerabilidade; confirmado que não causaram nenhuma falha na execução
+(`exit 0`). Por instrução explícita, `npm audit fix`/`npm audit fix --force` NÃO foram
+executados -- nenhuma dependência foi tocada. Registrado como pendência de TRIAGEM separada
+(avaliar severidade real e segurança de upgrade) antes do empacotamento final do Incremento 2.2
+-- não bloqueia a aprovação do E2E do visualizador, que é sobre comportamento funcional real da
+interface. Ver `TEST_EVIDENCE.md` seção 29 para o registro completo.
+
+**Cobertura E2E completa do visualizador 3D: APROVADA no Windows real (15/15, exit code 0).**
+
 ## Incremento 2.2 Alpha Pesquisa — resumo (branch `incremento-2.2-alpha-pesquisa`)
 
 Escopo desta rodada: observabilidade real + integração à GUI, GUI completa de pesquisa (retry,

@@ -2336,3 +2336,97 @@ real e mensurável: 2 -> 11 -> (esperado) 15 aprovados ao longo das 3 execuçõe
 provadas por testes de regressão que genuinamente detectam cada uma (confirmado por mutation
 testing via `git stash`). A prova definitiva depende de uma QUARTA execução real do usuário no
 Windows, ainda pendente.
+
+## 29. Execução Windows real `e2e-only-20260807-201720` (commit `7719aeb`): 15/15 APROVADOS, exit code 0 -- cobertura E2E completa do visualizador 3D APROVADA (2026-08-07)
+
+**Este registro NÃO substitui nem apaga as seções 26, 27 e 28** -- as três execuções Windows
+reais anteriores (2/14 reprovado, depois 2/14, depois 11/14) e as causas raiz reais que
+motivaram cada correção permanecem registradas exatamente como aconteceram. Esta seção documenta
+a QUARTA execução real no Windows, na qual a suíte completa (crescida para 15 testes na rodada
+anterior, ao dividir "eixos e grade") passou integralmente pela primeira vez.
+
+**Evidência literal relatada pelo usuário**:
+
+- HEAD confirmado: `7719aeb` (o commit da rodada anterior, "corrigir defeito real de
+  acessibilidade em fullscreen e 2 expectativas erradas de teste E2E").
+- Árvore de trabalho limpa (`working tree: clean`).
+- Roteiro: `scripts/Run-E2EOnly.ps1` (o mesmo comando entregue nas rodadas anteriores -- não
+  precisou de nenhuma alteração desde a seção 26).
+- Ambiente: Windows real + PowerShell 7.6.4 + Chromium real (não simulado, não o Chromium
+  headless deste sandbox).
+- **Total: 15 testes. Aprovados: 15. Falhas: 0. Duração do Playwright: 2,1 min.
+  `E2EExitCode=0`.**
+- Relatório: `C:\biomatcad-runs\e2e-only-20260807-201720\E2E_ONLY_REPORT.md`.
+- Transcript: `C:\biomatcad-runs\e2e-viewer-fourth-run.txt`.
+
+**Controles confirmados aprovados** (lista literal fornecida pelo usuário, cobrindo os 15
+cenários de `vertical.spec.ts` + `viewer.spec.ts`): fluxo vertical principal (login -> projeto ->
+receita -> job); carregamento real do STL; wireframe; transparência e slider de opacidade; eixos;
+grade; bounding box; clipping; screenshot PNG; fullscreen com entrada E saída; cancelamento real
+do download; retomada após cancelamento; descarte de recursos ao sair da página; reset da câmera.
+
+Isto confirma, com prova real e não fabricada, que as 3 correções da rodada anterior (seção 28)
+funcionam de ponta a ponta no ambiente real do usuário:
+
+- **Eixos e grade**: o teste corrigido (estado inicial real = checado, alternância nos dois
+  sentidos, validados separadamente) passou -- confirma que a correção era mesmo só do teste,
+  nunca do produto.
+- **Fullscreen**: o teste passou "com entrada E saída" -- confirma que
+  `viewerRootRef.current.requestFullscreen()` (chamado no `<div>` mais externo, que envolve
+  controles + canvas) resolve genuinamente o defeito real de acessibilidade encontrado
+  (controles inalcançáveis dentro do modo tela cheia por estarem fora da "top layer" do
+  navegador quando só o container do canvas ia para tela cheia).
+- **Cancelamento**: o teste passou -- confirma que o marcador `data-viewer-status="cancelled"`
+  prova corretamente o estado interno real, sem depender da presença/ausência do `<canvas>` (que
+  de fato permanece montado, como esperado desde a correção do deadlock "empty" -> URL da seção
+  27).
+
+### Diferenciação explícita do que está aprovado nesta rodada
+
+Por clareza -- e para não confundir escopos distintos de validação real já registrados em
+seções anteriores deste mesmo documento:
+
+- **Matriz Voronoi/Gyroid (worker C#/PicoGK real, golden recipes, calibração de porosidade)**:
+  já aprovada em rodada anterior e SEM relação com esta seção -- ver seção 23
+  (`voronoi-validation-staged-20260806-195638`). Não foi reexecutada nem precisava ser (o
+  usuário instruiu explicitamente não repetir essa matriz nesta rodada).
+- **E2E principal (`vertical.spec.ts`: login, criação de projeto/receita, página de job com
+  download do STL)**: já aprovado desde a seção 24 (commit `84f46fc`) e reconfirmado sem
+  regressão em TODAS as execuções subsequentes, incluindo esta.
+- **E2E completo do visualizador 3D (`viewer.spec.ts`, 13 testes)**: escrito na seção 25,
+  reprovado 12/12 na seção 26, reprovado 12/12 por causa diferente na seção 27, reprovado 3/14 na
+  seção 28 -- **agora, e só agora (2026-08-07, execução `e2e-only-20260807-201720`), aprovado
+  15/15 com exit code 0**. Este é o item que este registro formalmente aprova.
+
+### `npm audit` -- 11 avisos observados, NÃO corrigidos nesta rodada (triagem separada necessária)
+
+O `E2E_ONLY_REPORT`/log desta execução reportou 11 avisos de vulnerabilidade via `npm audit`
+durante o `npm ci` do frontend. Confirmado explicitamente pelo usuário e registrado aqui: **esses
+avisos NÃO causaram nenhuma falha nesta execução** (o `npm ci` e a suíte Playwright completaram
+normalmente, `exit 0`). Por instrução explícita, `npm audit fix` e `npm audit fix --force` **NÃO
+foram executados** nesta rodada -- nenhuma dependência foi tocada. Este achado fica registrado
+como uma pendência de TRIAGEM separada (avaliar severidade real, se são apenas dependências de
+desenvolvimento/build sem exposição em produção, e se algum upgrade é seguro sem quebrar
+contratos existentes) **antes do empacotamento final** do Incremento 2.2 -- não bloqueia a
+aprovação do E2E do visualizador registrada nesta seção, que é sobre comportamento funcional real
+da interface, não sobre postura de dependências.
+
+### Verificação desta rodada
+
+Rodada exclusivamente documental, por instrução explícita do usuário ("Não é necessário repetir
+nenhuma suíte nesta rodada documental", "Não altere código-fonte"). Nenhum arquivo de código,
+teste, script ou dependência foi tocado -- só os documentos formais listados abaixo. As suítes
+completas (pytest contra Postgres real, tsc/eslint/vitest/build, `playwright --list`, mutation
+testing das 3 correções) já haviam sido rodadas e confirmadas na rodada anterior (seção 28), sem
+nenhuma mudança de código desde então.
+
+### Veredito -- cobertura E2E completa do visualizador 3D APROVADA
+
+Com a evidência literal acima -- 15/15 aprovados, `E2EExitCode=0`, em Chromium real no Windows do
+usuário, cobrindo todos os controles do checklist original (`docs/architecture/viewer-3d-audit.md`)
+-- este documento **declara aprovada** a cobertura E2E real do visualizador 3D
+(`apps/web/e2e/viewer.spec.ts`). Isso fecha o ciclo de diagnóstico/correção iniciado na seção 26:
+das 12 falhas originais, todas foram genuinamente diagnosticadas (nunca presumidas), corrigidas
+com testes de regressão específicos (vários confirmados via mutation testing real, `git stash`),
+e agora confirmadas em execução real. Pendências que ainda impedem o fechamento formal do
+Incremento 2.2 estão listadas na seção correspondente do `ROADMAP.md`.
