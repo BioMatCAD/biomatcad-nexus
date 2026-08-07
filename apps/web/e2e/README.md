@@ -384,3 +384,40 @@ falha sem a correção (verificado via `git stash` isolando só a correção). C
 `scripts/Run-E2EOnly.ps1` não precisou de nenhuma alteração. **Esta cobertura E2E do
 visualizador continua NÃO aprovada** até uma TERCEIRA execução real no Windows retornar 14/14 e
 exit code 0.
+
+## Execução Windows real `e2e-only-20260807-110029` (commit `85b58c4`): 11/14 aprovados -- 3 causas diagnosticadas, corrigidas (2 testes com expectativa errada, 1 defeito real de acessibilidade) (2026-08-07)
+
+A terceira execução real do Windows (`Run-E2EOnly.ps1`, commit `85b58c4`) saltou para 11
+aprovados (2 de `vertical.spec.ts` + 9 de `viewer.spec.ts`), 3 reprovados. `global-setup`
+reportou `status=already_valid` em todos os componentes, sem senha em texto plano -- confirmando
+que as correções anteriores seguem funcionando em produção.
+
+As 3 falhas foram auditadas antes de qualquer edição:
+
+1. **"eixos e grade"** -- expectativa INCORRETA do teste. `StlViewer.tsx` sempre teve
+   `showAxes`/`showGrid` com `useState(true)` (o teste unitário já existente confirmava isso
+   corretamente há rodadas); o spec E2E assumiu, por engano, um estado inicial desmarcado.
+   Corrigido dividindo o teste em dois ("eixos" e "grade" separadamente), provando o estado
+   inicial real e a alternância nos dois sentidos, sem forçar nada artificial.
+2. **"fullscreen"** -- DEFEITO REAL de acessibilidade. `requestFullscreen()` era chamado no
+   `containerRef` (só o `<canvas>`), deixando os controles (inclusive o botão "Sair de tela
+   cheia") como irmãos fora da "top layer" do navegador -- o canvas passava a interceptar todos
+   os cliques sobre a área dos controles em tela cheia real, afetando qualquer usuário real do
+   Chrome, não só o Playwright. Corrigido chamando `requestFullscreen()`/`exitFullscreen()` no
+   `<div>` mais externo (`viewerRootRef`, que já envolve controles + canvas), sem z-index/
+   position manual e sem `click({force:true})`.
+3. **"cancelamento"** -- expectativa INCORRETA do teste, mas exigiu um marcador novo. O container
+   do canvas é permanentemente montado desde a correção do deadlock "empty" -> URL, e o
+   `<canvas>` é criado assim que o carregamento COMEÇA (antes do fetch resolver) -- cancelar
+   aborta só o fetch, o `<canvas>` continua no DOM. Corrigido adicionando
+   `data-viewer-status={status}` no container (nunca expõe nada sensível) -- o teste agora prova
+   o estado real via esse atributo em vez da presença/ausência do `<canvas>`.
+
+Testes de regressão novos/estendidos em `StlViewer.test.tsx`. **Mutation testing real** via `git
+stash`: isolando só a correção de `StlViewer.tsx`, os testes novos de fullscreen e cancelamento
+falham exatamente como esperado, confirmando que detectam as regressões de verdade. Ver
+`TEST_EVIDENCE.md` seção 28 para o detalhamento completo.
+
+`scripts/Run-E2EOnly.ps1` não precisou de nenhuma alteração. A suíte cresceu de 14 para 15 testes
+(divisão de "eixos e grade"). **Esta cobertura E2E do visualizador continua NÃO aprovada** até
+uma QUARTA execução real no Windows retornar 15/15 e exit code 0.

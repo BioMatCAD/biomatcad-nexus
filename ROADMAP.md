@@ -128,10 +128,22 @@ incremento concluído:
    do `StlViewer.tsx` (a div de `containerRef` nunca era renderizada nesse estado, bloqueando
    para sempre a transição a "ready" quando o artefato chegava depois do mount, como acontece de
    fato em `JobDetailPage.tsx`) -- corrigido, com teste de regressão que reproduz exatamente essa
-   sequência e comprovadamente falha sem a correção; ver `TEST_EVIDENCE.md` seção 27. A execução
-   REAL em Chromium continua bloqueada neste sandbox (mesmo motivo de sempre, `libXdamage.so.1`
-   ausente) e **NÃO foi declarada aprovada** até o usuário confirmar 14/14 e exit code 0 em uma
-   NOVA (terceira) execução no Windows com `scripts/Run-E2EOnly.ps1`.
+   sequência e comprovadamente falha sem a correção; ver `TEST_EVIDENCE.md` seção 27. **Terceira
+   execução real** (`e2e-only-20260807-110029`, commit `85b58c4`) saltou para 11/14 aprovados.
+   Das 3 falhas restantes: "eixos e grade" e "cancelamento" eram expectativa INCORRETA do teste
+   (o produto sempre teve eixos/grade visíveis por padrão; o container do canvas é
+   permanentemente montado desde a correção anterior, então `<canvas>` nunca chega a count=0 só
+   por cancelar) -- corrigidos os testes (divididos/estendidos, com um novo marcador
+   `data-viewer-status` observável e não sensível). "Fullscreen" era um DEFEITO REAL de
+   acessibilidade: `requestFullscreen()` era chamado só no container do canvas, deixando os
+   controles (inclusive o botão de saída) fora da "top layer" do navegador e inalcançáveis em
+   tela cheia real -- corrigido chamando `requestFullscreen()` no `<div>` mais externo (controles
+   + canvas juntos), sem z-index manual nem `click({force:true})`. Testes de regressão
+   confirmados via mutation testing (`git stash` isolando a correção). Ver `TEST_EVIDENCE.md`
+   seção 28. A execução REAL em Chromium continua bloqueada neste sandbox (mesmo motivo de
+   sempre, `libXdamage.so.1` ausente) e **NÃO foi declarada aprovada** até o usuário confirmar
+   15/15 (a suíte cresceu de 14 para 15 testes nesta rodada) e exit code 0 em uma NOVA (quarta)
+   execução no Windows com `scripts/Run-E2EOnly.ps1`.
 2. ~~**`VoronoiTopologyProvider` real**~~ -- **CONCLUÍDO e APROVADO no Windows real** (commits
    `e07a5e2`..`bf756a4` implementaram; execução real `voronoi-validation-staged-
    20260806-195638` aprovou): geração de sítios, tesselação 3D real (`MIConvexHull`, MIT,

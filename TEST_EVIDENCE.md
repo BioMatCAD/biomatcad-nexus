@@ -2190,3 +2190,149 @@ corrigiu-se uma causa raiz REAL e DIFERENTE (deadlock de montagem do `StlViewer`
 corrigiu-se o vazamento da senha sintética no log do seed. A prova definitiva de que os 14
 testes passam de ponta a ponta no ambiente real do usuário depende de uma TERCEIRA execução no
 Windows, ainda pendente.
+
+## 28. Execução Windows real `e2e-only-20260807-110029` (commit `85b58c4`): 11 aprovados / 3 REPROVADOS -- 3 causas distintas diagnosticadas (2 testes com expectativa incorreta corrigidos, 1 defeito real de acessibilidade em tela cheia corrigido) (2026-08-07)
+
+**Este registro NÃO substitui nem apaga a seção 27** -- a correção do deadlock de montagem do
+`StlViewer` no estado "empty" (rodada anterior) permanece verdadeira e, nesta rodada, é
+confirmada indiretamente: os 3 testes que dependem de chegar a "ready" (carregamento, wireframe,
+transparência, bounding box, clipping, screenshot, retomada após cancelamento, descarte de
+recursos, reset de câmera) **passaram**, junto com os 2 testes de `vertical.spec.ts`. Esta seção
+documenta a TERCEIRA execução real no Windows: um salto real de progresso (2 -> 11 aprovados) e a
+investigação/correção das 3 falhas remanescentes.
+
+**Evidência literal fornecida pelo usuário**: `e2e-viewer-third-run.txt` (resumo), pacote
+`e2e-only-20260807-110029.zip` (`E2E_ONLY_REPORT.json/.md`, `e2e-output.log`, `alembic.log`,
+`api-runtime.log(.err)`, `web-npm-ci.log`) e `viewer-third-run-test-results.zip` (4 subpastas de
+`test-results/`, cada uma com `error-context.md`/`trace.zip`, para os 3 testes falhos).
+
+- `E2E_ONLY_REPORT.md`: HEAD confirmado `85b58c4`; todas as etapas de preparo **ok**; apenas
+  `e2e_playwright`: FALHA (`npm run test:e2e -> exit 1`).
+- `e2e-output.log`: **11 passed, 3 failed** em 1.9min. `global-setup` reportou
+  `{"status": "already_valid", ..., "components": {"user": "already_valid", "project":
+  "already_valid", "recipe": "already_valid", "design_run": "already_valid", "job":
+  "already_valid", "stl_artifact": "already_valid", "manifest": "already_valid"}}` -- **sem a
+  senha em texto plano**, confirmando que a correção da seção 27 (remoção do vazamento de senha)
+  também funcionou em produção, e que o fixture permanece são entre execuções (nenhuma
+  reconciliação foi necessária desta vez -- `already_valid` em todos os componentes).
+- 2/2 testes de `vertical.spec.ts` aprovados; 9/12 testes de `viewer.spec.ts` aprovados; 3
+  reprovados: `eixos e grade` (linha 124), `fullscreen` (linha 192), `cancelamento` (linha 229).
+
+### Metodologia -- classificação de cada falha ANTES de editar
+
+Por instrução explícita do usuário, cada uma das 3 falhas foi auditada (código-fonte de
+`StlViewer.tsx`, `viewer.spec.ts`, `StlViewer.test.tsx` e a evidência bruta -- `error-context.md`)
+antes de qualquer edição, e classificada individualmente como defeito real do produto ou
+expectativa incorreta do teste.
+
+**1. "eixos e grade" -- expectativa incorreta do teste, NÃO um defeito do produto.** O erro
+literal: `expect(locator).not.toBeChecked() failed ... Received: checked`. Auditoria de
+`StlViewer.tsx`: `const [showAxes, setShowAxes] = useState(true);` e `const [showGrid, setShowGrid]
+= useState(true);` -- ambos default para `true` (visíveis), diferente de `showBoundingBox`/
+`clippingEnabled` (que de fato default para `false`, e cujos testes correspondentes continuam
+corretos). Mais revelador: o teste unitário `StlViewer.test.tsx` ("eixos e grade: os toggles
+existem e alternam", escrito em uma rodada anterior) **já afirmava corretamente**
+`expect(axes.checked).toBe(true)` -- ou seja, o comportamento real do produto sempre foi
+conhecido e intencional; foi só o spec E2E (`viewer.spec.ts`) que assumiu, por engano (provável
+cópia do padrão usado para bbox/clipping), um estado inicial que nunca existiu. Mostrar eixos e
+grade por padrão é uma escolha de UX razoável para um visualizador 3D (referência de orientação
+espacial imediata) -- não há regressão a corrigir no produto.
+
+Corrigido apenas o teste E2E: dividido em dois testes separados ("eixos" e "grade", por
+exigência explícita de validá-los separadamente), cada um confirmando o estado inicial REAL
+(checado) sem forçá-lo artificialmente, e provando a alternância nos DOIS sentidos (ligado ->
+desligado -> ligado de novo). Os testes unitários correspondentes em `StlViewer.test.tsx` foram
+estendidos da mesma forma (também divididos, também provando os dois sentidos).
+
+**2. "fullscreen" -- DEFEITO REAL de acessibilidade da interface, confirmado.** O erro literal:
+`locator.click: Test timeout ... <canvas ...> from <div>…</div> subtree intercepts pointer
+events`, repetido dezenas de vezes ao tentar clicar em "Sair de tela cheia". Auditoria de
+`StlViewer.tsx`: `handleToggleFullscreen` chamava `containerRef.current.requestFullscreen()` --
+`containerRef` é o `<div>` que envolve SOMENTE o `<canvas>`; todos os controles (incluindo o
+próprio botão de tela cheia) são elementos IRMÃOS, fora dele. A API de Fullscreen promove o
+elemento alvo (e só seus descendentes) para a "top layer" do navegador, renderizada acima de todo
+o resto do documento -- os controles, por não serem descendentes, continuam no fluxo normal por
+baixo dessa camada. Isso não é um artefato do Playwright: qualquer usuário real do Chrome, ao
+clicar "Tela cheia" e depois tentar clicar em "Sair de tela cheia", teria o clique interceptado
+pelo `<canvas>` exatamente da mesma forma -- um defeito real de acessibilidade da interface, como
+o usuário instruiu a tratar.
+
+Corrigido introduzindo `viewerRootRef` (uma nova ref no `<div>` mais externo do componente, que
+já envolve tanto os controles quanto o container do canvas) e chamando
+`requestFullscreen()`/`exitFullscreen()` nele em vez de em `containerRef`. Como os controles
+ficam em uma linha ACIMA do canvas no fluxo normal do documento (sem sobreposição espacial), essa
+correção torna os controles parte da mesma "top layer" que o canvas sem precisar de nenhum
+z-index/position manual -- e sem recorrer a `click({force: true})`, que apenas esconderia o
+defeito real em vez de corrigi-lo. Não foi necessário nenhum CSS novo.
+
+**3. "cancelamento" -- expectativa incorreta do teste, NÃO um defeito do produto** (mas exigia um
+novo marcador observável, per instrução explícita do usuário). O erro literal:
+`expect(locator).toHaveCount(expected) failed ... Locator: locator('canvas') ... Expected: 0 ...
+Received: 1`. Auditoria de `StlViewer.tsx`: o efeito de carregamento cria o `WebGLRenderer` e
+anexa seu `<canvas>` ao container **antes mesmo do fetch do STL ser disparado** (não só quando a
+malha termina de carregar) -- e o container em si é permanentemente montado desde a correção do
+deadlock "empty" -> URL (seção 27). Cancelar (`handleCancelLoad` -> `abortController.abort()`)
+aborta somente o fetch em andamento; o cleanup completo (dispose do renderer, remoção do
+`<canvas>`) só roda quando o efeito é re-executado de fato (outro `loadToken` -- uma nova
+tentativa -- ou o unmount do componente). Ou seja: `<canvas>` count=0 após cancelar nunca foi
+verdade desde que o container passou a ser permanente -- o teste E2E original media a arquitetura
+errada. Confirmado explicitamente pela instrução do usuário: "não presuma que o canvas precisa
+ser removido, pois o container permanente foi necessário para corrigir o deadlock empty→URL".
+
+Corrigido adicionando um marcador estável e observável do estado interno da máquina de estados --
+`data-viewer-status={status}` no container (`data-testid="viewer-container"`) -- que nunca expõe
+nada sensível (só um dos valores do enum `ViewerStatus`: empty/size-warning/loading/ready/error/
+cancelled/webgl-unavailable/context-lost). O teste E2E de cancelamento agora prova o estado real
+via `expect(page.getByTestId("viewer-container")).toHaveAttribute("data-viewer-status",
+"cancelled")`, combinado com as provas já existentes (ausência de `viewer-triangle-count`,
+"Carregamento cancelado" visível, botão de retry visível, abort real confirmado via
+`requestfailed` de rede) -- prova exatamente o que importa (nenhuma malha carregada, estado
+interno genuinamente "cancelled"), sem depender da presença/ausência do `<canvas>`.
+
+### Testes de regressão novos + mutation testing
+
+`apps/web/tests/StlViewer.test.tsx`: eixos e grade divididos em dois testes que provam o estado
+inicial real e a alternância nos dois sentidos; novo teste que reproduz exatamente a sequência de
+cancelamento e prova `data-viewer-status="cancelled"` com `<canvas>` ainda presente; novo teste
+que captura literalmente QUAL elemento recebe `requestFullscreen()` (via `this` dentro do mock) e
+confirma que o botão de tela cheia é descendente desse elemento -- detecta a regressão de
+acessibilidade sem depender de um Chromium real.
+
+**Mutation testing real** (não apenas nomeado): isolei via `git stash` apenas as mudanças de
+`StlViewer.tsx` (mantendo os testes novos) e confirmei que os dois novos testes relacionados
+(fullscreen e cancelamento) **falham exatamente como esperado** sem a correção --
+`elementRequested!.contains(button)` retorna `false` (fullscreen chamado no elemento errado), e
+`getByTestId("viewer-container")` não existe ainda (o atributo não fazia parte do componente
+antes da correção) -- confirmando que os testes genuinamente detectam as regressões, não são
+testes vazios. Restaurado com `git stash pop` em seguida.
+
+### Verificação completa nesta rodada
+
+- **Frontend (`apps/web`)**: `tsc --noEmit` limpo; `eslint .` limpo (1 erro real corrigido --
+  `@typescript-eslint/no-this-alias` no novo teste de fullscreen, resolvido com
+  `eslint-disable-next-line` justificado, já que capturar `this` de uma chamada de método real é
+  a única forma de observar o elemento-alvo); `vitest run` -- **128 passed** (125 da seção 27 + 3
+  novos/estendidos); `npm run build` limpo (mesmo aviso pré-existente de chunk >500kB).
+- **Playwright**: `npx playwright test --list` confirma **15 testes** (2 de `vertical.spec.ts` +
+  13 de `viewer.spec.ts` -- subiu de 14 para 15 porque "eixos e grade" foi dividido em dois
+  testes, por exigência explícita de validá-los separadamente); `npx playwright test` continua
+  **BLOQUEADO neste sandbox** pela mesma limitação recorrente (`chrome-headless-shell: error
+  while loading shared libraries: libXdamage.so.1`), confirmada literalmente no log desta
+  verificação -- reportado honestamente, sem alterar o veredito.
+- **Backend (`apps/api`)**: nenhum arquivo backend foi tocado nesta rodada (por instrução
+  explícita); `pytest` reconfirmado contra Postgres real via `pgserver` (instância nova) --
+  **223 passed, 2 skipped** em 66,86s, idêntico à seção 27.
+- **`scripts/Run-E2EOnly.ps1`**: não precisou de nenhuma alteração -- as correções desta rodada
+  são inteiramente em `StlViewer.tsx`, `viewer.spec.ts` e `StlViewer.test.tsx`; o roteiro Windows
+  continua o mesmo comando já entregue.
+
+### Veredito -- cobertura do visualizador CONTINUA NÃO aprovada
+
+Consistente com a instrução do usuário ("Não declare a cobertura do visualizador aprovada antes
+de 14/14 e exit code 0 no Windows" -- agora **15/15**, já que a suíte cresceu para 15 testes
+nesta rodada), este documento **não declara** a cobertura E2E do visualizador aprovada. Progresso
+real e mensurável: 2 -> 11 -> (esperado) 15 aprovados ao longo das 3 execuções Windows reais. As
+3 causas desta rodada foram diagnosticadas com evidência bruta (não suposição), corrigidas e
+provadas por testes de regressão que genuinamente detectam cada uma (confirmado por mutation
+testing via `git stash`). A prova definitiva depende de uma QUARTA execução real do usuário no
+Windows, ainda pendente.

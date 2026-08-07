@@ -145,20 +145,39 @@ describe("StlViewer -- STL binário válido (formato/controles/proveniência)", 
     vi.unstubAllGlobals();
   });
 
-  it("eixos e grade: os toggles existem e alternam", async () => {
+  // Estes dois testes já provavam corretamente, desde antes desta rodada, que o estado inicial
+  // real de eixos/grade é `true` (checado) -- foi exatamente a evidência que confirmou, na 3a
+  // execução Windows real (viewer.spec.ts:124 original, commit 85b58c4), que a falha era uma
+  // expectativa incorreta do teste E2E (que assumia `not.toBeChecked()`), não uma regressão do
+  // produto. Estendidos aqui para provar também a ida E volta (dois sentidos), separadamente
+  // para eixos e grade, espelhando exatamente o que passou a ser exigido em viewer.spec.ts.
+  it("eixos: toggle existe, inicia checado (padrão real do produto) e alterna nos dois sentidos", async () => {
     const user = userEvent.setup();
     vi.stubGlobal("fetch", mockFetchReturning(buildBinaryStlBuffer(2)));
     render(<StlViewer artifactUrl="https://api/artifacts/1/download" token="tok" />);
     await screen.findByTestId("viewer-triangle-count");
 
     const axes = screen.getByTestId("viewer-axes-toggle") as HTMLInputElement;
-    const grid = screen.getByTestId("viewer-grid-toggle") as HTMLInputElement;
     expect(axes.checked).toBe(true);
-    expect(grid.checked).toBe(true);
     await user.click(axes);
-    await user.click(grid);
     expect(axes.checked).toBe(false);
+    await user.click(axes);
+    expect(axes.checked).toBe(true);
+    vi.unstubAllGlobals();
+  });
+
+  it("grade: toggle existe, inicia checado (padrão real do produto) e alterna nos dois sentidos", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", mockFetchReturning(buildBinaryStlBuffer(2)));
+    render(<StlViewer artifactUrl="https://api/artifacts/1/download" token="tok" />);
+    await screen.findByTestId("viewer-triangle-count");
+
+    const grid = screen.getByTestId("viewer-grid-toggle") as HTMLInputElement;
+    expect(grid.checked).toBe(true);
+    await user.click(grid);
     expect(grid.checked).toBe(false);
+    await user.click(grid);
+    expect(grid.checked).toBe(true);
     vi.unstubAllGlobals();
   });
 
@@ -285,6 +304,55 @@ describe("StlViewer -- fullscreen", () => {
 
     expect(screen.queryByTestId("viewer-fullscreen")).not.toBeInTheDocument();
     vi.unstubAllGlobals();
+  });
+
+  // Regressão real (3a execução Windows, viewer.spec.ts:192 original, commit 85b58c4 -- ver
+  // TEST_EVIDENCE.md): `requestFullscreen()` era chamado em `containerRef` (o elemento que
+  // envolve SOMENTE o <canvas>), deixando os controles (inclusive o próprio botão "Sair de tela
+  // cheia") como irmãos FORA do elemento promovido à "top layer" do navegador -- o <canvas>
+  // passava a interceptar todos os cliques sobre a área dos controles em tela cheia real
+  // (Playwright reportou "subtree intercepts pointer events" -- não um problema do teste, um
+  // defeito real de acessibilidade que afetaria qualquer usuário). Corrigido chamando
+  // `requestFullscreen()` no `<div>` mais externo (`viewerRootRef`), que envolve tanto os
+  // controles quanto o container do canvas. Este teste prova a correção arquitetural
+  // diretamente: captura QUAL elemento recebeu a chamada de `requestFullscreen()` e confirma que
+  // o botão de tela cheia é descendente desse mesmo elemento (ou seja, entra na mesma "top
+  // layer" e permanece alcançável) -- sem depender de um Chromium real para detectar a
+  // regressão.
+  it("chama requestFullscreen() em um elemento que contém os controles (botão de tela cheia incluído), não só o canvas", async () => {
+    const user = userEvent.setup();
+    let elementRequested: HTMLElement | null = null;
+    // Captura deliberada de `this` (o elemento real em que requestFullscreen() foi chamado)
+    // para fora do mock -- não há outra forma de observar o elemento-alvo real de uma chamada
+    // de método de instância.
+    const requestFullscreenMock = vi.fn(function (this: HTMLElement) {
+      // eslint-disable-next-line @typescript-eslint/no-this-alias
+      elementRequested = this;
+      return Promise.resolve();
+    });
+    Object.defineProperty(document, "fullscreenEnabled", { value: true, configurable: true });
+    HTMLDivElement.prototype.requestFullscreen = requestFullscreenMock as unknown as () => Promise<void>;
+
+    try {
+      vi.stubGlobal("fetch", mockFetchReturning(buildBinaryStlBuffer(2)));
+      render(<StlViewer artifactUrl="https://api/artifacts/1/download" token="tok" />);
+      await screen.findByTestId("viewer-triangle-count");
+
+      const button = screen.getByTestId("viewer-fullscreen");
+      await user.click(button);
+
+      expect(requestFullscreenMock).toHaveBeenCalledTimes(1);
+      expect(elementRequested).not.toBeNull();
+      // O botão precisa ser DESCENDENTE do elemento que foi para tela cheia -- se fosse chamado
+      // em containerRef (só o canvas), esta asserção falharia, exatamente como falhava no
+      // Chromium real antes da correção.
+      expect(elementRequested!.contains(button)).toBe(true);
+
+      vi.unstubAllGlobals();
+    } finally {
+      // @ts-expect-error -- limpeza do mock adicionado manualmente ao protótipo
+      delete HTMLDivElement.prototype.requestFullscreen;
+    }
   });
 });
 
@@ -415,6 +483,45 @@ describe("StlViewer -- cancelamento de carregamento", () => {
 
     expect(await screen.findByText(/carregamento cancelado/i)).toBeInTheDocument();
     expect(screen.getByTestId("viewer-retry-button")).toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
+
+  // Regressão real (3a execução Windows, viewer.spec.ts:229 original, commit 85b58c4 -- ver
+  // TEST_EVIDENCE.md): o teste E2E assumia `<canvas>` count=0 após cancelar, mas o container
+  // (containerRef) é permanentemente montado desde a correção do deadlock "empty" -> URL (rodada
+  // anterior), e o <canvas>/WebGLRenderer são criados assim que o carregamento COMEÇA -- antes
+  // do fetch do STL resolver --, não só quando a malha termina. Cancelar aborta só o fetch em
+  // andamento; o <canvas> continua no DOM (nada foi "vazado": geometria/material/mesh nunca
+  // chegaram a ser criados, porque o cancelamento ocorreu antes do `.then()` de sucesso). Este
+  // teste prova exatamente isso -- canvas PERMANECE presente, e o estado real e observável do
+  // componente (não inferido do canvas) é exposto pelo marcador estável `data-viewer-status`.
+  it("após cancelar, o <canvas> permanece montado (container permanente) mas data-viewer-status reflete 'cancelled'", async () => {
+    const user = userEvent.setup();
+    let rejectFetch: (reason: unknown) => void;
+    const pending = new Promise((_resolve, reject) => {
+      rejectFetch = reject;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+        init?.signal?.addEventListener("abort", () => rejectFetch(new DOMException("Aborted", "AbortError")));
+        return pending;
+      }),
+    );
+
+    const { container } = render(<StlViewer artifactUrl="https://api/artifacts/1/download" token="tok" />);
+    await screen.findByTestId("viewer-cancel-button");
+    await user.click(screen.getByTestId("viewer-cancel-button"));
+
+    await screen.findByText(/carregamento cancelado/i);
+
+    const viewerContainer = screen.getByTestId("viewer-container");
+    expect(viewerContainer).toHaveAttribute("data-viewer-status", "cancelled");
+    expect(container.querySelectorAll("canvas")).toHaveLength(1);
+    // Nenhuma malha/métrica é exibida -- a prova real de "sem carregamento concluído", não a
+    // ausência do canvas.
+    expect(screen.queryByTestId("viewer-triangle-count")).not.toBeInTheDocument();
+
     vi.unstubAllGlobals();
   });
 });

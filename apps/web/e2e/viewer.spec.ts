@@ -121,22 +121,48 @@ test.describe("Visualizador 3D (StlViewer) -- cobertura E2E real (Chromium)", ()
     await expect(opacitySlider).toHaveCount(0);
   });
 
-  test("eixos e grade: alternam estado real do checkbox", async ({ page }) => {
+  // Bug real encontrado na 3a execução Windows real (commit 85b58c4, ver TEST_EVIDENCE.md): este
+  // teste assumia `not.toBeChecked()` como estado inicial de eixos/grade -- mas o estado inicial
+  // REAL definido pelo produto (StlViewer.tsx: `useState(true)` para `showAxes` e `showGrid`) é
+  // CHECADO por padrão (diferente de bounding box/clipping, que de fato default para `false` --
+  // ver os testes correspondentes logo abaixo, que continuam corretos). Não é um defeito do
+  // produto: mostrar eixos e grade por padrão é a escolha de UX esperada para um visualizador 3D
+  // (referência de orientação espacial imediata). Corrigido para refletir o estado inicial real,
+  // sem forçar um estado artificial, e provando a alternância observável nos DOIS sentidos
+  // (ligado -> desligado -> ligado de novo) para eixos e grade SEPARADAMENTE.
+  test("eixos: alternam estado real do checkbox nos dois sentidos (padrão do produto = visível)", async ({ page }) => {
     await gotoPreseededJobPage(page);
     await waitForViewerReady(page);
 
     const axesToggle = page.getByTestId("viewer-axes-toggle");
-    const gridToggle = page.getByTestId("viewer-grid-toggle");
 
+    // Estado inicial real (não forçado): eixos visíveis por padrão.
+    await expect(axesToggle).toBeChecked();
+
+    await axesToggle.click();
     await expect(axesToggle).not.toBeChecked();
+
     await axesToggle.click();
     await expect(axesToggle).toBeChecked();
 
+    await expect(page.locator("canvas")).toHaveCount(1);
+  });
+
+  test("grade: alterna estado real do checkbox nos dois sentidos (padrão do produto = visível)", async ({ page }) => {
+    await gotoPreseededJobPage(page);
+    await waitForViewerReady(page);
+
+    const gridToggle = page.getByTestId("viewer-grid-toggle");
+
+    // Estado inicial real (não forçado): grade visível por padrão.
+    await expect(gridToggle).toBeChecked();
+
+    await gridToggle.click();
     await expect(gridToggle).not.toBeChecked();
+
     await gridToggle.click();
     await expect(gridToggle).toBeChecked();
 
-    // Ambos ativos simultaneamente não quebram a renderização (canvas continua presente).
     await expect(page.locator("canvas")).toHaveCount(1);
   });
 
@@ -258,7 +284,20 @@ test.describe("Visualizador 3D (StlViewer) -- cobertura E2E real (Chromium)", ()
       await expect(page.getByText("Carregamento cancelado")).toBeVisible();
       await expect(page.getByTestId("viewer-retry-button")).toBeVisible();
       await expect(page.getByTestId("viewer-triangle-count")).toHaveCount(0);
-      await expect(page.locator("canvas")).toHaveCount(0);
+
+      // NÃO assumir canvas count=0: bug real encontrado na 3a execução Windows real
+      // (viewer.spec.ts:229 original, commit 85b58c4, ver TEST_EVIDENCE.md). O container do
+      // canvas (containerRef) é permanentemente montado desde a correção do deadlock "empty" ->
+      // URL de uma rodada anterior, e o <canvas>/WebGLRenderer/cena base são criados assim que o
+      // CARREGAMENTO COMEÇA (antes mesmo do fetch do STL resolver -- ver StlViewer.tsx), não só
+      // quando a malha termina de carregar. Cancelar aborta apenas o fetch em andamento; o
+      // <canvas> permanece montado (o cleanup completo só roda no próximo loadToken -- outra
+      // tentativa -- ou no unmount). O estado real e observável é provado, em vez disso, pelo
+      // marcador estável `data-viewer-status` no container (nunca expõe nada sensível, só o
+      // enum interno de status) e pela ausência de `viewer-triangle-count` (nenhuma malha/
+      // métrica é exibida) -- prova exatamente o que importa: nenhuma malha carregada, estado
+      // interno genuinamente "cancelled".
+      await expect(page.getByTestId("viewer-container")).toHaveAttribute("data-viewer-status", "cancelled");
 
       // Prova de que o carregamento foi REALMENTE abortado no nível de rede (não só que a UI
       // mudou de estado): o Chromium reporta a requisição como falha por abort

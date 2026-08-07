@@ -68,6 +68,10 @@ export function StlViewer({
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const initialCameraRef = useRef<{ position: THREE.Vector3; target: THREE.Vector3 } | null>(null);
   const isMountedRef = useRef(true);
+  // Ref separada do containerRef (que só envolve o <canvas>) para o elemento que efetivamente
+  // entra em tela cheia -- ver comentário completo acima de handleToggleFullscreen sobre o bug
+  // real corrigido nesta rodada (controles inacessíveis dentro do modo tela cheia).
+  const viewerRootRef = useRef<HTMLDivElement | null>(null);
 
   const [status, setStatus] = useState<ViewerStatus>(
     !artifactUrl ? "empty" : declaredSizeBytes && declaredSizeBytes > maxBytes ? "size-warning" : "loading",
@@ -363,11 +367,28 @@ export function StlViewer({
   };
 
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const fullscreenSupported = typeof document !== "undefined" && Boolean(document.fullscreenEnabled ?? true) && Boolean(containerRef.current?.requestFullscreen);
+  // Bug real encontrado na 3a execucao Windows real (viewer.spec.ts:192, commit 85b58c4, ver
+  // TEST_EVIDENCE.md): `requestFullscreen()` era chamado em `containerRef.current` -- o elemento
+  // que envolve SOMENTE o <canvas>, sem os controles (wireframe/eixos/grade/.../o proprio botao
+  // de tela cheia), que ficam FORA dele como irmaos no DOM. A API de Fullscreen promove o
+  // elemento (e so ele + seus descendentes) para a "top layer" do navegador, renderizada acima
+  // de todo o resto do documento -- os controles, por serem irmaos e nao descendentes,
+  // continuavam no fluxo normal por baixo dessa camada. Resultado real (nao so no Playwright):
+  // ao entrar em tela cheia, o <canvas> passava a interceptar TODOS os eventos de ponteiro sobre
+  // a area onde os controles apareceriam, inclusive o proprio botao "Sair de tela cheia" --
+  // qualquer usuario real do Chrome ficaria com os controles inacessiveis dentro do modo tela
+  // cheia (Playwright reportou honestamente via "subtree intercepts pointer events", sem
+  // precisar de click({force:true}), que so esconderia o defeito real). Corrigido chamando
+  // `requestFullscreen()`/`exitFullscreen()` em `viewerRootRef` (o `<div>` mais externo, que
+  // envolve tanto os controles quanto o container do canvas) -- assim os controles entram na
+  // mesma "top layer" que o canvas, permanecendo clicaveis (nao se sobrepoem espacialmente: os
+  // controles ficam em uma linha acima do canvas no fluxo normal do documento, sem necessidade
+  // de z-index/position manual).
+  const fullscreenSupported = typeof document !== "undefined" && Boolean(document.fullscreenEnabled ?? true) && Boolean(viewerRootRef.current?.requestFullscreen);
   const handleToggleFullscreen = () => {
-    if (!containerRef.current) return;
+    if (!viewerRootRef.current) return;
     if (!isFullscreen) {
-      containerRef.current.requestFullscreen?.().then(() => setIsFullscreen(true)).catch(() => undefined);
+      viewerRootRef.current.requestFullscreen?.().then(() => setIsFullscreen(true)).catch(() => undefined);
     } else {
       document.exitFullscreen?.().then(() => setIsFullscreen(false)).catch(() => undefined);
     }
@@ -397,7 +418,7 @@ export function StlViewer({
   // WebGLRenderer a ela se `containerRef.current` já existir no momento em que o efeito roda
   // (logo após o commit deste render).
   return (
-    <div>
+    <div ref={viewerRootRef}>
       {status === "empty" && (
         <EmptyState title="Nenhum artefato disponível" description="Este job ainda não gerou um STL para visualização." />
       )}
@@ -538,8 +559,25 @@ export function StlViewer({
         </>
       )}
 
+      {/* data-viewer-status expõe o estado interno da máquina de estados (nunca dados
+          sensíveis -- só um dos valores do enum ViewerStatus) como um marcador estável e
+          observável, independente da presença do <canvas>. Necessário desde que o container
+          abaixo passou a ficar permanentemente montado (ver comentário grande acima sobre o
+          bug do deadlock "empty" -> URL, corrigido em rodada anterior): um teste que dependesse
+          de `<canvas>` count para inferir o estado (ex.: "cancelado" = canvas ausente) deixou de
+          ser válido, porque o <canvas> É criado assim que o carregamento começa (antes mesmo do
+          fetch do STL resolver -- ver efeito acima), não só quando a malha termina de carregar,
+          e permanece montado mesmo após um cancelamento (só o fetch em andamento é abortado, não
+          o WebGLRenderer/cena base, que só são descartados no cleanup do efeito quando
+          `[artifactUrl, loadToken]` muda de novo -- outra tentativa/retry -- ou no unmount). Bug
+          real encontrado na 3a execução Windows real (viewer.spec.ts:229, commit 85b58c4, ver
+          TEST_EVIDENCE.md): o teste de cancelamento assumia canvas count=0 após cancelar, o que
+          nunca foi verdade desde a correção do deadlock -- corrigido usando este marcador em vez
+          de inferir do <canvas>. */}
       <div
         ref={containerRef}
+        data-testid="viewer-container"
+        data-viewer-status={status}
         style={{
           width: "100%",
           height: 480,
