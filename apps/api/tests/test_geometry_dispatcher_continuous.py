@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from sqlalchemy.exc import DBAPIError
 
 import scripts.geometry_dispatcher as dispatcher_mod
 from scripts.geometry_dispatcher import (
@@ -304,3 +305,64 @@ def test_stop_requested_helper_checks_both_signal_and_file(tmp_path):
     stop_file.unlink()
     shutdown.requested = True
     assert _stop_requested(shutdown, None) is True
+
+
+def test_run_continuous_sobrevive_a_indisponibilidade_temporaria_do_banco(monkeypatch, tmp_path):
+    # Incremento 2.2 (Fase D -- resiliencia): antes da correcao, uma excecao real de conexao
+    # com o banco (DBAPIError, ex.: Postgres reiniciando/indisponivel por um instante) dentro
+    # de process_queued_jobs() NAO era capturada por run_continuous() -- propagava e derrubava
+    # o processo inteiro do dispatcher. Este teste simula exatamente essa falha transitoria
+    # (uma excecao no primeiro ciclo, sucesso normal no segundo) e prova que o loop SOBREVIVE,
+    # trata o ciclo com falha como um ciclo vazio (log estruturado + backoff), e continua
+    # tentando no ciclo seguinte sem precisar de um supervisor externo para reiniciá-lo.
+    calls = {"n": 0}
+
+    def _flaky_process_queued_jobs(limit, dispatcher_id, on_phase_change=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise DBAPIError("SELECT 1", {}, Exception("connection refused (simulado)"))
+        return 1
+
+    monkeypatch.setattr(dispatcher_mod, "process_queued_jobs", _flaky_process_queued_jobs)
+    clock = _FakeClock()
+    status_file = tmp_path / "status.json"
+
+    total = run_continuous(
+        dispatcher_id="d-db-blip",
+        base_poll_interval=1.0,
+        limit_per_cycle=None,
+        status_file=status_file,
+        shutdown=GracefulShutdown(),
+        max_iterations=2,
+        sleep_fn=clock,
+    )
+
+    # O processo NAO morreu (nenhuma excecao propagou daqui) -- rodou os 2 ciclos pedidos, e o
+    # segundo ciclo (apos a falha transitoria) processou o job normalmente.
+    assert calls["n"] == 2
+    assert total == 1
+    payload = json.loads(status_file.read_text(encoding="utf-8"))
+    assert payload["state"] == "stopped"
+
+
+def test_run_continuous_loga_evento_estruturado_na_falha_temporaria_do_banco(monkeypatch, tmp_path, capsys):
+    def _always_flaky(limit, dispatcher_id, on_phase_change=None):
+        raise DBAPIError("SELECT 1", {}, Exception("connection refused (simulado)"))
+
+    monkeypatch.setattr(dispatcher_mod, "process_queued_jobs", _always_flaky)
+    clock = _FakeClock()
+    status_file = tmp_path / "status.json"
+
+    run_continuous(
+        dispatcher_id="d-db-blip-2",
+        base_poll_interval=1.0,
+        limit_per_cycle=None,
+        status_file=status_file,
+        shutdown=GracefulShutdown(),
+        max_iterations=1,
+        sleep_fn=clock,
+    )
+
+    out = capsys.readouterr().out
+    events = [json.loads(line) for line in out.strip().splitlines()]
+    assert any(e["event"] == "database_temporarily_unavailable" for e in events)

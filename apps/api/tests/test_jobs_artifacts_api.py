@@ -9,7 +9,7 @@ from pathlib import Path
 
 from biomatcad_api.config import get_settings
 from biomatcad_api.services.geometry_job_service import claim_next_queued_job, dispatch_job
-from biomatcad_api.services.storage import LocalStorageAdapter
+from biomatcad_api.services.storage import LocalStorageAdapter, sha256_of_bytes
 from biomatcad_api.services.worker_client import WorkerResult
 
 from .factories import RESEARCHER_PASSWORD, create_researcher, login
@@ -129,7 +129,11 @@ class _FakeWorkerClient:
                 "stl_reload_validation_passed": True,
             },
             worker_version="0.1.0-fake-test-double", dotnet_version="9.0.0", picogk_version="2.2.0",
-            duration_seconds=0.1, stl_sha256="0" * 64, platform="fake-platform-for-tests",
+            duration_seconds=0.1,
+            # SHA-256 REAL do conteudo escrito (Fase D, Incremento 2.2): dispatch_job() agora
+            # rejeita divergencia entre este valor e o hash calculado a partir dos bytes
+            # realmente armazenados.
+            stl_sha256=sha256_of_bytes(self.stl_content), platform="fake-platform-for-tests",
         )
 
 

@@ -32,6 +32,7 @@ from pathlib import Path
 import psutil
 import pytest
 
+import biomatcad_api.services.worker_client as worker_client_module
 from biomatcad_api.models.geometry_job import JobStatus
 from biomatcad_api.models.geometry_recipe import GeometryRecipe
 from biomatcad_api.models.project import BioMatProject
@@ -41,7 +42,7 @@ from biomatcad_api.services.geometry_job_service import (
     dispatch_job,
 )
 from biomatcad_api.services.recipe_service import validate_and_canonicalize
-from biomatcad_api.services.storage import LocalStorageAdapter
+from biomatcad_api.services.storage import LocalStorageAdapter, sha256_of_bytes
 from biomatcad_api.services.worker_client import (
     DotnetPicoGkWorkerClient,
     WorkerExecutionError,
@@ -49,7 +50,6 @@ from biomatcad_api.services.worker_client import (
     _kill_process_tree,
     _truncate_for_log,
 )
-import biomatcad_api.services.worker_client as worker_client_module
 
 from .conftest import load_golden_recipe
 from .factories import create_researcher
@@ -484,8 +484,9 @@ class _SucceedsWorkerClient:
         if on_process_started is not None:
             on_process_started(0)
         output_dir.mkdir(parents=True, exist_ok=True)
+        stl_content = b"solid ok\nendsolid ok\n"
         stl_path = output_dir / "ok.stl"
-        stl_path.write_bytes(b"solid ok\nendsolid ok\n")
+        stl_path.write_bytes(stl_content)
         return WorkerResult(
             stl_path=stl_path,
             thumbnail_path=None,
@@ -504,7 +505,10 @@ class _SucceedsWorkerClient:
             picogk_version="2.2.0",
             duration_seconds=0.1,
             effective_parameters={"wall_thickness_requested_mm": 0.6, "wall_thickness_effective_mm": 0.6},
-            stl_sha256="1" * 64,
+            # SHA-256 REAL do conteudo escrito (Fase D, Incremento 2.2, tornou dispatch_job()
+            # sensivel a divergencia entre este valor e o hash de fato calculado a partir dos
+            # bytes armazenados -- ver test_security_hardening/test_geometry_job_orchestration).
+            stl_sha256=sha256_of_bytes(stl_content),
             platform="fake-platform-for-tests",
         )
 

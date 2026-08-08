@@ -30,8 +30,11 @@ from biomatcad_api.models.geometry_recipe import GeometryRecipe, RecipeStatus
 from biomatcad_api.models.material import MaterialRecord
 from biomatcad_api.models.project import BioMatProject
 from biomatcad_api.services.manifest_service import build_and_store_manifest
-from biomatcad_api.services.storage import StorageAdapter, sha256_of_file
-from biomatcad_api.services.topology_providers import UnknownTopologyProviderError, get_topology_provider
+from biomatcad_api.services.storage import StorageAdapter, sha256_of_bytes, sha256_of_file
+from biomatcad_api.services.topology_providers import (
+    UnknownTopologyProviderError,
+    get_topology_provider,
+)
 from biomatcad_api.services.worker_client import GeometryWorkerClient, WorkerExecutionError
 
 HEARTBEAT_MIN_INTERVAL_SECONDS = 2.0
@@ -476,6 +479,50 @@ def dispatch_job(
     job = job_after_success
 
     stl_bytes = result.stl_path.read_bytes()
+
+    # Defesa de resiliencia (Incremento 2.2, Fase D -- "arquivo parcial"/"checksum
+    # divergente"): um STL vazio nunca e um resultado geometrico real (mesmo um dominio
+    # minimo golden recipe produz uma malha nao-trivial) -- tratar como falha real do worker,
+    # nunca persistir um artefato vazio como "succeeded". Cobre o caso de um processo
+    # encerrado/morto no meio da escrita do arquivo (arquivo criado, mas nunca preenchido).
+    if len(stl_bytes) == 0:
+        _mark_failed(
+            db,
+            job,
+            error_code="WORKER_PARTIAL_OUTPUT",
+            error_message=(
+                f"O worker reportou sucesso, mas o arquivo STL em {result.stl_path} esta "
+                "vazio (0 bytes) -- resultado geometrico incompleto/parcial, tratado como "
+                "falha real (nunca persistido como artefato valido)."
+            ),
+        )
+        _cleanup_output_dir(output_dir)
+        return job
+
+    # Defesa de resiliencia ("checksum divergente"): o SHA-256 e SEMPRE recalculado de forma
+    # independente a partir dos bytes REALMENTE armazenados (nunca confiando cegamente no
+    # stl_sha256 autorreportado pelo worker). Se o worker tambem reportou um hash e ele
+    # DIVERGE do hash real dos bytes gravados (corrupcao, escrita incompleta entre o calculo
+    # do hash e a leitura aqui, bug do worker), isso e um problema real de integridade -- o job
+    # e marcado como falho em vez de persistir silenciosamente um artefato com checksum
+    # incorreto (quebraria a garantia de integridade SHA-256 ponta a ponta em toda a cadeia:
+    # banco, manifesto, download, visualizador).
+    actual_stl_sha256 = sha256_of_bytes(stl_bytes)
+    if result.stl_sha256 is not None and result.stl_sha256 != actual_stl_sha256:
+        _mark_failed(
+            db,
+            job,
+            error_code="WORKER_CHECKSUM_MISMATCH",
+            error_message=(
+                f"O SHA-256 autorreportado pelo worker ({result.stl_sha256}) diverge do "
+                f"SHA-256 real dos bytes do STL gravado ({actual_stl_sha256}) -- possivel "
+                "corrupcao ou escrita incompleta. Job marcado como falho para nunca expor um "
+                "artefato com integridade nao verificada."
+            ),
+        )
+        _cleanup_output_dir(output_dir)
+        return job
+
     stl_key = f"jobs/{job.id}/scaffold.stl"
     storage.put(stl_key, stl_bytes)
     db.add(
@@ -483,7 +530,7 @@ def dispatch_job(
             geometry_job_id=job.id,
             kind=ArtifactKind.STL,
             storage_key=stl_key,
-            sha256=result.stl_sha256 or sha256_of_file(result.stl_path),
+            sha256=actual_stl_sha256,
             size_bytes=len(stl_bytes),
         )
     )
@@ -520,6 +567,6 @@ def dispatch_job(
         repo_root=repo_root,
         effective_parameters=result.effective_parameters,
         platform_info=result.platform,
-        stl_sha256=result.stl_sha256,
+        stl_sha256=actual_stl_sha256,
     )
     return job

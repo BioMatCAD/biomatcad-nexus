@@ -40,7 +40,7 @@ from biomatcad_api.services.geometry_job_service import (
     retry_job,
 )
 from biomatcad_api.services.recipe_service import validate_and_canonicalize
-from biomatcad_api.services.storage import LocalStorageAdapter
+from biomatcad_api.services.storage import LocalStorageAdapter, sha256_of_bytes
 from biomatcad_api.services.worker_client import (
     DotnetPicoGkWorkerClient,
     WorkerExecutionError,
@@ -217,7 +217,12 @@ class FakeWorkerClient:
             picogk_version="2.2.0",
             duration_seconds=0.1,
             effective_parameters={"wall_thickness_requested_mm": 0.6, "wall_thickness_effective_mm": 0.6},
-            stl_sha256="0" * 64,
+            # SHA-256 REAL do conteudo escrito (nunca um placeholder fixo) -- a Fase D
+            # (Incremento 2.2) tornou dispatch_job() sensivel a divergencia entre este valor e
+            # o hash de fato calculado a partir dos bytes armazenados; um dublê de teste
+            # precisa reportar o mesmo hash que um worker real reportaria para o conteudo que
+            # ele mesmo escreveu.
+            stl_sha256=sha256_of_bytes(self.stl_content),
             platform="fake-platform-for-tests",
         )
 

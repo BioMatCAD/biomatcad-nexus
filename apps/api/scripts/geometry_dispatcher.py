@@ -54,6 +54,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy.exc import DBAPIError
+
 from biomatcad_api.config import get_settings
 from biomatcad_api.db import SessionLocal
 from biomatcad_api.services.geometry_job_service import (
@@ -272,11 +274,28 @@ def run_continuous(
             break
         iteration += 1
 
-        n = process_queued_jobs(
-            limit=limit_per_cycle,
-            dispatcher_id=dispatcher_id,
-            on_phase_change=on_phase_change,
-        )
+        # Resiliencia a indisponibilidade TEMPORARIA do banco (Incremento 2.2, Fase D):
+        # process_queued_jobs() faz consultas reais (claim_next_queued_job,
+        # recover_orphaned_jobs) que podem falhar com uma excecao de conexao/protocolo real se
+        # o Postgres estiver temporariamente fora do ar (reinicio, blip de rede). Antes desta
+        # correcao, essa excecao NAO era capturada aqui -- propagava e derrubava o processo
+        # inteiro do dispatcher continuo, exigindo um supervisor externo para reiniciar. Agora
+        # o ciclo trata isso como um ciclo vazio (mesmo backoff geometrico), loga o erro e
+        # CONTINUA tentando no proximo ciclo -- o dispatcher sobrevive a uma indisponibilidade
+        # transitoria sem intervencao externa, assim que o banco volta a responder.
+        try:
+            n = process_queued_jobs(
+                limit=limit_per_cycle,
+                dispatcher_id=dispatcher_id,
+                on_phase_change=on_phase_change,
+            )
+        except DBAPIError as exc:
+            n = 0
+            log_event(
+                "database_temporarily_unavailable",
+                dispatcher_id=dispatcher_id,
+                error=str(exc.orig) if exc.orig is not None else str(exc),
+            )
         jobs_processed_total += n
 
         if n > 0:
