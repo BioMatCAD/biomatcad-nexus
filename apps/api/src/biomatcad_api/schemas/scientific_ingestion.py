@@ -67,3 +67,28 @@ class ConnectorInfoResponse(BaseModel):
     version: str
     status: str
     description: str
+
+
+class RawSourceRecordResponse(BaseModel):
+    """Snapshot bruto versionado de uma fonte externa (Adendo de Interface Científica Mínima,
+    Fase L) -- exposto em modo leitura para a aba "Snapshots" do detalhe de entidade científica.
+    Nunca editável via API; apenas leitura de um registro já persistido por
+    `services/scientific_ingestion_service.py::_persist_raw_source_record`."""
+
+    model_config = {"from_attributes": True}
+    id: str
+    source_id: str
+    connector_id: str
+    connector_version: str
+    external_record_id: str
+    requested_endpoint: str
+    http_status: int
+    content_type: str | None
+    fetched_at: datetime
+    payload_sha256: str
+    payload_size_bytes: int
+    schema_mapping_version: str
+    predecessor_record_id: str | None
+    parsing_status: str
+    retention_policy: str
+    created_at: datetime

@@ -3,16 +3,30 @@ import { offlineValidateResponse } from "./recipeValidationOffline";
 import {
   ApiError,
   type ArtifactResponse,
+  type BiologicalEvidenceResponse,
+  type ConnectorInfoResponse,
+  type CrystalStructureReferenceResponse,
   type DesignRunResponse,
   type GeometryJobResponse,
   type GeometryRecipeBody,
+  type IngestionConflictResponse,
+  type IngestionRequestResponse,
   type ManifestResponse,
   type MaterialCreateRequest,
   type MaterialDetail,
   type MaterialSummary,
   type ProjectCreateRequest,
   type ProjectResponse,
+  type PropertyDefinitionResponse,
+  type PropertyObservationResponse,
+  type ProvenanceEntry,
+  type RawSourceRecordResponse,
   type RecipeResponse,
+  type ReviewDecisionOutcome,
+  type ReviewDecisionResponse,
+  type ScientificEntityDetail,
+  type ScientificEntitySummary,
+  type SupplierProductResponse,
 } from "./types";
 
 // Cliente de demonstração usado exclusivamente no build do GitHub Pages (Prompt Mestre §3.3,
@@ -98,6 +112,265 @@ const SAMPLE_RECIPE: RecipeResponse = {
   status: "validated",
   created_at: new Date().toISOString(),
 };
+
+// ---------------------------------------------------------------------------------------
+// Incremento 2.3 -- dados científicos + ingestão PubChem (Adendo de Interface Científica
+// Mínima). Espelha o MESMO conteúdo do seed sintético real (seed_scientific_data.py) na
+// medida do possível -- nomes/rótulos claramente fictícios, nunca um CID/InChIKey real do
+// PubChem. O modo demo (GitHub Pages) não tem backend real, então TODA a ingestão aqui é
+// simulada via setTimeout, exatamente como `simulateJobProgress` já faz para jobs geométricos.
+const DEMO_BIOMATERIAL_ID = "demo-sci-entity-biomaterial";
+const DEMO_CHEMICAL_ID = "demo-sci-entity-chemical";
+const DEMO_DRUG_ID = "demo-sci-entity-drug";
+// CID reservado (fictício) que, se incluído numa submissão de demonstração, simula uma
+// solicitação "partial" com um conflito -- nunca um CID real do PubChem.
+const DEMO_CONFLICT_CID = "9999";
+
+const SAMPLE_SCI_ENTITIES: ScientificEntityDetail[] = [
+  {
+    id: DEMO_BIOMATERIAL_ID,
+    organization_id: null,
+    entity_type: "biomaterial",
+    preferred_name: "Hidroxiapatita Sintética de Demonstração (fictícia)",
+    review_status: "reviewed",
+    is_active: true,
+    created_at: new Date().toISOString(),
+    description: "Biomaterial fictício usado apenas para demonstrar o domínio científico. Sem dado real.",
+    updated_at: new Date().toISOString(),
+    identifiers: [
+      {
+        id: "demo-sci-identifier-1",
+        namespace: "SYNTHETIC_DEMO_ID",
+        identifier: "SYNTH-BIOMAT-0001",
+        identifier_normalized: "SYNTH-BIOMAT-0001",
+        verification_status: "unverified",
+        created_at: new Date().toISOString(),
+      },
+    ],
+  },
+  {
+    id: DEMO_CHEMICAL_ID,
+    organization_id: null,
+    entity_type: "chemical_substance",
+    preferred_name: "Ácido Poliláctico Fictício de Demonstração",
+    review_status: "draft",
+    is_active: true,
+    created_at: new Date().toISOString(),
+    description: "Substância química fictícia de demonstração. Sem dado real -- não importada do PubChem.",
+    updated_at: new Date().toISOString(),
+    identifiers: [],
+  },
+  {
+    id: DEMO_DRUG_ID,
+    organization_id: null,
+    entity_type: "drug",
+    preferred_name: "Fármaco Fictício de Demonstração X-100",
+    review_status: "rejected",
+    is_active: true,
+    created_at: new Date().toISOString(),
+    description: "Fármaco inteiramente fictício, criado apenas para teste do domínio. Não existe na realidade.",
+    updated_at: new Date().toISOString(),
+    identifiers: [],
+  },
+];
+
+const SAMPLE_PROPERTY_DEFINITIONS: PropertyDefinitionResponse[] = [
+  {
+    id: "demo-propdef-young-modulus",
+    canonical_key: "young_modulus_demo",
+    name: "Módulo de Young (demonstração)",
+    dimension: "mechanical",
+    canonical_unit: "GPa",
+    value_type: "numeric",
+    applicable_domain: "generic",
+  },
+];
+
+const SAMPLE_PROPERTY_OBSERVATIONS: Record<string, PropertyObservationResponse[]> = {
+  [DEMO_BIOMATERIAL_ID]: [
+    {
+      id: "demo-sci-obs-alpha",
+      property_definition_id: "demo-propdef-young-modulus",
+      value_numeric: 12.3,
+      value_min: null,
+      value_max: null,
+      value_text: null,
+      unit_original: "GPa",
+      value_normalized: null,
+      method: "Ensaio de compressão fictício (fonte Alfa)",
+      condition_temperature_k: null,
+      condition_pressure_kpa: null,
+      condition_ph: null,
+      condition_medium: null,
+      conditions_extra: null,
+      uncertainty_low: null,
+      uncertainty_high: null,
+      evidence_type: "experimental",
+      reference_id: null,
+      source_id: "demo-sci-source-alpha",
+      source_location: null,
+      related_supplier_product_id: null,
+      review_status: "reviewed",
+      notes: "Observação sintética de demonstração -- fonte Alfa.",
+      created_at: new Date().toISOString(),
+    },
+    {
+      id: "demo-sci-obs-beta",
+      property_definition_id: "demo-propdef-young-modulus",
+      value_numeric: 15.7,
+      value_min: null,
+      value_max: null,
+      value_text: null,
+      unit_original: "GPa",
+      value_normalized: null,
+      method: "Ensaio de compressão fictício (fonte Beta)",
+      condition_temperature_k: null,
+      condition_pressure_kpa: null,
+      condition_ph: null,
+      condition_medium: null,
+      conditions_extra: null,
+      uncertainty_low: null,
+      uncertainty_high: null,
+      evidence_type: "experimental",
+      reference_id: null,
+      source_id: "demo-sci-source-beta",
+      source_location: null,
+      related_supplier_product_id: null,
+      review_status: "draft",
+      notes:
+        "Observação sintética de demonstração -- fonte Beta. Valor DIVERGENTE da observação " +
+        "da fonte Alfa, mantido como linha separada (nunca sobrescrita silenciosa).",
+      created_at: new Date().toISOString(),
+    },
+  ],
+};
+
+const SAMPLE_PROVENANCE: Record<string, ProvenanceEntry[]> = {
+  [DEMO_BIOMATERIAL_ID]: [
+    {
+      observation_id: "demo-sci-obs-alpha",
+      reference: null,
+      source: {
+        id: "demo-sci-source-alpha",
+        name: "Fonte Sintética Alfa de Demonstração",
+        source_type: "database",
+        base_url: null,
+        publisher: "Fonte fictícia de demonstração -- não corresponde a nenhuma editora/banco real.",
+        license: "Uso interno de demonstração apenas -- não redistribuir.",
+        version: "demo-1",
+        accessed_at: new Date().toISOString(),
+        redistribution_status: "unknown",
+      },
+    },
+  ],
+};
+
+const SAMPLE_BIOLOGICAL_EVIDENCE: Record<string, BiologicalEvidenceResponse[]> = {
+  [DEMO_DRUG_ID]: [
+    {
+      id: "demo-sci-bioevidence-1",
+      entity_id: DEMO_DRUG_ID,
+      assay_type: "ensaio_fictício_demo",
+      biological_model: "in_vitro_fictício",
+      species: null,
+      cell_line: "Linhagem celular fictícia de demonstração",
+      organism: null,
+      endpoint: "viabilidade_celular_fictícia",
+      result_value: 72.5,
+      result_text: "Resultado fictício de demonstração -- classificação apenas de pesquisa.",
+      dose_value: 10.0,
+      dose_unit: "ug_mL_fictício",
+      duration_value: 24.0,
+      duration_unit: "h",
+      conditions: { nota: "Dado inteiramente sintético, não é validação clínica." },
+      reference_id: null,
+      source_id: null,
+      research_classification_only: true,
+      created_at: new Date().toISOString(),
+    },
+  ],
+};
+
+const SAMPLE_RAW_SOURCE_RECORDS: Record<string, RawSourceRecordResponse[]> = {
+  [DEMO_BIOMATERIAL_ID]: [
+    {
+      id: "demo-sci-raw-record-1",
+      source_id: "demo-sci-source-alpha",
+      connector_id: "synthetic_demo_connector",
+      connector_version: "0.0.0-demo",
+      external_record_id: "SYNTH-DEMO-0001",
+      requested_endpoint: "synthetic://demo/SYNTH-DEMO-0001",
+      http_status: 200,
+      content_type: "application/json",
+      fetched_at: new Date().toISOString(),
+      payload_sha256: "0".repeat(64),
+      payload_size_bytes: 128,
+      schema_mapping_version: "synthetic_demo_v1",
+      predecessor_record_id: null,
+      parsing_status: "parsed",
+      retention_policy: "demo_synthetic",
+      created_at: new Date().toISOString(),
+    },
+  ],
+};
+
+const demoConflict: IngestionConflictResponse = {
+  id: "demo-sci-conflict-1",
+  ingestion_request_id: "demo-ingestion-preseeded",
+  external_record_id: DEMO_CONFLICT_CID,
+  conflict_type: "inchikey_shared_with_other_entity",
+  entity_id: DEMO_CHEMICAL_ID,
+  other_entity_id: DEMO_DRUG_ID,
+  details: {
+    nota:
+      "Conflito inteiramente sintético de demonstração -- nunca uma colisão real de InChIKey " +
+      "do PubChem.",
+  },
+  resolved: false,
+  created_at: new Date().toISOString(),
+};
+
+const SAMPLE_CONFLICTS: Record<string, IngestionConflictResponse[]> = {
+  [DEMO_CHEMICAL_ID]: [demoConflict],
+  [DEMO_DRUG_ID]: [demoConflict],
+};
+
+const SAMPLE_CONNECTORS: ConnectorInfoResponse[] = [
+  {
+    connector_id: "pubchem_pug_rest",
+    version: "1",
+    status: "implemented",
+    description: "Conector PubChem PUG REST (piloto) -- simulado no modo demonstração (GitHub Pages).",
+  },
+];
+
+const demoIngestionRequests: IngestionRequestResponse[] = [];
+let demoIngestionRequestCounter = 0;
+
+function simulateIngestionProgress(requestId: string, externalIds: string[], dryRun: boolean): void {
+  setTimeout(() => {
+    const req = demoIngestionRequests.find((r) => r.id === requestId);
+    if (!req || req.status !== "queued") return;
+    req.status = "running";
+    req.started_at = new Date().toISOString();
+  }, 350);
+
+  setTimeout(() => {
+    const req = demoIngestionRequests.find((r) => r.id === requestId);
+    if (!req || req.status !== "running") return;
+    const hasConflict = externalIds.includes(DEMO_CONFLICT_CID);
+    req.status = hasConflict ? "partial" : "succeeded";
+    req.finished_at = new Date().toISOString();
+    req.summary = {
+      received_count: externalIds.length,
+      created_count: dryRun ? 0 : hasConflict ? externalIds.length - 1 : externalIds.length,
+      updated_count: 0,
+      unchanged_count: 0,
+      rejected_count: 0,
+      conflicts_count: hasConflict ? 1 : 0,
+    };
+  }, 1100);
+}
 
 const demoStore: {
   materials: MaterialDetail[];
@@ -510,5 +783,136 @@ export const demoApiClient: ApiClient = {
       return `${import.meta.env.BASE_URL}demo-assets/${SAMPLE_STL_FILENAME}`;
     }
     return `${import.meta.env.BASE_URL}demo-assets/${SAMPLE_STL_FILENAME}`;
+  },
+
+  // ---- Incremento 2.3 -- Dados científicos (simulado, sem backend real) ----
+  listScientificEntities: () => delay(SAMPLE_SCI_ENTITIES.map(({ identifiers: _identifiers, description: _description, updated_at: _updated_at, ...rest }) => rest as ScientificEntitySummary)),
+  getScientificEntity: (_token, entityId) => {
+    const entity = SAMPLE_SCI_ENTITIES.find((e) => e.id === entityId);
+    if (!entity) return Promise.reject(new ApiError(404, { error: { id: "demo", code: "HTTP_404", message: "Entidade científica não encontrada (demo)." } }));
+    return delay(entity);
+  },
+  listPropertyDefinitions: () => delay(SAMPLE_PROPERTY_DEFINITIONS),
+  listScientificSources: () =>
+    delay([
+      {
+        id: "demo-sci-source-alpha",
+        name: "Fonte Sintética Alfa de Demonstração",
+        source_type: "database",
+        base_url: null,
+        publisher: "Fonte fictícia de demonstração -- não corresponde a nenhuma editora/banco real.",
+        license: "Uso interno de demonstração apenas -- não redistribuir.",
+        version: "demo-1",
+        accessed_at: new Date().toISOString(),
+        redistribution_status: "unknown",
+      },
+    ]),
+  listEntityIdentifiers: (_token, entityId) => {
+    const entity = SAMPLE_SCI_ENTITIES.find((e) => e.id === entityId);
+    return delay(entity?.identifiers ?? []);
+  },
+  listEntityPropertyObservations: (_token, entityId) => delay(SAMPLE_PROPERTY_OBSERVATIONS[entityId] ?? []),
+  listEntityProvenance: (_token, entityId) => delay(SAMPLE_PROVENANCE[entityId] ?? []),
+  listEntitySupplierProducts: (): Promise<SupplierProductResponse[]> => delay([]),
+  listEntityCrystalStructures: (): Promise<CrystalStructureReferenceResponse[]> => delay([]),
+  listEntityReviewHistory: (): Promise<ReviewDecisionResponse[]> => delay([]),
+  listEntityBiologicalEvidence: (_token, entityId) => delay(SAMPLE_BIOLOGICAL_EVIDENCE[entityId] ?? []),
+  listEntityRawSourceRecords: (_token, entityId) => delay(SAMPLE_RAW_SOURCE_RECORDS[entityId] ?? []),
+  listEntityConflicts: (_token, entityId) => delay(SAMPLE_CONFLICTS[entityId] ?? []),
+  createReviewDecision: (_token, entityId, payload) => {
+    const entity = SAMPLE_SCI_ENTITIES.find((e) => e.id === entityId);
+    if (!entity) return Promise.reject(new ApiError(404, { error: { id: "demo", code: "HTTP_404", message: "Entidade científica não encontrada (demo)." } }));
+    const newState: ReviewDecisionOutcome extends string ? string : never =
+      payload.decision === "approved" ? "reviewed" : payload.decision === "rejected" ? "rejected" : entity.review_status;
+    const decision: ReviewDecisionResponse = {
+      id: `demo-sci-review-${Date.now()}`,
+      subject_type: "ScientificEntity",
+      subject_id: entityId,
+      decision: payload.decision,
+      reviewer_user_id: "demo-user",
+      justification: payload.justification,
+      previous_state: entity.review_status,
+      new_state: newState,
+      created_at: new Date().toISOString(),
+    };
+    entity.review_status = newState as ScientificEntityDetail["review_status"];
+    return delay(decision);
+  },
+
+  // ---- Incremento 2.3 -- Ingestão científica / conector PubChem (simulado, GitHub Pages) ----
+  listIngestionConnectors: () => delay(SAMPLE_CONNECTORS),
+  listIngestionRequests: () => delay([...demoIngestionRequests]),
+  getIngestionRequest: (_token, requestId) => {
+    const req = demoIngestionRequests.find((r) => r.id === requestId);
+    if (!req) return Promise.reject(new ApiError(404, { error: { id: "demo", code: "HTTP_404", message: "Solicitação de ingestão não encontrada (demo)." } }));
+    return delay(req);
+  },
+  getIngestionRequestConflicts: (_token, requestId) => {
+    const req = demoIngestionRequests.find((r) => r.id === requestId);
+    if (!req) return delay([]);
+    return delay(req.external_ids.includes(DEMO_CONFLICT_CID) ? [demoConflict] : []);
+  },
+  submitIngestionRequest: (_token, payload) => {
+    demoIngestionRequestCounter += 1;
+    const req: IngestionRequestResponse = {
+      id: `demo-ingestion-${demoIngestionRequestCounter}`,
+      organization_id: "demo-org",
+      requested_by_user_id: "demo-user",
+      connector_id: payload.connector_id,
+      source_id: payload.source_id,
+      external_ids: payload.external_ids,
+      dry_run: Boolean(payload.dry_run),
+      status: "queued",
+      created_at: new Date().toISOString(),
+      started_at: null,
+      finished_at: null,
+      claimed_by_dispatcher_id: "demo-dispatcher",
+      heartbeat_at: null,
+      attempt_number: 1,
+      cancel_requested_at: null,
+      summary: null,
+      error: null,
+      ingestion_run_id: null,
+    };
+    demoIngestionRequests.push(req);
+    simulateIngestionProgress(req.id, payload.external_ids, Boolean(payload.dry_run));
+    return delay(req);
+  },
+  submitIngestionDryRun: (_token, payload) => {
+    demoIngestionRequestCounter += 1;
+    const req: IngestionRequestResponse = {
+      id: `demo-ingestion-${demoIngestionRequestCounter}`,
+      organization_id: "demo-org",
+      requested_by_user_id: "demo-user",
+      connector_id: payload.connector_id,
+      source_id: payload.source_id,
+      external_ids: payload.external_ids,
+      dry_run: true,
+      status: "queued",
+      created_at: new Date().toISOString(),
+      started_at: null,
+      finished_at: null,
+      claimed_by_dispatcher_id: "demo-dispatcher",
+      heartbeat_at: null,
+      attempt_number: 1,
+      cancel_requested_at: null,
+      summary: null,
+      error: null,
+      ingestion_run_id: null,
+    };
+    demoIngestionRequests.push(req);
+    simulateIngestionProgress(req.id, payload.external_ids, true);
+    return delay(req);
+  },
+  cancelIngestionRequest: (_token, requestId) => {
+    const req = demoIngestionRequests.find((r) => r.id === requestId);
+    if (!req) return Promise.reject(new ApiError(404, { error: { id: "demo", code: "HTTP_404", message: "Solicitação de ingestão não encontrada (demo)." } }));
+    if (req.status !== "queued" && req.status !== "running") {
+      return Promise.reject(new ApiError(409, { error: { id: "demo", code: "HTTP_409", message: "Solicitação já finalizada (demo)." } }));
+    }
+    req.status = "cancelled";
+    req.cancel_requested_at = new Date().toISOString();
+    req.finished_at = new Date().toISOString();
+    return delay(req);
   },
 };

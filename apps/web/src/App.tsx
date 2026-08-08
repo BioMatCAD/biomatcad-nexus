@@ -16,6 +16,8 @@ import { ProjectDetailPage } from "./pages/ProjectDetailPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { RecipeDetailPage } from "./pages/RecipeDetailPage";
 import { RecipeEditorPage } from "./pages/RecipeEditorPage";
+import { ScientificDataPage } from "./pages/ScientificDataPage";
+import { ScientificEntityDetailPage } from "./pages/ScientificEntityDetailPage";
 
 export function App() {
   return (
@@ -95,6 +97,22 @@ export function App() {
               element={
                 <ProtectedRoute>
                   <ObservabilityPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/app/scientific-data"
+              element={
+                <ProtectedRoute>
+                  <ScientificDataPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/app/scientific-data/:entityId"
+              element={
+                <ProtectedRoute>
+                  <ScientificEntityDetailPage />
                 </ProtectedRoute>
               }
             />

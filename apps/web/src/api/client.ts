@@ -2,11 +2,17 @@ import {
   ApiError,
   type ApiErrorPayload,
   type ArtifactResponse,
+  type BiologicalEvidenceResponse,
+  type ConnectorInfoResponse,
+  type CrystalStructureReferenceResponse,
   type DesignRunResponse,
   type GeometryJobResponse,
   type GeometryMetrics,
   type GeometryRecipeBody,
   type HealthResponse,
+  type IngestionConflictResponse,
+  type IngestionRequestCreate,
+  type IngestionRequestResponse,
   type LoginRequest,
   type LoginResponse,
   type ManifestResponse,
@@ -16,9 +22,20 @@ import {
   type ObservabilityStatusResponse,
   type ProjectCreateRequest,
   type ProjectResponse,
+  type PropertyDefinitionResponse,
+  type PropertyObservationResponse,
+  type ProvenanceEntry,
+  type RawSourceRecordResponse,
   type ReadyResponse,
   type RecipeResponse,
   type RecipeValidateResponse,
+  type ReviewDecisionOutcome,
+  type ReviewDecisionResponse,
+  type ScientificEntityDetail,
+  type ScientificEntitySummary,
+  type ScientificIdentifierResponse,
+  type ScientificSourceResponse,
+  type SupplierProductResponse,
   type SystemStatusResponse,
   type UserResponse,
   type VersionResponse,
@@ -110,6 +127,84 @@ export const apiClient = {
   getJobMetrics: (token: string, jobId: string) =>
     request<GeometryMetrics>(`/api/v1/jobs/${jobId}/metrics`, {}, token),
   artifactDownloadUrl: (artifactId: string) => `${API_BASE_URL}/api/v1/artifacts/${artifactId}/download`,
+
+  // ---- Incremento 2.3 -- Dados científicos (Rodada 1) ----
+  listScientificEntities: (token: string) =>
+    request<ScientificEntitySummary[]>("/api/v1/scientific-entities", {}, token),
+  getScientificEntity: (token: string, entityId: string) =>
+    request<ScientificEntityDetail>(`/api/v1/scientific-entities/${entityId}`, {}, token),
+  listPropertyDefinitions: (token: string) =>
+    request<PropertyDefinitionResponse[]>("/api/v1/scientific-entities/property-definitions", {}, token),
+  listScientificSources: (token: string) =>
+    request<ScientificSourceResponse[]>("/api/v1/scientific-entities/sources", {}, token),
+  listEntityIdentifiers: (token: string, entityId: string) =>
+    request<ScientificIdentifierResponse[]>(`/api/v1/scientific-entities/${entityId}/identifiers`, {}, token),
+  listEntityPropertyObservations: (token: string, entityId: string) =>
+    request<PropertyObservationResponse[]>(
+      `/api/v1/scientific-entities/${entityId}/property-observations`,
+      {},
+      token,
+    ),
+  listEntityProvenance: (token: string, entityId: string) =>
+    request<ProvenanceEntry[]>(`/api/v1/scientific-entities/${entityId}/provenance`, {}, token),
+  listEntitySupplierProducts: (token: string, entityId: string) =>
+    request<SupplierProductResponse[]>(`/api/v1/scientific-entities/${entityId}/supplier-products`, {}, token),
+  listEntityCrystalStructures: (token: string, entityId: string) =>
+    request<CrystalStructureReferenceResponse[]>(
+      `/api/v1/scientific-entities/${entityId}/crystal-structures`,
+      {},
+      token,
+    ),
+  listEntityReviewHistory: (token: string, entityId: string) =>
+    request<ReviewDecisionResponse[]>(`/api/v1/scientific-entities/${entityId}/review-history`, {}, token),
+  listEntityBiologicalEvidence: (token: string, entityId: string) =>
+    request<BiologicalEvidenceResponse[]>(`/api/v1/scientific-entities/${entityId}/biological-evidence`, {}, token),
+  listEntityRawSourceRecords: (token: string, entityId: string) =>
+    request<RawSourceRecordResponse[]>(`/api/v1/scientific-entities/${entityId}/raw-source-records`, {}, token),
+  listEntityConflicts: (token: string, entityId: string) =>
+    request<IngestionConflictResponse[]>(`/api/v1/scientific-entities/${entityId}/conflicts`, {}, token),
+  createReviewDecision: (
+    token: string,
+    entityId: string,
+    payload: { decision: ReviewDecisionOutcome; justification: string },
+  ) =>
+    request<ReviewDecisionResponse>(
+      `/api/v1/scientific-entities/${entityId}/review-decisions`,
+      { method: "POST", body: JSON.stringify(payload) },
+      token,
+    ),
+
+  // ---- Incremento 2.3 -- Ingestão científica / conector PubChem (Rodada 2) ----
+  listIngestionConnectors: (token: string) =>
+    request<ConnectorInfoResponse[]>("/api/v1/scientific-ingestion/connectors", {}, token),
+  listIngestionRequests: (token: string) =>
+    request<IngestionRequestResponse[]>("/api/v1/scientific-ingestion/requests", {}, token),
+  getIngestionRequest: (token: string, requestId: string) =>
+    request<IngestionRequestResponse>(`/api/v1/scientific-ingestion/requests/${requestId}`, {}, token),
+  getIngestionRequestConflicts: (token: string, requestId: string) =>
+    request<IngestionConflictResponse[]>(
+      `/api/v1/scientific-ingestion/requests/${requestId}/conflicts`,
+      {},
+      token,
+    ),
+  submitIngestionRequest: (token: string, payload: IngestionRequestCreate) =>
+    request<IngestionRequestResponse>(
+      "/api/v1/scientific-ingestion/requests",
+      { method: "POST", body: JSON.stringify(payload) },
+      token,
+    ),
+  submitIngestionDryRun: (token: string, payload: IngestionRequestCreate) =>
+    request<IngestionRequestResponse>(
+      "/api/v1/scientific-ingestion/requests/dry-run",
+      { method: "POST", body: JSON.stringify({ ...payload, dry_run: true }) },
+      token,
+    ),
+  cancelIngestionRequest: (token: string, requestId: string) =>
+    request<IngestionRequestResponse>(
+      `/api/v1/scientific-ingestion/requests/${requestId}/cancel`,
+      { method: "POST" },
+      token,
+    ),
 };
 
 export type ApiClient = typeof apiClient;

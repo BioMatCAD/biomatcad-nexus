@@ -27,8 +27,10 @@ from biomatcad_api.db import get_db
 from biomatcad_api.models.audit_event import AuditEvent
 from biomatcad_api.models.scientific_data import (
     BibliographicReference,
+    BiologicalEvidence,
     CrystalStructureReference,
     CurationState,
+    PropertyDefinition,
     PropertyObservation,
     ReviewDecision,
     ScientificEntity,
@@ -36,11 +38,14 @@ from biomatcad_api.models.scientific_data import (
     ScientificSource,
     SupplierProduct,
 )
+from biomatcad_api.models.scientific_ingestion import IngestionConflict, RawSourceRecord
 from biomatcad_api.models.user import User
 from biomatcad_api.routers.auth import get_current_user, require_admin
 from biomatcad_api.schemas.scientific_data import (
     BibliographicReferenceResponse,
+    BiologicalEvidenceResponse,
     CrystalStructureReferenceResponse,
+    PropertyDefinitionResponse,
     PropertyObservationResponse,
     ProvenanceEntry,
     ReviewDecisionCreateRequest,
@@ -51,6 +56,10 @@ from biomatcad_api.schemas.scientific_data import (
     ScientificIdentifierResponse,
     ScientificSourceResponse,
     SupplierProductResponse,
+)
+from biomatcad_api.schemas.scientific_ingestion import (
+    IngestionConflictResponse,
+    RawSourceRecordResponse,
 )
 
 router = APIRouter(prefix="/api/v1/scientific-entities", tags=["scientific-data"])
@@ -105,6 +114,30 @@ def list_scientific_entities(
         .order_by(ScientificEntity.created_at.desc())
         .all()
     )
+
+
+@router.get("/property-definitions", response_model=list[PropertyDefinitionResponse])
+def list_property_definitions(
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+) -> list[PropertyDefinition]:
+    """Vocabulário canônico de propriedades (Adendo de Interface Científica Mínima, Fase L) --
+    vocabulário global, não escopado por organização (ver PropertyDefinition, sem
+    organization_id). Permite ao frontend traduzir `property_definition_id` em nome/unidade
+    legíveis sem precisar de N chamadas por observação. Declarado ANTES de `/{entity_id}` para
+    que "property-definitions" nunca seja capturado como um valor de entity_id."""
+    return db.query(PropertyDefinition).order_by(PropertyDefinition.name.asc()).all()
+
+
+@router.get("/sources", response_model=list[ScientificSourceResponse])
+def list_scientific_sources(
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+) -> list[ScientificSource]:
+    """Lista de `ScientificSource` (Adendo de Interface Científica Mínima, Fase L/O) -- permite
+    ao painel administrativo de ingestão escolher um `source_id` real sem precisar conhecer o
+    UUID de antemão (ex.: o registro "PubChem" criado por `ensure_pubchem_source.py`, ou os
+    registros fictícios do seed de demonstração). Vocabulário global, não escopado por
+    organização. Declarado ANTES de `/{entity_id}` pela mesma razão de `/property-definitions`."""
+    return db.query(ScientificSource).order_by(ScientificSource.name.asc()).all()
 
 
 @router.get("/{entity_id}", response_model=ScientificEntityDetail)
@@ -276,3 +309,71 @@ def create_entity_review_decision(
     db.commit()
     db.refresh(decision)
     return decision
+
+
+@router.get("/{entity_id}/biological-evidence", response_model=list[BiologicalEvidenceResponse])
+def list_entity_biological_evidence(
+    entity_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+) -> list[BiologicalEvidence]:
+    """Evidência biológica da entidade (Adendo de Interface Científica Mínima, Fase L) --
+    `research_classification_only` é sempre True nesta rodada; a interface nunca deve
+    apresentar isto como validação clínica (ver docstring de BiologicalEvidence)."""
+    _get_visible_entity(entity_id, db, current_user)
+    return (
+        db.query(BiologicalEvidence)
+        .filter(BiologicalEvidence.entity_id == entity_id)
+        .order_by(BiologicalEvidence.created_at.asc())
+        .all()
+    )
+
+
+@router.get("/{entity_id}/raw-source-records", response_model=list[RawSourceRecordResponse])
+def list_entity_raw_source_records(
+    entity_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+) -> list[RawSourceRecord]:
+    """Snapshots brutos versionados (Adendo de Interface Científica Mínima, Fase L) -- a aba
+    "Snapshots" do detalhe de entidade. Reconstituído via `PropertyObservation.raw_source_record_id`
+    (coluna aditiva da Rodada 2) -- nunca por casamento de identificador externo direto, que
+    seria frágil a mudanças no conector. Apenas leitura; não expõe `payload_json` bruto aqui
+    (ver RawSourceRecordResponse) para manter a resposta compacta -- o payload completo
+    permanece disponível via `scripts/pubchem_pilot_report.py` para inspeção administrativa."""
+    _get_visible_entity(entity_id, db, current_user)
+    record_ids = {
+        obs.raw_source_record_id
+        for obs in db.query(PropertyObservation.raw_source_record_id)
+        .filter(
+            PropertyObservation.entity_id == entity_id,
+            PropertyObservation.raw_source_record_id.is_not(None),
+        )
+        .all()
+    }
+    if not record_ids:
+        return []
+    return (
+        db.query(RawSourceRecord)
+        .filter(RawSourceRecord.id.in_(record_ids))
+        .order_by(RawSourceRecord.fetched_at.desc())
+        .all()
+    )
+
+
+@router.get("/{entity_id}/conflicts", response_model=list[IngestionConflictResponse])
+def list_entity_conflicts(
+    entity_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+) -> list[IngestionConflict]:
+    """Conflitos de ingestão que referenciam esta entidade, como entidade principal OU como a
+    "outra entidade" colidente (Adendo de Interface Científica Mínima, Fase L) -- nunca
+    resolvidos automaticamente por esta rota, apenas expostos para decisão humana futura (ver
+    services/connectors/base.py::reconcile)."""
+    _get_visible_entity(entity_id, db, current_user)
+    return (
+        db.query(IngestionConflict)
+        .filter(
+            or_(
+                IngestionConflict.entity_id == entity_id,
+                IngestionConflict.other_entity_id == entity_id,
+            )
+        )
+        .order_by(IngestionConflict.created_at.desc())
+        .all()
+    )

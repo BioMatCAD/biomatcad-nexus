@@ -158,3 +158,46 @@ class ReviewDecisionResponse(BaseModel):
     previous_state: str | None
     new_state: str | None
     created_at: datetime
+
+
+class PropertyDefinitionResponse(BaseModel):
+    """Vocabulário canônico de propriedades (Adendo de Interface Científica Mínima, Incremento
+    2.3, Rodada 2, Fase L) -- permite ao frontend traduzir `property_definition_id` (um UUID
+    opaco em PropertyObservationResponse) em nome legível/unidade canônica, sem duplicar essa
+    informação em cada observação."""
+
+    model_config = {"from_attributes": True}
+    id: str
+    canonical_key: str
+    name: str
+    dimension: str
+    canonical_unit: str
+    value_type: str
+    applicable_domain: str
+
+
+class BiologicalEvidenceResponse(BaseModel):
+    """Evidência biológica (Adendo de Interface Científica Mínima) -- `research_classification_only`
+    é sempre True nesta rodada (ver models/scientific_data.py::BiologicalEvidence); nunca
+    representa validação clínica."""
+
+    model_config = {"from_attributes": True}
+    id: str
+    entity_id: str
+    assay_type: str
+    biological_model: str
+    species: str | None
+    cell_line: str | None
+    organism: str | None
+    endpoint: str
+    result_value: float | None
+    result_text: str | None
+    dose_value: float | None
+    dose_unit: str | None
+    duration_value: float | None
+    duration_unit: str | None
+    conditions: dict | None
+    reference_id: str | None
+    source_id: str | None
+    research_classification_only: bool
+    created_at: datetime

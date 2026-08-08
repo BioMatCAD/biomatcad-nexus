@@ -21,6 +21,8 @@ Idempotente: reexecutável sem duplicar linhas, seguindo o mesmo padrão de `_en
 seed.py (get_or_create por chave natural)."""
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import datetime, timezone
 
 from biomatcad_api.db import SessionLocal
@@ -47,6 +49,14 @@ from biomatcad_api.models.scientific_data import (
     Supplier,
     SupplierProduct,
     compute_observation_fingerprint,
+)
+from biomatcad_api.models.scientific_ingestion import (
+    IngestionConflict,
+    IngestionConflictType,
+    IngestionRequestStatus,
+    ParsingStatus,
+    RawSourceRecord,
+    ScientificIngestionRequest,
 )
 from biomatcad_api.models.user import User
 from biomatcad_api.seed import SYNTHETIC_ADMIN_EMAIL, SYNTHETIC_ORG_SLUG
@@ -302,7 +312,7 @@ def run_seed_scientific_data() -> None:
 
         # --- Observações conflitantes: mesma entidade+propriedade, duas fontes distintas,
         # valores DIFERENTES -- ambas devem coexistir (fingerprints diferentes). -------------
-        _ensure_observation(
+        alpha_obs = _ensure_observation(
             db,
             entity=biomaterial,
             property_definition=young_modulus,
@@ -433,6 +443,106 @@ def run_seed_scientific_data() -> None:
                     cell_params={"a": 9.42, "b": 9.42, "c": 6.88, "nota": "Parâmetros fictícios de demonstração"},
                     url=None,
                     license="Uso interno de demonstração apenas.",
+                )
+            )
+
+        # --- Snapshot bruto sintético + conflito de ingestão sintético (Adendo de Interface
+        # Científica Mínima, Incremento 2.3, Rodada 2, Fase M/N) -- permite às abas "Snapshots"
+        # e "Conflitos" da interface científica terem conteúdo real para exibir a partir deste
+        # seed, SEM depender de rede nem de uma execução real do piloto PubChem. `connector_id`
+        # é deliberadamente "synthetic_demo_connector" (nunca "pubchem_pug_rest") e o payload é
+        # marcado explicitamente como fictício -- nunca deve ser confundido com uma resposta
+        # real do PubChem capturada pelo roteiro Windows (ver
+        # docs/data/connectors/PUBCHEM_CONNECTOR.md, seção de bloqueio de rede do sandbox). ----
+        demo_payload = {
+            "synthetic_contract_fixture": True,
+            "nota": "Snapshot inteiramente fictício de demonstração -- nunca atribuído ao PubChem.",
+            "external_record_id": "SYNTH-DEMO-0001",
+        }
+        demo_payload_json = json.dumps(demo_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        demo_payload_sha256 = hashlib.sha256(demo_payload_json.encode("utf-8")).hexdigest()
+
+        existing_raw_record = (
+            db.query(RawSourceRecord)
+            .filter(
+                RawSourceRecord.source_id == source_alpha.id,
+                RawSourceRecord.connector_id == "synthetic_demo_connector",
+                RawSourceRecord.external_record_id == "SYNTH-DEMO-0001",
+            )
+            .first()
+        )
+        if existing_raw_record is None:
+            existing_raw_record = RawSourceRecord(
+                source_id=source_alpha.id,
+                connector_id="synthetic_demo_connector",
+                connector_version="0.0.0-demo",
+                external_record_id="SYNTH-DEMO-0001",
+                requested_endpoint="synthetic://demo/SYNTH-DEMO-0001",
+                http_status=200,
+                content_type="application/json",
+                fetched_at=datetime.now(timezone.utc),
+                payload_json=demo_payload,
+                payload_sha256=demo_payload_sha256,
+                payload_size_bytes=len(demo_payload_json.encode("utf-8")),
+                schema_mapping_version="synthetic_demo_v1",
+                parsing_status=ParsingStatus.PARSED,
+                retention_policy="demo_synthetic",
+            )
+            db.add(existing_raw_record)
+            db.flush()
+
+        # Vincula o snapshot à observação "fonte Alfa" já criada acima -- a aba "Snapshots" do
+        # detalhe de entidade (Fase N) reconstitui snapshots via
+        # PropertyObservation.raw_source_record_id (nunca por casamento de identificador).
+        if alpha_obs.raw_source_record_id is None:
+            alpha_obs.raw_source_record_id = existing_raw_record.id
+
+        existing_demo_request = (
+            db.query(ScientificIngestionRequest)
+            .filter(ScientificIngestionRequest.connector_id == "synthetic_demo_connector")
+            .first()
+        )
+        if existing_demo_request is None:
+            existing_demo_request = ScientificIngestionRequest(
+                organization_id=None,
+                requested_by_user_id=admin.id,
+                connector_id="synthetic_demo_connector",
+                source_id=source_alpha.id,
+                external_ids=["SYNTH-DEMO-0001"],
+                dry_run=False,
+                status=IngestionRequestStatus.PARTIAL,
+                summary={
+                    "received_count": 1,
+                    "created_count": 0,
+                    "updated_count": 0,
+                    "unchanged_count": 0,
+                    "rejected_count": 0,
+                    "conflicts_count": 1,
+                },
+            )
+            db.add(existing_demo_request)
+            db.flush()
+
+        existing_conflict = (
+            db.query(IngestionConflict)
+            .filter(IngestionConflict.ingestion_request_id == existing_demo_request.id)
+            .first()
+        )
+        if existing_conflict is None:
+            db.add(
+                IngestionConflict(
+                    ingestion_request_id=existing_demo_request.id,
+                    external_record_id="SYNTH-DEMO-0001",
+                    conflict_type=IngestionConflictType.INCHIKEY_SHARED_WITH_OTHER_ENTITY,
+                    entity_id=chemical_substance.id,
+                    other_entity_id=drug.id,
+                    details={
+                        "nota": (
+                            "Conflito inteiramente sintético de demonstração -- nunca uma colisão "
+                            "real de InChIKey do PubChem. Usado apenas para exercitar a aba "
+                            "'Conflitos' da interface científica sem depender de ingestão real."
+                        ),
+                    },
                 )
             )
 

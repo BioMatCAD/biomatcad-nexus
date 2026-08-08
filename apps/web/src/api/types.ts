@@ -426,3 +426,277 @@ export interface ObservabilityStatusResponse {
   jobs_active: ActiveJobSummary[];
   jobs_failed_recent: FailedJobSummary[];
 }
+
+// ---------------------------------------------------------------------------------------
+// Incremento 2.3 (Rodada 1 + Rodada 2) — dados científicos + ingestão PubChem (Adendo de
+// Interface Científica Mínima). Espelha apps/api/src/biomatcad_api/schemas/scientific_data.py
+// e schemas/scientific_ingestion.py -- toda entidade científica é sempre rotulada com seu
+// review_status real; nenhum dado importado/não revisado é jamais apresentado como validado.
+// ---------------------------------------------------------------------------------------
+
+export type ScientificEntityType =
+  | "biomaterial"
+  | "chemical_substance"
+  | "drug"
+  | "formulation"
+  | "nanomaterial"
+  | "other";
+
+export type CurationState = "draft" | "reviewed" | "rejected";
+
+export type IdentifierVerificationStatus = "unverified" | "verified" | "disputed";
+
+export type EvidenceType =
+  | "experimental"
+  | "calculated"
+  | "supplier_declared"
+  | "literature_reported"
+  | "inferred"
+  | "synthetic";
+
+export interface ScientificIdentifierResponse {
+  id: string;
+  namespace: string;
+  identifier: string;
+  identifier_normalized: string;
+  verification_status: IdentifierVerificationStatus;
+  created_at: string;
+}
+
+export interface ScientificEntitySummary {
+  id: string;
+  organization_id: string | null;
+  entity_type: ScientificEntityType;
+  preferred_name: string;
+  review_status: CurationState;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface ScientificEntityDetail extends ScientificEntitySummary {
+  description: string | null;
+  updated_at: string;
+  identifiers: ScientificIdentifierResponse[];
+}
+
+export interface PropertyDefinitionResponse {
+  id: string;
+  canonical_key: string;
+  name: string;
+  dimension: string;
+  canonical_unit: string;
+  value_type: string;
+  applicable_domain: string;
+}
+
+export interface PropertyObservationResponse {
+  id: string;
+  property_definition_id: string;
+  value_numeric: number | null;
+  value_min: number | null;
+  value_max: number | null;
+  value_text: string | null;
+  unit_original: string;
+  value_normalized: number | null;
+  method: string | null;
+  condition_temperature_k: number | null;
+  condition_pressure_kpa: number | null;
+  condition_ph: number | null;
+  condition_medium: string | null;
+  conditions_extra: Record<string, unknown> | null;
+  uncertainty_low: number | null;
+  uncertainty_high: number | null;
+  evidence_type: EvidenceType;
+  reference_id: string | null;
+  source_id: string | null;
+  source_location: string | null;
+  related_supplier_product_id: string | null;
+  review_status: CurationState;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface BibliographicReferenceResponse {
+  id: string;
+  doi: string | null;
+  pmid: string | null;
+  other_identifier: string | null;
+  title: string;
+  authors: string | null;
+  venue: string | null;
+  year: number | null;
+  url: string | null;
+}
+
+export interface ScientificSourceResponse {
+  id: string;
+  name: string;
+  source_type: string;
+  base_url: string | null;
+  publisher: string | null;
+  license: string | null;
+  version: string | null;
+  accessed_at: string | null;
+  redistribution_status: string;
+}
+
+export interface ProvenanceEntry {
+  observation_id: string;
+  reference: BibliographicReferenceResponse | null;
+  source: ScientificSourceResponse | null;
+}
+
+export interface SupplierProductResponse {
+  id: string;
+  supplier_id: string;
+  entity_id: string | null;
+  catalog_sku: string;
+  commercial_name: string;
+  url: string | null;
+  region: string | null;
+  lot_number: string | null;
+  registry_valid_from: string | null;
+  registry_valid_to: string | null;
+  declared_properties: Record<string, unknown> | null;
+}
+
+export interface CrystalStructureReferenceResponse {
+  id: string;
+  entity_id: string;
+  database_name: string;
+  accession_id: string;
+  formula: string | null;
+  crystal_system: string | null;
+  space_group: string | null;
+  cell_params: Record<string, unknown> | null;
+  url: string | null;
+  license: string | null;
+  file_checksum_sha256: string | null;
+}
+
+export type ReviewDecisionOutcome = "approved" | "rejected" | "needs_more_evidence";
+
+export interface ReviewDecisionResponse {
+  id: string;
+  subject_type: string;
+  subject_id: string;
+  decision: ReviewDecisionOutcome;
+  reviewer_user_id: string;
+  justification: string;
+  previous_state: string | null;
+  new_state: string | null;
+  created_at: string;
+}
+
+export interface BiologicalEvidenceResponse {
+  id: string;
+  entity_id: string;
+  assay_type: string;
+  biological_model: string;
+  species: string | null;
+  cell_line: string | null;
+  organism: string | null;
+  endpoint: string;
+  result_value: number | null;
+  result_text: string | null;
+  dose_value: number | null;
+  dose_unit: string | null;
+  duration_value: number | null;
+  duration_unit: string | null;
+  conditions: Record<string, unknown> | null;
+  reference_id: string | null;
+  source_id: string | null;
+  research_classification_only: boolean;
+  created_at: string;
+}
+
+export interface RawSourceRecordResponse {
+  id: string;
+  source_id: string;
+  connector_id: string;
+  connector_version: string;
+  external_record_id: string;
+  requested_endpoint: string;
+  http_status: number;
+  content_type: string | null;
+  fetched_at: string;
+  payload_sha256: string;
+  payload_size_bytes: number;
+  schema_mapping_version: string;
+  predecessor_record_id: string | null;
+  parsing_status: string;
+  retention_policy: string;
+  created_at: string;
+}
+
+// ---- Ingestão científica / conector PubChem (Incremento 2.3, Rodada 2) ----
+
+export type IngestionRequestStatusKind =
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "partial"
+  | "failed"
+  | "cancelled";
+
+export type IngestionConflictTypeKind =
+  | "inchikey_shared_with_other_entity"
+  | "identifier_verification_disputed"
+  | "other";
+
+export interface IngestionConflictResponse {
+  id: string;
+  ingestion_request_id: string;
+  external_record_id: string;
+  conflict_type: IngestionConflictTypeKind;
+  entity_id: string | null;
+  other_entity_id: string | null;
+  details: Record<string, unknown> | null;
+  resolved: boolean;
+  created_at: string;
+}
+
+export interface IngestionRequestSummary {
+  received_count?: number;
+  created_count?: number;
+  updated_count?: number;
+  unchanged_count?: number;
+  rejected_count?: number;
+  conflicts_count?: number;
+  [key: string]: unknown;
+}
+
+export interface IngestionRequestResponse {
+  id: string;
+  organization_id: string | null;
+  requested_by_user_id: string;
+  connector_id: string;
+  source_id: string;
+  external_ids: string[];
+  dry_run: boolean;
+  status: IngestionRequestStatusKind;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  claimed_by_dispatcher_id: string | null;
+  heartbeat_at: string | null;
+  attempt_number: number;
+  cancel_requested_at: string | null;
+  summary: IngestionRequestSummary | null;
+  error: Record<string, unknown> | null;
+  ingestion_run_id: string | null;
+}
+
+export interface ConnectorInfoResponse {
+  connector_id: string;
+  version: string;
+  status: string;
+  description: string;
+}
+
+export interface IngestionRequestCreate {
+  connector_id: string;
+  source_id: string;
+  external_ids: string[];
+  dry_run?: boolean;
+}

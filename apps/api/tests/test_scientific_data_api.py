@@ -171,6 +171,9 @@ def test_related_subresource_endpoints_return_empty_lists_when_no_data(client, d
         "supplier-products",
         "crystal-structures",
         "review-history",
+        "biological-evidence",
+        "raw-source-records",
+        "conflicts",
     ):
         sub_resp = client.get(f"/api/v1/scientific-entities/{entity_id}/{suffix}", headers=headers)
         assert sub_resp.status_code == 200, f"{suffix}: {sub_resp.text}"
@@ -188,6 +191,100 @@ def test_unknown_entity_id_returns_404_for_all_subresources(client, db_session):
         "/supplier-products",
         "/crystal-structures",
         "/review-history",
+        "/biological-evidence",
+        "/raw-source-records",
+        "/conflicts",
     ):
         resp = client.get(f"/api/v1/scientific-entities/{fake_id}{suffix}", headers=headers)
         assert resp.status_code == 404
+
+
+def test_property_definitions_endpoint_lists_canonical_vocabulary(client, db_session):
+    """`/property-definitions` (Adendo de Interface Científica Mínima, Fase L) -- vocabulário
+    global, acessível a qualquer usuário autenticado (não exige admin, ao contrário de criação/
+    revisão de entidade), e declarado ANTES de `/{entity_id}` para nunca ser capturado como um
+    valor de entity_id (prova de regressão de ordenação de rotas)."""
+    from biomatcad_api.models.scientific_data import PropertyDefinition
+
+    headers, _ = _researcher_header(client, db_session, "sci-propdefs@biomatcad.example")
+    prop_def = PropertyDefinition(
+        canonical_key="test_prop_defs_endpoint",
+        name="Propriedade de teste (endpoint)",
+        dimension="mechanical",
+        canonical_unit="GPa",
+        value_type="numeric",
+        applicable_domain="generic",
+    )
+    db_session.add(prop_def)
+    db_session.commit()
+
+    resp = client.get("/api/v1/scientific-entities/property-definitions", headers=headers)
+    assert resp.status_code == 200
+    keys = [p["canonical_key"] for p in resp.json()]
+    assert "test_prop_defs_endpoint" in keys
+
+
+def test_entity_conflicts_endpoint_shows_conflict_where_entity_is_either_side(client, db_session):
+    """Conflitos aparecem tanto quando a entidade é `entity_id` quanto quando é
+    `other_entity_id` do IngestionConflict (Adendo de Interface Científica Mínima, Fase L)."""
+    from biomatcad_api.models.scientific_ingestion import (
+        IngestionConflict as IngestionConflictModel,
+    )
+    from biomatcad_api.models.scientific_ingestion import (
+        IngestionConflictType,
+        IngestionRequestStatus,
+        ScientificIngestionRequest,
+    )
+
+    headers, admin = _admin_header(client, db_session, "sci-conflict@biomatcad.example")
+
+    resp_a = client.post(
+        "/api/v1/scientific-entities",
+        headers=headers,
+        json={"entity_type": "chemical_substance", "preferred_name": "Entidade Conflito A"},
+    )
+    resp_b = client.post(
+        "/api/v1/scientific-entities",
+        headers=headers,
+        json={"entity_type": "chemical_substance", "preferred_name": "Entidade Conflito B"},
+    )
+    entity_a_id = resp_a.json()["id"]
+    entity_b_id = resp_b.json()["id"]
+
+    from biomatcad_api.models.scientific_data import ScientificSource, SourceType
+
+    source = ScientificSource(name="Fonte de teste conflito", source_type=SourceType.DATABASE)
+    db_session.add(source)
+    db_session.flush()
+
+    request = ScientificIngestionRequest(
+        organization_id=None,
+        requested_by_user_id=admin.id,
+        connector_id="pubchem_pug_rest",
+        source_id=source.id,
+        external_ids=["9999"],
+        dry_run=False,
+        status=IngestionRequestStatus.PARTIAL,
+    )
+    db_session.add(request)
+    db_session.flush()
+
+    conflict = IngestionConflictModel(
+        ingestion_request_id=request.id,
+        external_record_id="9999",
+        conflict_type=IngestionConflictType.INCHIKEY_SHARED_WITH_OTHER_ENTITY,
+        entity_id=entity_a_id,
+        other_entity_id=entity_b_id,
+        details={"nota": "conflito de teste"},
+    )
+    db_session.add(conflict)
+    db_session.commit()
+
+    resp_a_conflicts = client.get(f"/api/v1/scientific-entities/{entity_a_id}/conflicts", headers=headers)
+    resp_b_conflicts = client.get(f"/api/v1/scientific-entities/{entity_b_id}/conflicts", headers=headers)
+    assert resp_a_conflicts.status_code == 200
+    assert resp_b_conflicts.status_code == 200
+    assert len(resp_a_conflicts.json()) == 1
+    assert len(resp_b_conflicts.json()) == 1
+    assert resp_a_conflicts.json()[0]["id"] == conflict.id
+    assert resp_b_conflicts.json()[0]["id"] == conflict.id

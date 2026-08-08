@@ -9,6 +9,7 @@ import { BrandLogo } from "../brand/BrandLogo";
 const REAL_WORKSPACES = [
   { label: "Materiais", to: "/app/materials" },
   { label: "Projetos BioMatCAD", to: "/app/projects" },
+  { label: "Dados científicos", to: "/app/scientific-data" },
   { label: "Observabilidade", to: "/app/observability" },
 ];
 
