@@ -373,6 +373,14 @@ class PropertyObservation(Base):
     related_supplier_product_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("supplier_products.id"), nullable=True
     )
+    # Incremento 2.3, Rodada 2 (Fase C): rastreia uma observação criada por um conector de
+    # ingestão até o snapshot EXATO e imutável do payload de onde ela veio (ver
+    # models/scientific_ingestion.py::RawSourceRecord). Sempre NULL para observações
+    # criadas manualmente/via seed -- coluna aditiva, sem impacto em nenhum comportamento
+    # já testado da Rodada 1.
+    raw_source_record_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("raw_source_records.id"), nullable=True
+    )
 
     review_status: Mapped[CurationState] = mapped_column(
         Enum(CurationState, native_enum=False), nullable=False, default=CurationState.DRAFT

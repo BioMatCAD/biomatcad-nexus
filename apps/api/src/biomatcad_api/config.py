@@ -66,6 +66,28 @@ class Settings(BaseSettings):
     # implementaria -- trocar de adaptador não deve exigir mudança nos routers/serviços.
     artifact_storage_dir: str = Field(default="./data/artifacts")
 
+    # --- Conector PubChem (Incremento 2.3, Rodada 2) ------------------------------------------
+    pubchem_contact_email: str | None = Field(default=None)
+    pubchem_user_agent: str = Field(
+        default="BioMatCADNexus-ResearchConnector/0.1 (pesquisa nao-clinica; piloto Incremento 2.3)"
+    )
+    pubchem_rate_limit_per_second: float = Field(default=2.0)
+    pubchem_timeout_seconds: float = Field(default=15.0)
+    pubchem_max_retries: int = Field(default=3)
+    pubchem_max_cids_per_request: int = Field(default=10)
+
+    @field_validator("pubchem_rate_limit_per_second")
+    @classmethod
+    def validate_pubchem_rate_limit(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("PUBCHEM_RATE_LIMIT_PER_SECOND deve ser positivo.")
+        if v > 4.0:
+            raise ValueError(
+                "PUBCHEM_RATE_LIMIT_PER_SECOND não pode exceder 4 requisições/segundo "
+                "(limite absoluto desta rodada, ver docs/data/connectors/PUBCHEM_CONNECTOR.md)."
+            )
+        return v
+
     @field_validator("database_url")
     @classmethod
     def validate_database_url(cls, v: str, info) -> str:  # type: ignore[no-untyped-def]

@@ -34,6 +34,14 @@ from biomatcad_api.models.scientific_data import (
     Supplier,
     SupplierProduct,
 )
+from biomatcad_api.models.scientific_ingestion import (
+    IngestionConflict,
+    IngestionConflictType,
+    IngestionRequestStatus,
+    ParsingStatus,
+    RawSourceRecord,
+    ScientificIngestionRequest,
+)
 from biomatcad_api.models.user import User
 
 __all__ = [
@@ -51,6 +59,9 @@ __all__ = [
     "GeometryJob",
     "GeometryRecipe",
     "IdentifierVerificationStatus",
+    "IngestionConflict",
+    "IngestionConflictType",
+    "IngestionRequestStatus",
     "IngestionRun",
     "IngestionStatus",
     "JobStatus",
@@ -60,9 +71,11 @@ __all__ = [
     "OperationalState",
     "OperationalStateKind",
     "Organization",
+    "ParsingStatus",
     "ProjectStatus",
     "PropertyDefinition",
     "PropertyObservation",
+    "RawSourceRecord",
     "RecipeStatus",
     "RedistributionStatus",
     "ReviewDecision",
@@ -71,6 +84,7 @@ __all__ = [
     "ScientificEntity",
     "ScientificEntityType",
     "ScientificIdentifier",
+    "ScientificIngestionRequest",
     "ScientificReference",
     "ScientificSource",
     "SourceType",
