@@ -220,6 +220,70 @@ repetição de prova. Segurança, testes de resiliência e critério de aceite/e
 permanecem genuinamente pendentes e são retomados nesta rodada sob as Fases C, D, I e J deste
 plano (mais amplo e mais preciso que o plano original do launcher).
 
+## Fase G -- Determinação do gate Windows complementar (rodada de fechamento do Incremento 2.2)
+
+Objetivo desta fase: decidir, com base em evidência e não em suposição, se alguma prova real no
+Windows ainda falta antes do empacotamento final v2.2 -- sem repetir a matriz geométrica
+Voronoi/Gyroid, a reprodução dos hashes golden, o E2E principal ou o E2E completo do
+visualizador 3D, todos já aprovados (ver tabela da Fase A acima).
+
+**Determinação: nenhum gate Windows complementar é necessário para fechar o Incremento 2.2.**
+
+Justificativa, item a item, cobrindo tudo que mudou nas Fases B-F desta rodada de fechamento
+em relação ao commit-base `922cbae` (último commit com gate Windows aprovado):
+
+- **Fase B (`DesignAdvisor` concreto)**: modulo Python novo e isolado
+  (`design_advisor_rule_based.py`), sem nenhuma dependência de geometria, PicoGK, worker C# ou
+  UI. Toda a superfície é determinística e testada localmente (33 testes, mutation-tested). Não
+  há comportamento observável no Windows que dependa de execução real além do que já é coberto
+  pela suíte Python padrão.
+
+- **Fase C (segurança do ambiente de pesquisa)**: validador de CORS, testes de path traversal,
+  sanitização de log, comportamento seguro em falha -- tudo backend Python puro, sem nenhuma
+  dependência de SO. A suíte de 12 testes novos roda de forma idêntica em Linux (sandbox) e
+  Windows (mesmo interpretador Python, mesmas bibliotecas).
+
+- **Fase D (resiliência)**: as duas mudanças de comportamento real (recomputação independente do
+  SHA-256 do STL, tratamento de STL vazio como falha) alteram apenas *como a API reage* ao que o
+  worker já devolve -- não alteram o worker C#/PicoGK, que permanece intocado nesta rodada. Para
+  qualquer execução real já aprovada (golden recipes, gate final), o worker sempre produziu um
+  STL não vazio cujo hash reportado bate com o hash real dos bytes gravados -- ou seja, o novo
+  caminho de recomputação simplesmente confirma o mesmo hash que já era confirmado antes, sem
+  mudar o resultado observável dessas execuções já aprovadas. Os novos caminhos de falha
+  (`WORKER_CHECKSUM_MISMATCH`, `WORKER_PARTIAL_OUTPUT`) só são exercitados por cenários de
+  injeção de defeito (dublês de worker no Python), nunca pelo worker PicoGK real nas condições já
+  testadas. O terceiro item (dispatcher sobrevive a indisponibilidade transitória do banco) é
+  controle de fluxo Python em torno de uma exceção do SQLAlchemy -- também independente de SO.
+  Nenhum desses três itens exige uma nova execução do worker real no Windows para ser considerado
+  provado; a suíte de 259 testes (Postgres real efêmero) já constitui a prova completa.
+
+- **Fase E (triagem de dependências)**: mudanças restritas a `package-lock.json` do frontend
+  (4 patches de dependências transitivas/de build). Build de produção e `build:pages` já
+  reverificados no sandbox sem erro; nenhuma mudança de comportamento em tempo de execução do
+  navegador.
+
+- **Fase F (gates completos)**: exclusivamente correções de estilo/lint (ruff, mypy, bits de
+  execução de arquivo) e confirmação de que os gates existentes (build do worker C#, 111 testes
+  .NET, 10 scripts PowerShell) continuam passando. Nenhuma mudança de comportamento.
+
+Em resumo: nenhuma das Fases B-F desta rodada tocou geometria, golden recipes, `TopologyProviders`,
+PicoGK ou o código C# do worker, e nenhuma introduziu comportamento novo de UI que exigisse uma
+nova cobertura Playwright real no Windows. Os quatro gates Windows já aprovados anteriormente
+(matriz Voronoi/Gyroid, hashes golden Gyroid, E2E principal via gate final real, E2E completo do
+visualizador 3D 15/15) continuam válidos e suficientes como evidência para o Incremento 2.2.
+
+Caso o usuário deseje, por precaução adicional (não por exigência técnica), uma reexecução do
+gate final real (`Run-FinalGate.ps1`) para reconfirmar que as mudanças de checksum/STL-vazio da
+Fase D não regrediram o caminho feliz no worker PicoGK real, o comando exato já documentado
+permanece válido e não foi alterado nesta rodada:
+
+```powershell
+.\scripts\Run-FinalGate.ps1 -RepoPath <caminho-do-repo> -BundlePath <caminho-do-bundle>
+```
+
+Esta reexecução é opcional/confirmatória, não bloqueante -- o empacotamento final v2.2 pode
+prosseguir sem ela, dado que nada no diff desta rodada altera o caminho feliz já comprovado.
+
 ## Dependências deferidas (Incremento 2.1.1)
 
 17 vulnerabilidades npm de **tooling de desenvolvimento apenas** (ESLint 8.x e sua cadeia —
