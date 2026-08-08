@@ -1,9 +1,12 @@
 """Testes do conector PubChem PUG REST (Incremento 2.3, Rodada 2 -- Fases E, F, G, J).
 
 Nenhum destes testes toca a rede -- `PubChemConnector.fetch()` é exercitado com um
-`AllowlistedHttpsClient` fake (monkeypatch em `get`) que devolve payloads fixos, exatamente
-como o formato real documentado do PubChem PUG REST. Testes de rede real (opcionais) ficam em
-docs/data/connectors/PUBCHEM_CONNECTOR.md e no roteiro PowerShell -- nunca nesta suíte padrão.
+`AllowlistedHttpsClient` fake (monkeypatch em `get`) que devolve payloads `synthetic_contract_fixture`
+(ver REGRAS ADICIONAIS regra 2): imitam o FORMATO documentado do PubChem PUG REST, mas nunca
+foram capturados de uma resposta real (a rede pubchem.ncbi.nlm.nih.gov está bloqueada neste
+sandbox -- ver docs/data/connectors/PUBCHEM_CONNECTOR.md). A única fonte de verdade sobre
+comportamento real de rede é o roteiro scripts/Run-PubChemPilotWindows.ps1, rodando no Windows
+do usuário, fora deste sandbox.
 """
 from __future__ import annotations
 
@@ -24,9 +27,15 @@ from biomatcad_api.services.connectors.registry import get_connector, list_conne
 
 
 def _aspirin_payload() -> dict:
-    # Formato real da resposta PUG REST para
-    # /rest/pug/compound/cid/2244/property/.../JSON (aspirina, CID 2244) -- valores reais
-    # publicados pelo PubChem, usados aqui apenas como fixture, não como consulta em tempo real.
+    # synthetic_contract_fixture: NUNCA capturado de uma resposta real do PubChem nesta sessão
+    # (a rede pubchem.ncbi.nlm.nih.gov está bloqueada neste sandbox -- ver REGRAS ADICIONAIS
+    # regra 1/2 e docs/data/connectors/PUBCHEM_CONNECTOR.md). Esta é uma fixture SINTÉTICA que
+    # imita o FORMATO documentado da resposta PUG REST (chaves/estrutura do PropertyTable);
+    # os valores numéricos/estruturais (peso molecular, SMILES, InChI/InChIKey da aspirina) são
+    # fatos químicos publicamente conhecidos e verificáveis, usados apenas como conteúdo
+    # plausível de teste -- NUNCA atribuir este payload ao PubChem como se fosse uma resposta
+    # oficial real capturada; apenas o roteiro Windows (Run-PubChemPilotWindows.ps1), rodando
+    # fora deste sandbox, pode produzir/preservar uma resposta oficial real verificável.
     return {
         "PropertyTable": {
             "Properties": [
