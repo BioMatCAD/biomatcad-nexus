@@ -2430,3 +2430,79 @@ das 12 falhas originais, todas foram genuinamente diagnosticadas (nunca presumid
 com testes de regressão específicos (vários confirmados via mutation testing real, `git stash`),
 e agora confirmadas em execução real. Pendências que ainda impedem o fechamento formal do
 Incremento 2.2 estão listadas na seção correspondente do `ROADMAP.md`.
+
+## 30. Fechamento do Incremento 2.2 -- evidência de sandbox das Fases B-F (2026-08-07)
+
+Rodada de fechamento a partir do commit-base `922cbae`. Toda a evidência abaixo foi produzida e
+verificada dentro do sandbox Linux (sem PicoGK real) -- ver `ROADMAP.md` seção "Fase G" para a
+justificativa de por que nenhuma reexecução Windows adicional é necessária para nenhum destes
+itens.
+
+**Fase B -- `DesignAdvisor` concreto** (commit `2486518`):
+```
+apps/api/tests/test_design_advisor_rule_based.py -- 33 passed
+```
+Cobre: entradas válidas (Gyroid/Voronoi), material ausente, resolução ausente, limites da faixa
+de porosidade das golden recipes, determinismo, ausência de alegação clínica, rastreabilidade de
+regra, e o gap fechado por mutation testing (`material.source == ""`).
+
+**Fase C -- segurança do ambiente de pesquisa** (commit `61e3753`):
+```
+apps/api/tests/test_security_hardening.py -- 12 passed
+```
+Cobre: path traversal (`LocalStorageAdapter`), prevenção de command injection (spy em
+`subprocess.Popen`), sanitização de log (`RedactSensitiveFilter`), comportamento seguro em falha
+(`TestClient(app, raise_server_exceptions=False)`), e 3 testes de CORS (incluindo o gap real
+encontrado e corrigido: rejeição de `"*"` fora de development/test).
+
+**Fase D -- resiliência e recuperação de falha** (commit `e4429e7`):
+```
+apps/api/tests/test_resilience_recovery.py -- 6 passed (novo)
+apps/api/tests/test_geometry_dispatcher_continuous.py -- 2 novos passed (sobrevivência a DBAPIError)
+```
+Mais 3 test doubles corrigidos (`test_geometry_job_orchestration.py`,
+`test_jobs_artifacts_api.py`, `test_worker_timeout_recovery.py`) para computar
+`sha256_of_bytes()` real em vez de hash fixo fake, após a recomputação independente de checksum
+ter passado a rejeitar divergências. Todas as 4 correções de produção (recuperação de órfão via
+heartbeat, STL vazio como falha, checksum divergente como falha, sobrevivência a indisponibilidade
+transitória do banco) confirmadas por mutation testing manual.
+
+**Fase E -- triagem `npm audit`** (commit `7469f88`):
+```
+npm audit (antes):  11 avisos (5 moderate, 5 high, 1 critical)
+npm audit fix (sem --force): brace-expansion 1.1.17->1.1.18, js-yaml 4.3.0->4.3.1,
+                              nanoid 3.3.16->3.3.18, fast-uri 3.1.4->3.1.5
+npm audit (depois): 7 avisos (5 moderate, 1 high, 1 critical)
+
+tsc --noEmit:            sem erros
+eslint . --max-warnings 0: sem erros/avisos
+vitest run:               24 arquivos, 128/128 passed
+npm run build:            OK (dist/, ~883 KB / ~245 KB gzip)
+npm run build:pages:      OK
+```
+
+**Fase F -- gates completos** (commits `f98a66e`, `93ffa27`):
+```
+--- Backend (apps/api) ---
+ruff check .              -> All checks passed! (25 avisos pré-existentes corrigidos)
+mypy src/ scripts/         -> Success: no issues found in 57 source files (2 erros pré-existentes corrigidos)
+pytest (Postgres real efêmero via pgserver): 259 passed, 2 skipped, exit 0
+
+--- Frontend (apps/web) ---
+tsc --noEmit / eslint / vitest 128/128 / build / build:pages: todos OK (reconfirmados pós-lint)
+npx playwright test --list -> 15 testes listados em 2 arquivos (vertical.spec.ts, viewer.spec.ts)
+
+--- Worker C# (apps/geometry-worker) ---
+dotnet build -c Release                              -> 0 Warning(s), 0 Error(s)
+dotnet test BioMatCadGeometryWorker.Tests              -> 100/100 passed
+dotnet test BioMatCadGeometryWorker.TopologyProviderTests -> 11/11 passed
+
+--- Scripts (10 arquivos .ps1) ---
+PSParser (PowerShell 7.4.6 portable, obtido apenas para esta verificação de sintaxe):
+  10/10 arquivos parseiam sem erro de sintaxe.
+Auditoria manual: nenhum caminho absoluto hardcoded não-substituível; todo Stop-Process/kill
+  restrito a um Id/PID especificamente rastreado pelo próprio script.
+```
+
+Nenhum destes resultados foi declarado aprovado sem execução real correspondente no sandbox.
+Nenhum teste foi enfraquecido ou removido nestas fases.

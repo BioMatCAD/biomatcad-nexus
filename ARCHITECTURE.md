@@ -297,7 +297,16 @@ observabilidade real, e três preparações arquiteturais auditáveis:
   (listagem de providers compatíveis via o registro real do TopologyProvider, comparação
   aritmética de métricas contra objetivos, montagem de um registro de decisão manual completo
   com `algorithm_name` sempre `"manual-researcher-decision"`). Nenhuma alegação de equivalência
-  a softwares de IA autônoma proprietários é feita.
+  a softwares de IA autônoma proprietários é feita. **Atualização (fechamento do Incremento
+  2.2, Fase B)**: implementação concreta real do `DesignAdvisor` adicionada em módulo separado
+  (`apps/api/src/biomatcad_api/services/design_advisor_rule_based.py`,
+  `RuleBasedDesignAdvisor`, `RULES_VERSION="1.0.0"`), registrada de forma explícita e
+  não-reflexiva (mesmo padrão do `TopologyProviderRegistry`), sem alterar o `Protocol` original
+  nem o teste de regressão que impede implementação concreta dentro do módulo de contratos. Só
+  emite recomendação/alerta com justificativa rastreável, nível de confiança metodológica e
+  aviso fixo de ausência de validação clínica -- nunca uma decisão clínica, nunca uma
+  propriedade de material inventada. Ver `IMPLEMENTATION_STATUS.md` seção "Fechamento do
+  Incremento 2.2" para o detalhamento completo e `REQUIREMENTS_MATRIX.md` seção I.
 - **Identidade visual oficial**: logomarca original preservada byte a byte
   (`apps/web/public/brand/biomatcad-nexus-logo-original.png`), derivados gerados por operações
   não-destrutivas (remoção de fundo por conectividade de borda, recorte, redimensionamento) —

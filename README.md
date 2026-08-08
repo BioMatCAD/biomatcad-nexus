@@ -292,4 +292,12 @@ npm run build:pages   # build estático para GitHub Pages (dados sintéticos ape
 - `docs/examples/WINDOWS_EXECUTION_KIT.md` — guia para o usuário executar o worker real em
   Windows x64 e devolver os resultados.
 - `docs/security/DEPENDENCY_AUDIT_2.1.1.md` — auditoria de dependências e decisões registradas.
-- `TEST_EVIDENCE.md` — log de evidência de teste, incluindo a seção do Incremento 2.1.1.
+- `docs/security/DEPENDENCY_AUDIT_2.2.md` — triagem dos 11 avisos de `npm audit` do fechamento
+  do Incremento 2.2 (4 corrigidos, 7 formalmente deferidos com análise de alcançabilidade).
+- `docs/security/RESEARCH_SECURITY_POSTURE.md` — postura de segurança do ambiente de pesquisa
+  (14 itens auditados); disclaimer explícito de que isto não é conformidade clínica, LGPD
+  completa, segurança hospitalar ou certificação regulatória.
+- `apps/api/src/biomatcad_api/services/design_advisor_rule_based.py` — implementação concreta e
+  determinística do `DesignAdvisor` (regras versionadas, nunca uma decisão clínica).
+- `TEST_EVIDENCE.md` — log de evidência de teste, incluindo a seção do Incremento 2.1.1 e a
+  seção 30 (fechamento do Incremento 2.2).

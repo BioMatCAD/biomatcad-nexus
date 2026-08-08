@@ -556,6 +556,133 @@ introduzido nesta ou em rodadas anteriores. Recomendação registrada para um pr
 a fixture `engine` deveria fazer `TRUNCATE`/`DROP SCHEMA CASCADE` no **início** da sessão de
 testes (não só no fim), para não depender de um teardown limpo da execução anterior.
 
+## Fechamento do Incremento 2.2 Alpha Pesquisa (Fases B-G, branch `incremento-2.2-alpha-pesquisa`)
+
+Rodada de fechamento a partir do commit-base `922cbae` (E2E completo do visualizador 3D já
+aprovado, 15/15). Objetivo: concluir os itens genuinamente pendentes (ver `ROADMAP.md` seção
+"Reconciliação de pendências -- Fase A") sem repetir nenhuma prova já aprovada e sem antecipar o
+launcher/instalador clínico.
+
+| Item | Status | Evidência |
+|---|---|---|
+| `DesignAdvisor` concreto (Fase B) | **Real** | `apps/api/src/biomatcad_api/services/design_advisor_rule_based.py`; `apps/api/tests/test_design_advisor_rule_based.py` (33 testes) |
+| Segurança do ambiente de pesquisa, 14 itens (Fase C) | **Auditado e testado; 1 gap real corrigido (CORS wildcard)** | `apps/api/tests/test_security_hardening.py` (12 testes); `docs/security/RESEARCH_SECURITY_POSTURE.md` |
+| Resiliência e recuperação de falha, itens genuinamente novos (Fase D) | **Real** | `apps/api/tests/test_resilience_recovery.py` (6 testes novos) + 2 testes novos em `test_geometry_dispatcher_continuous.py` + 3 test doubles corrigidos |
+| Triagem `npm audit`, 11 avisos (Fase E) | **4/11 corrigidos, 7/11 formalmente deferidos com mitigação** | `docs/security/DEPENDENCY_AUDIT_2.2.md` |
+| Gates completos -- backend/frontend/worker/scripts (Fase F) | **Todos executados e verificados** | `ruff check`/`mypy` limpos; 259 passed/2 skipped (API); 128/128 (frontend); 111/111 (.NET worker); 10/10 scripts PowerShell com sintaxe válida |
+| Determinação de gate Windows complementar (Fase G) | **Nenhum necessário** | `ROADMAP.md` seção "Fase G"; os 4 gates Windows já aprovados (matriz Voronoi/Gyroid, hashes golden, E2E principal, E2E do visualizador) permanecem válidos e suficientes |
+
+### `DesignAdvisor` concreto (Fase B) -- detalhamento
+
+O `Protocol DesignAdvisor` (`computational_intelligence.py`) permanece exatamente como estava,
+incluindo o teste de regressão que barra qualquer implementação concreta *nesse mesmo módulo*
+(`test_design_advisor_e_apenas_um_protocolo_sem_implementacao_concreta`). A implementação real
+(`RuleBasedDesignAdvisor`, `ADVISOR_ID="rule-based-v1"`, `RULES_VERSION="1.0.0"`) vive em um
+módulo novo e separado, registrada explicitamente em `_ADVISOR_REGISTRY` -- o mesmo princípio de
+não-descoberta-automática já usado pelo `TopologyProviderRegistry` (nenhum plugin/reflexão).
+
+Entradas aceitas: domínio geométrico, topologia, porosidade alvo, resolução, métricas já
+calculadas, e material apenas quando explicitamente disponível (nunca inferido). Saída sempre
+estruturada: recomendação, justificativas rastreáveis, lista de regras disparadas por ID,
+nível de confiança metodológica, limitações, campos ausentes, e um aviso fixo e não removível
+de ausência de validação clínica (`NO_CLINICAL_VALIDATION_WARNING`). O módulo nunca inventa uma
+propriedade de material que não foi fornecida, nunca prescreve medicação/tratamento/indicação
+clínica, e não tem nenhuma dependência obrigatória de IA externa (as 5 regras são determinísticas
+e versionadas em código, não chamadas a modelo).
+
+Cobertura de teste (33 cenários): entradas válidas para Gyroid e Voronoi, dados incompletos
+(material ausente, resolução ausente), casos de limite da faixa de porosidade das golden
+recipes (55-70%), determinismo (mesma entrada -> mesma saída, byte a byte), ausência de qualquer
+alegação clínica em qualquer caminho de saída, rastreabilidade de regra (cada recomendação aponta
+exatamente quais regras dispararam), e um gap de cobertura real fechado via mutation testing
+(`material.source == ""` não era distinguido de material ausente antes do teste
+`test_material_com_source_vazia_nao_e_reconhecido_como_disponivel` ser adicionado).
+
+### Segurança do ambiente de pesquisa (Fase C) -- detalhamento
+
+Auditados os 14 itens pedidos. Treze já eram tecnicamente sólidos por construção (autenticação/
+autorização, segregação entre organizações e projetos em múltiplos endpoints, proteção de
+artefato/download sempre via `Authorization: Bearer`, ausência de segredo hardcoded, sanitização
+de log via `RedactSensitiveFilter`, validação de caminho em `LocalStorageAdapter`, ausência de
+`shell=True`/concatenação de string em qualquer chamada de subprocesso do worker, controle de
+upload/download, auditoria de ação via `AuditEvent`, comportamento seguro em falha), mas sem
+teste dedicado que provasse isso de forma permanente e repetível -- agora cobertos por
+`test_security_hardening.py` (12 testes).
+
+Um gap real de aplicação foi encontrado: o validador de configuração não rejeitava `cors_allowed_origins`
+contendo `"*"` fora de `LOCAL_NETWORK`/`STAGING`/`PRODUCTION` -- corrigido com um novo
+`field_validator` em `config.py`, confirmado por mutation testing (desabilitar o validador faz o
+teste correspondente falhar de verdade).
+
+`docs/security/RESEARCH_SECURITY_POSTURE.md` documenta os 14 itens com evidência/status e um
+disclaimer explícito: isto **não** é conformidade clínica, LGPD completa, segurança hospitalar
+ou certificação regulatória de nenhum tipo -- é a postura mínima coerente para um ambiente de
+pesquisa que nunca deve receber dado clínico real. RBAC/ABAC completo (17 perfis, OIDC, MFA)
+permanece `PM-ONLY-04e/f/g/h`, deliberadamente fora de escopo.
+
+### Resiliência e recuperação de falha (Fase D) -- detalhamento
+
+Auditados os 17 itens pedidos contra a suíte já existente. Catorze já estavam cobertos por
+incrementos anteriores (claim atômico via `SELECT FOR UPDATE SKIP LOCKED`, cancelamento real com
+kill de processo, timeout, limites computacionais, idempotência, isolamento entre organizações,
+encerramento gracioso, ausência de processo órfão -- confirmado empiricamente nas execuções
+Windows). Três gaps reais foram encontrados e corrigidos:
+
+1. **Recuperação de job órfão via heartbeat** (`recover_orphaned_jobs`) já existia e já estava
+   conectada ao ciclo do dispatcher (`process_queued_jobs`), mas nunca tinha um teste direto --
+   adicionado (heartbeat expirado é recolocado na fila; heartbeat recente é ignorado; jobs
+   `QUEUED`/`SUCCEEDED` nunca são tocados).
+2. **STL vazio do worker** era silenciosamente aceito como artefato "concluído" -- agora é
+   classificado como falha real (`WORKER_PARTIAL_OUTPUT`), nunca persistido como sucesso.
+3. **Checksum autorreportado pelo worker era confiado cegamente** -- `dispatch_job()` agora
+   recalcula o SHA-256 real dos bytes efetivamente gravados e, se o worker reportou um valor
+   diferente, marca o job como falho (`WORKER_CHECKSUM_MISMATCH`) em vez de persistir integridade
+   não verificada. O manifesto e o registro de `Artifact` sempre usam o hash recalculado, nunca
+   o autorreportado.
+4. **Dispatcher contínuo não sobrevivia a indisponibilidade transitória do Postgres**
+   (`DBAPIError` derrubava o processo inteiro) -- agora tratado como um ciclo vazio (mesmo
+   backoff geométrico já existente), com um evento de log estruturado
+   (`database_temporarily_unavailable`).
+
+As quatro correções foram confirmadas por mutation testing manual (reintroduzir o defeito,
+observar a falha do teste correspondente, restaurar o código original com `diff` byte a byte).
+Nenhuma delas depende de comportamento específico do Windows -- são caminhos de controle Python
+puros, testados contra um Postgres real efêmero (`pgserver`) no sandbox.
+
+### Triagem de dependências `npm audit` (Fase E) -- detalhamento
+
+Ver `docs/security/DEPENDENCY_AUDIT_2.2.md` para a análise completa item a item. Resumo: dos 11
+avisos (5 moderados, 5 altos, 1 crítico) já observados em execução real no Windows, 4 foram
+corrigidos nesta rodada com atualização de PATCH sem mudança de comportamento
+(`brace-expansion`, `js-yaml`, `nanoid`, `fast-uri`), verificados com a suíte completa do
+frontend (typecheck, eslint, 128/128 testes, build normal e GitHub Pages). Os 7 restantes
+exigem todos mudança de versão major -- cada um analisado individualmente quanto à
+alcançabilidade real e formalmente adiado com mitigação documentada (nunca mascarado, nunca
+declarado "sem risco" só por os testes passarem).
+
+### Gates completos no sandbox (Fase F) -- detalhamento
+
+Backend: `ruff check` e `mypy src/ scripts/` totalmente limpos (25 avisos + 2 erros
+pré-existentes corrigidos, nenhum relacionado às Fases B-E, nenhuma mudança de comportamento);
+suíte completa (259 passed, 2 skipped) contra Postgres real efêmero. Frontend: `tsc --noEmit`,
+`eslint . --max-warnings 0`, `vitest run` (128/128), `npm run build` e `npm run build:pages`
+(ambos sem erro), `playwright test --list` (15 testes confirmados nos 2 arquivos de spec).
+Worker C#: `dotnet build -c Release` (0 Warning(s), 0 Error(s)); `BioMatCadGeometryWorker.Tests`
+(100/100) e `BioMatCadGeometryWorker.TopologyProviderTests` (11/11). Scripts: os 10 arquivos
+PowerShell do repositório parseiam sem erro de sintaxe (via `PSParser`/PowerShell 7.4.6);
+auditoria confirma que nenhum caminho absoluto hardcoded é não-substituível (todos são exemplos
+de documentação ou valores padrão de parâmetro) e que todo encerramento de processo é restrito
+ao PID rastreado pelo próprio script.
+
+### Determinação do gate Windows complementar (Fase G) -- detalhamento
+
+Ver `ROADMAP.md` seção "Fase G" para a justificativa completa item a item. Conclusão: nenhuma
+das mudanças das Fases B-F toca geometria, golden recipes, `TopologyProviders`, PicoGK ou o
+código C# do worker, nem introduz comportamento novo de UI -- os 4 gates Windows já aprovados
+(matriz Voronoi/Gyroid, hashes golden Gyroid, E2E principal via gate final real, E2E completo do
+visualizador 3D 15/15) permanecem válidos e suficientes. Nenhum novo gate Windows obrigatório foi
+criado nesta rodada.
+
 ## Legenda
 
 - **Real**: código existe, foi executado nesta sessão, com evidência de teste/execução abaixo.

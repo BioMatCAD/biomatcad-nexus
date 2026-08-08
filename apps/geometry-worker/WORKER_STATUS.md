@@ -816,3 +816,33 @@ infraestrutura do próprio roteiro (frontend não iniciado), não uma regressão
 do roteiro falhou **somente** por esse defeito de infraestrutura. A reconfirmação do E2E
 corrigido (via `Run-E2EOnly.ps1` ou uma nova execução de `Run-VoronoiWindowsValidation.ps1`)
 ainda depende de uma execução real do usuário -- não declarada aprovada até essa confirmação.
+
+## 16. Fechamento do Incremento 2.2 -- confirmação de que o worker C# não foi tocado (Fases B-G)
+
+Rodada de fechamento do Incremento 2.2 (branch `incremento-2.2-alpha-pesquisa`, a partir do
+commit-base `922cbae`). Nenhum arquivo `.cs` deste projeto foi alterado nas Fases B-G desta
+rodada -- confirmado via `git diff --stat` restrito a `apps/geometry-worker/` antes de cada
+commit. As mudanças de resiliência da Fase D (recomputação independente do SHA-256 do STL,
+tratamento de STL vazio como falha) vivem inteiramente do lado do backend Python
+(`geometry_job_service.py`), em como a API reage ao que o worker devolve -- não no worker em si.
+
+Gate completo (Fase F) reexecutado sobre o worker sem nenhuma mudança de código, apenas para
+confirmar que nada regrediu:
+
+```
+dotnet build -c Release
+  -> Build succeeded. 0 Warning(s). 0 Error(s).
+
+dotnet test -c Release --no-build  (BioMatCadGeometryWorker.Tests)
+  -> Passed! Failed: 0, Passed: 100, Skipped: 0, Total: 100
+
+dotnet test -c Release --no-build  (BioMatCadGeometryWorker.TopologyProviderTests)
+  -> Passed! Failed: 0, Passed: 11, Skipped: 0, Total: 11
+```
+
+Estes dois projetos de teste cobrem lógica pura (cálculo/calibração/contratos/registro de
+providers) e não dependem do runtime nativo PicoGK -- por isso rodam integralmente no sandbox
+Linux. A geração real de geometria via `Library.Go` continua exigindo execução Windows,
+já aprovada separadamente na matriz golden recipes (seção 15 acima) e não repetida nesta rodada
+(ver `ROADMAP.md` seção "Fase G" para a justificativa completa de por que nenhum novo gate
+Windows é necessário para o worker nesta rodada de fechamento).
