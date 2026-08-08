@@ -81,4 +81,32 @@ export default async function globalSetup(): Promise<void> {
     console.error("[e2e global-setup] Falha ao semear usuário/job E2E:", err);
     throw err;
   }
+
+  // Adendo de Interface Científica Mínima (Incremento 2.3, Rodada 2, Fase R) --
+  // scientific-data.spec.ts precisa de: (a) um usuário researcher e um usuário admin (para
+  // provar que o painel PubChem só aparece para admin), e (b) entidades científicas/
+  // observações/proveniência/conflito sintéticos já persistidos no Postgres real. Os dois
+  // módulos abaixo já existem desde as Rodadas 1/2 (Fases E e C respectivamente) e já são
+  // idempotentes (get-or-create, nunca duplicam nem tocam dado de outro usuário/organização) --
+  // reaproveitados aqui em vez de inventar um terceiro script de seed científico exclusivo
+  // para E2E. Nenhuma chamada de rede real (PubChem ou qualquer outra) acontece em nenhum dos
+  // dois: são inserções diretas via SQLAlchemy.
+  try {
+    const seedUsersOutput = execFileSync(pythonBin, ["-m", "biomatcad_api.seed"], {
+      cwd: apiDir,
+      env: process.env,
+      encoding: "utf-8",
+    });
+    console.log("[e2e global-setup] seed (usuários demo/admin):", seedUsersOutput.trim());
+
+    const seedScientificOutput = execFileSync(pythonBin, ["-m", "biomatcad_api.seed_scientific_data"], {
+      cwd: apiDir,
+      env: process.env,
+      encoding: "utf-8",
+    });
+    console.log("[e2e global-setup] seed científico:", seedScientificOutput.trim());
+  } catch (err) {
+    console.error("[e2e global-setup] Falha ao semear dados científicos sintéticos:", err);
+    throw err;
+  }
 }
