@@ -184,6 +184,42 @@ incremento concluído:
    risco nulo/baixo no `dist/` de produção) ou achados novos, e decidir upgrades seguros --
    ANTES do empacotamento final v2.2 (item 4 acima).
 
+## Reconciliação de pendências -- Fase A (rodada de fechamento do Incremento 2.2)
+
+Auditoria integral realizada antes de qualquer alteração de código nesta rodada (commit-base
+`922cbae`), cobrindo `ROADMAP.md`, `IMPLEMENTATION_STATUS.md`, `REQUIREMENTS_MATRIX.md`,
+`TEST_EVIDENCE.md`, `apps/geometry-worker/WORKER_STATUS.md`, `docs/architecture/`,
+`docs/security/DEPENDENCY_AUDIT_2.1.1.md`, `docs/regulatory/README.md`,
+`docs/threat-model/README.md`, os relatórios das matrizes Windows e o histórico Git. Classifica
+cada pendência para não repetir prova já aprovada e não deixar nada em aberto por omissão.
+
+| # | Item | Classificação | Evidência já existente |
+|---|---|---|---|
+| 1 | Visualizador 3D + cobertura E2E completa | **JÁ APROVADA** | `TEST_EVIDENCE.md` seções 26-29; 15/15, exit code 0, commit `7719aeb`/`922cbae`. Não repetir. |
+| 2 | `VoronoiTopologyProvider` real (matriz científica) | **JÁ APROVADA** | `TEST_EVIDENCE.md` seção 23; Windows real `voronoi-validation-staged-20260806-195638`. Não repetir. |
+| 3 | Reprodução dos hashes golden Gyroid ("Seção 11" do plano do launcher) | **JÁ APROVADA por evidência equivalente** | As 3 golden recipes de regressão Gyroid (`block-gyroid-v1`, `cylinder-gyroid-v1`, `preview-gyroid-low-res-v1`) já rodaram 2x cada com o worker PicoGK real no Windows, com os 3 SHA-256 literais registrados e determinismo byte a byte confirmado (`WORKER_STATUS.md` seção 15, `TEST_EVIDENCE.md` seção 23). Não há necessidade de uma nova reprodução -- o requisito já está integralmente satisfeito. |
+| 4 | E2E "fluxo não pré-semeado" ("Seção 10" do plano do launcher) | **JÁ APROVADA por evidência equivalente e mais forte** | O "gate final real" (`Run-FinalGate.ps1`, `TEST_EVIDENCE.md` seção 14, aprovado no Windows) exercita API→fila→worker PicoGK **real** (não `FakeWorkerClient`)→STL→Artifact/Manifest→download de ponta a ponta, sem nenhum job pré-semeado. Isso satisfaz o requisito de "fluxo real não pré-semeado" com rigor igual ou maior do que um spec Playwright equivalente faria (o gate final usa o worker de verdade; os specs Playwright usam seed só para não depender do PicoGK real dentro do teste de UI). Não é necessário criar um novo E2E Playwright sem preseed. |
+| 5 | `DesignAdvisor` concreto | **Realmente pendente** | Hoje é só `Protocol` (`computational_intelligence.py`), com um teste de regressão explícito (`test_design_advisor_e_apenas_um_protocolo_sem_implementacao_concreta`) que barra qualquer classe concreta *nesse módulo*. Endereçado nesta rodada (Fase B) via um módulo novo e separado, registrado explicitamente, sem alterar o contrato nem o teste de regressão existente. |
+| 6 | Segurança do ambiente de pesquisa (14 itens pedidos) | **Parcialmente aprovada** | Já implementado e testado: `DEV_AUTH` classificado (ADR-0005), recusa de startup com segredo inseguro (`assert_secure_for_environment`), autorização mínima admin (`require_admin`), auditoria de login/logout/tentativas negadas (`AuditEvent`), isolamento entre organizações em múltiplos endpoints (jobs, artefatos, projetos/receitas/materiais -- `test_geometry_job_security.py`, `test_artifact_download_is_denied_across_organizations`), download sempre autenticado via `Authorization: Bearer` (nunca token na URL), CORS restritivo por padrão (nunca `*` fora de development). **Sem cobertura dedicada ainda**: sanitização de logs, validação de caminhos de artefato, prevenção de command injection no processo do worker, política explícita de dados sintéticos/bloqueio de dados clínicos reais, comportamento seguro em falhas. Endereçado nesta rodada (Fase C). RBAC/ABAC completo (17 perfis, OIDC, MFA, revogação de sessão) é `PM-ONLY-04e/f/g/h` -- **deliberadamente adiado**, backlog de fases futuras, fora do escopo de pesquisa do 2.2 (`REQUIREMENTS_MATRIX.md`). |
+| 7 | Testes de resiliência (dispatcher/fila/worker) | **Parcialmente aprovada** | Já cobertos: claim atômico via `SELECT FOR UPDATE SKIP LOCKED` (Incremento 2.1.1 item 6), cancelamento real com kill de processo (item 7), limites computacionais + cleanup (item 3), zero processos `dotnet.exe` órfãos confirmado nas execuções Windows reais (observação empírica, não teste automatizado permanente). **Sem teste automatizado dedicado ainda**: recuperação de job órfão, heartbeat, arquivo parcial, checksum divergente, manifesto inconsistente, indisponibilidade temporária de banco, encerramento gracioso como cenário isolado e repetível. Endereçado nesta rodada (Fase D) -- apenas no backend/fila/worker, sem reabrir a estabilização do launcher. |
+| 8 | Launcher/instalador clínico completo | **Deliberadamente adiado** | Classificado como protótipo técnico deferido para a fase clínica (`IMPLEMENTATION_STATUS.md`, decisão já registrada). Não reaberto nesta rodada, por instrução explícita do usuário. O "dispatcher contínuo" básico já existente (parte do protótipo) não será expandido; a Fase D cobre resiliência do backend/fila/worker, não da orquestração do executável. |
+| 9 | Triagem dos 11 avisos de `npm audit` | **Realmente pendente** | Endereçado nesta rodada (Fase E), com classificação técnica pacote a pacote (ver `docs/security/DEPENDENCY_AUDIT_2.2.md` após a Fase E). |
+| 10 | Critério de aceite final + empacotamento v2.2 | **Realmente pendente -- objetivo desta rodada** | Fases I e J desta rodada. |
+| 11 | FEM, DICOM, dados clínicos reais, prontuário, telemedicina, LIMS/ELN/biobanco, matriz regulatória formal (Anvisa/ISO/IEC), validação hospitalar | **Fora de escopo do Incremento 2.2** | `PM-ONLY-01/02/03/05` (`REQUIREMENTS_MATRIX.md`) -- confirmados como escopo de produto futuro, não deste incremento de pesquisa. Nenhuma ação nesta rodada. |
+
+### Consolidação da lista de tarefas internas
+
+As tarefas internas antigas "Seção 8: Segurança (pesquisa apenas)", "Seção 9: Testes novos
+(launcher/dispatcher/UI/resiliência)", "Seção 10: E2E real obrigatório (fluxo não
+pré-semeado)", "Seção 11: Compatibilidade -- reproduzir os 3 hashes golden do Gyroid" e "Seção
+14/15: Critério de aceite + empacotar" vinham do plano original da rodada do launcher/dispatcher
+(commits `9a6...`-`...`, antes da decisão de adiar o launcher). Itens 3 e 4 da tabela acima
+mostram que a matriz Gyroid e o fluxo E2E não pré-semeado já foram satisfeitos por evidência
+equivalente fora daquele plano original -- essas duas tarefas internas foram encerradas sem
+repetição de prova. Segurança, testes de resiliência e critério de aceite/empacotamento
+permanecem genuinamente pendentes e são retomados nesta rodada sob as Fases C, D, I e J deste
+plano (mais amplo e mais preciso que o plano original do launcher).
+
 ## Dependências deferidas (Incremento 2.1.1)
 
 17 vulnerabilidades npm de **tooling de desenvolvimento apenas** (ESLint 8.x e sua cadeia —
