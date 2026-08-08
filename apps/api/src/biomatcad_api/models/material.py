@@ -44,6 +44,13 @@ class MaterialRecord(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     organization_id: Mapped[str] = mapped_column(String(36), ForeignKey("organizations.id"), nullable=False)
+    # Vínculo OPCIONAL com a fundação do banco científico mais amplo (Incremento 2.3, Rodada 1
+    # -- ver models/scientific_data.py). Sempre NULL para registros já existentes; nenhum
+    # backfill é feito nesta rodada, e nenhum endpoint/teste do Incremento 2.1/2.2 depende
+    # deste campo. Permite consolidação futura sem quebrar o contrato atual de MaterialRecord.
+    scientific_entity_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("scientific_entities.id"), nullable=True
+    )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     category: Mapped[str] = mapped_column(String(100), nullable=False)
     source_type: Mapped[MaterialSourceType] = mapped_column(
