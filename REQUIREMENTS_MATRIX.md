@@ -237,6 +237,28 @@ para o contrato completo.
 **Nenhum dado real do PubChem foi ingerido nesta rodada.** A Rodada 2 permanece WIP até a
 execução real do roteiro Windows por um humano, fora deste sandbox.
 
+## K.1 Adendo de Interface Científica Mínima (mesma Rodada 2, Fases L-T)
+
+Escopo: interface web mínima para visualizar entidades científicas/propriedades/proveniência/
+conflitos e operar o piloto PubChem (dry-run/submissão/status/cancelamento) via UI real,
+funcionando integralmente com o seed sintético, sem acesso à rede PubChem.
+
+| ID | Requisito relacionado | O que foi implementado | Status |
+|---|---|---|---|
+| PM-ONLY (auditoria + extensão mínima) | Nunca redesenhar backend já concluído; estender apenas o indispensável | 3 endpoints GET aditivos (`/property-definitions`, `/sources`, `/{id}/biological-evidence`, `/{id}/raw-source-records`, `/{id}/conflicts`), declarados antes de `/{entity_id}` para não colidir | **Implementado e testado (novos testes em `test_scientific_data_api.py`, 24 testes no arquivo, todos passando)** |
+| PM-ONLY (listagem) | Rota real de listagem com busca/filtros/estados | `ScientificDataPage.tsx`, rota `/app/scientific-data`, item no `Sidebar` | **Implementado e testado (12 testes Vitest + E2E)** |
+| PM-ONLY (detalhe) | Rota de detalhe com 11 seções/abas exigidas | `ScientificEntityDetailPage.tsx`, rota `/app/scientific-data/:entityId` | **Implementado e testado (9 testes Vitest + E2E)** |
+| PM-ONLY (painel PubChem) | Dry-run/submissão/status/cancelamento restrito a admin, máx. 10 CIDs, sem busca por nome | `PubChemIngestionPanel.tsx`, polling controlado (para ao desmontar), 403 real para não-admin | **Implementado e testado (9 testes Vitest + E2E, incluindo unmount/cancelamento)** |
+| PM-ONLY (avisos de uso responsável) | 3 avisos permanentes, nunca linguagem clínica/farmacêutica | `ScientificDisclaimers.tsx` | **Implementado e testado** |
+| PM-ONLY (rótulos de evidência) | "calculado" nunca traduzido como "validado" | `ScientificBadges.tsx::EVIDENCE_TYPE_LABEL` (rótulos literais para as 6 variantes de `EvidenceType`) | **Implementado e testado (teste dedicado que verifica ausência da palavra "validado")** |
+| PM-ONLY (testes de componente) | Cobertura Vitest dos cenários de navegação/listagem/detalhe/painel | 31 novos testes (`ScientificDataPage`, `ScientificEntityDetailPage`, `PubChemIngestionPanel`) | **159/159 testes Vitest passando (128 preexistentes + 31 novos), 0 regressões** |
+| PM-ONLY (E2E sintético) | E2E real via UI, seed sintético, sem chamada PubChem real | `apps/web/e2e/scientific-data.spec.ts` (9 testes) + `scripts/Run-ScientificDataE2EOnly.ps1` | **Listado corretamente via `playwright --list`; contrato de API subjacente verificado diretamente no sandbox (login, listagem, conflito, dry-run/submissão/cancelamento, 403); execução real do Chromium pendente no Windows do usuário (mesmo bloqueio de infraestrutura de `vertical.spec.ts`/`viewer.spec.ts`)** |
+| PM-ONLY (verificação completa) | tsc/eslint/vitest/build/build:pages/playwright --list + ruff/mypy/pytest completo + parser PowerShell | Ver `TEST_EVIDENCE.md` | **Frontend e backend 100% limpos; worker C#/PicoGK não tocado (dotnet indisponível neste sandbox, documentado)** |
+
+**Lacunas conhecidas, documentadas e não fabricadas**: sem paginação de servidor na listagem
+(seed pequeno); sem coluna de fórmula molecular (não persistida pelo `persist()` da Rodada 2 —
+expandir isso é backlog explícito, fora do escopo de uma interface mínima).
+
 ## Resumo de bloqueios remanescentes antes da Fase 1
 
 1. **`ARCH-DIVERGE-01`:** resolvido definitivamente pelo ADR-0002 (atualizado 2026-07-27):

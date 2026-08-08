@@ -117,6 +117,13 @@ Escopo coberto até aqui:
   funde entidades automaticamente.
 - Curadoria: todo dado externo entra sempre como não revisado (`DRAFT`); promoção a
   `REVIEWED` exige decisão humana explícita, nunca automática.
+- Interface web mínima (`/app/scientific-data` e `/app/scientific-data/:entityId`): listagem
+  com busca/filtros, detalhe com 11 abas (identificadores, propriedades, proveniência,
+  snapshots, referências, evidências biológicas, produtos de fornecedor, estruturas
+  cristalográficas, conflitos, histórico de revisão), painel administrativo de ingestão PubChem
+  (dry-run/submissão/status/cancelamento, restrito a admin, máximo 10 CIDs por solicitação), e
+  avisos de uso responsável sempre visíveis — ver `docs/data/INGESTION_OPERATIONS.md` para como
+  usar o painel e `apps/web/e2e/README.md` para os logins sintéticos e como reproduzir o E2E.
 
 O conector PubChem foi validado até aqui apenas por teste de contrato sintético — o sandbox de
 desenvolvimento bloqueia a rede real para `pubchem.ncbi.nlm.nih.gov` (ver seção de bloqueio de

@@ -293,6 +293,20 @@ documentação completa em `docs/data/`) — ver `IMPLEMENTATION_STATUS.md` para
 completo e `REQUIREMENTS_MATRIX.md` seção J. **Esta rodada NÃO declara o Incremento 2.3
 completo** — é deliberadamente apenas a fundação.
 
+## Incremento 2.3, Rodada 2 (infraestrutura de ingestão + conector PubChem + Adendo de Interface Científica Mínima) — concluída (execução real do piloto Windows ainda pendente)
+
+Conector real de ingestão PubChem PUG REST, infraestrutura comum de conectores, e a interface
+web mínima (`/app/scientific-data` e `/app/scientific-data/:entityId`) para visualizar
+entidades/propriedades/proveniência/conflitos e operar o piloto via UI (dry-run/submissão/
+status/cancelamento, restrito a admin). Ver `IMPLEMENTATION_STATUS.md` (seção "Adendo de
+Interface Científica Mínima") e `REQUIREMENTS_MATRIX.md` seção K.1 para o detalhamento
+completo. **Dois itens permanecem pendentes de execução real fora deste sandbox**: (1) o piloto
+PubChem contra a rede oficial (`scripts/Run-PubChemPilotWindows.ps1`); (2) o E2E real da
+interface científica em Chromium (`scripts/Run-ScientificDataE2EOnly.ps1`) — ambos escritos,
+validados por parser/`--list`, e com o contrato subjacente exercido diretamente no sandbox, mas
+não executados de ponta a ponta por bloqueio de infraestrutura do próprio sandbox (rede
+bloqueada para o primeiro; bibliotecas nativas do Chromium ausentes para o segundo).
+
 ## Próximo (Incremento 2.3, Rodada 2 e além — candidatas, não decididas)
 
 1. **Conector de ingestão real para uma única fonte candidata** (mais provável: Crossref, por

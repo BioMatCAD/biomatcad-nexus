@@ -441,3 +441,65 @@ completo.
 (2/14 -> 2/14 -> 11/14, com as respectivas causas raiz reais diagnosticadas e corrigidas)
 permanecem registradas exatamente como aconteceram -- este resultado é a confirmação final de
 que todas aquelas correções funcionam de ponta a ponta.
+
+## `scientific-data.spec.ts` — E2E da Interface Científica Mínima (Incremento 2.3, Rodada 2, Fase R)
+
+Novo spec (9 testes) cobrindo a interface `/app/scientific-data` e
+`/app/scientific-data/:entityId` adicionada nesta rodada (ver `IMPLEMENTATION_STATUS.md`, seção
+"Adendo de Interface Científica Mínima"). Usa exclusivamente o seed sintético — nenhuma chamada
+real ao PubChem em nenhum momento.
+
+**Logins usados** (ambos criados por `python -m biomatcad_api.seed`, chamado automaticamente
+pelo `globalSetup`):
+
+| Papel | E-mail | Senha |
+|---|---|---|
+| Pesquisador (sem painel admin) | `demo@biomatcad.example` | `demo-synthetic-password-123` |
+| Administrador (painel PubChem visível) | `admin@biomatcad.example` | `admin-synthetic-password-456` |
+
+**Dados usados**: as 5 entidades científicas sintéticas de `python -m biomatcad_api.seed_scientific_data`
+(também chamado automaticamente pelo `globalSetup`), incluindo o conflito de ingestão sintético
+pré-semeado entre "Ácido Poliláctico Fictício de Demonstração" e "Fármaco Fictício de
+Demonstração X-100" (usado para provar a aba "Conflitos" sem depender de nenhum processamento
+real).
+
+**Por que dry-run/submissão/cancelamento nunca tocam o PubChem real**: nenhum dispatcher de
+ingestão é iniciado por este spec nem pelo `globalSetup`. Uma solicitação criada via UI
+(dry-run ou submissão real) é persistida de verdade pela API real, mas permanece em `queued`
+indefinidamente — só um dispatcher separado (nunca iniciado aqui) a reivindicaria e chamaria o
+conector PubChem. O teste de cancelamento prova a transição real `queued` → `cancelled`,
+inteiramente local.
+
+**Como rodar só este spec** (sem repetir `vertical.spec.ts`/`viewer.spec.ts`):
+
+```powershell
+pwsh .\scripts\Run-ScientificDataE2EOnly.ps1 `
+    -RepoPath C:\caminho\para\o\repositorio `
+    -DatabaseUrl "postgresql+psycopg://biomatcad:biomatcad@localhost:5432/biomatcad"
+```
+
+Ou manualmente, com o frontend/API já rodando e `E2E_PYTHON_BIN` definido:
+
+```bash
+npx playwright test e2e/scientific-data.spec.ts --project=chromium
+```
+
+**Verificação feita neste sandbox** (sem Chromium disponível — mesma limitação de
+infraestrutura já documentada acima para `vertical.spec.ts`/`viewer.spec.ts`, sem acesso root
+para instalar as dependências nativas do navegador):
+
+- `npx playwright test --list` reconhece corretamente os 9 novos testes (24 no total, somando
+  os specs pré-existentes).
+- A cadeia completa de seed usada pelo `globalSetup` (`alembic upgrade head` +
+  `seed_e2e_user.py` + `biomatcad_api.seed` + `biomatcad_api.seed_scientific_data`) foi
+  executada 2x contra um Postgres real (via `pgserver`), confirmando idempotência (contagens de
+  linhas estáveis na segunda execução).
+- O contrato de API subjacente a cada asserção do spec foi exercitado diretamente (login
+  researcher/admin reais, listagem de entidades com os nomes exatos usados no spec, conflito
+  visível dos dois lados do relacionamento, dry-run/submissão/cancelamento com as transições de
+  status exatas assumidas pelo spec, 403 real para pesquisador tentando submeter) — todos com o
+  resultado esperado.
+
+**A execução real do Chromium em si permanece pendente no Windows do usuário.** Isso não é uma
+limitação nova desta interface — é a mesma limitação de ambiente já registrada para os outros
+dois specs deste diretório.

@@ -124,6 +124,15 @@ seria produzido numa execução real, para inspeção prévia.
 Não existe endpoint de busca livre nem de importação em massa nesta rodada — cada submissão
 exige uma lista explícita de CIDs, com máximo de 10 por solicitação.
 
+### Interface web administrativa (Adendo de Interface Científica Mínima, Rodada 2)
+
+Além da API e do CLI abaixo, existe um painel real na UI (`/app/scientific-data`, visível
+apenas para `role in {admin, superadmin}`) que cobre a mesma superfície de operação
+(dry-run/submissão/status/cancelamento) sem exigir linha de comando. Ver
+`docs/data/INGESTION_OPERATIONS.md` para o guia de uso completo do painel, e
+`apps/web/e2e/scientific-data.spec.ts` para a prova E2E de que ele funciona ponta a ponta contra
+a API real.
+
 ### CLI (`apps/api/scripts/pubchem_ingest_cli.py`)
 
 Uso via `SessionLocal` direto (nunca via HTTP), pensado para uso interativo/roteiros:

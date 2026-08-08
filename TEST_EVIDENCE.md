@@ -2581,3 +2581,94 @@ ponto de acoplamento real entre os dois domínios.
 
 Nenhum resultado acima foi declarado aprovado sem execução real correspondente no sandbox.
 Nenhum teste pré-existente foi enfraquecido ou removido nesta rodada.
+
+## Adendo de Interface Científica Mínima (Incremento 2.3, Rodada 2, Fases Q-S) — 2026-08-08
+
+Evidência real de todas as verificações rodadas neste sandbox para a interface web mínima
+(`/app/scientific-data`, `/app/scientific-data/:entityId`, painel de ingestão PubChem). Ver
+`IMPLEMENTATION_STATUS.md` (seção "Adendo de Interface Científica Mínima") para o detalhamento
+funcional completo.
+
+### Frontend
+
+```
+npx tsc --noEmit                 -> limpo (0 erros)
+npx eslint . --max-warnings 0    -> limpo (0 erros, 0 avisos)
+npx vitest run                  -> 27 arquivos de teste, 159 passed (128 preexistentes + 31 novos), 0 falhas
+npm run build                   -> OK (dist/assets/index-BRLjPcmq.js, 916.43 kB)
+npm run build:pages             -> OK (modo demo -- confirma paridade de demoApiClient/demoClient.ts)
+npx playwright test --list      -> 24 testes em 3 arquivos (vertical.spec.ts: 2, viewer.spec.ts: 13, scientific-data.spec.ts: 9)
+```
+
+Arquivos de teste novos: `tests/ScientificDataPage.test.tsx` (12 testes), 
+`tests/ScientificEntityDetailPage.test.tsx` (9 testes), `tests/PubChemIngestionPanel.test.tsx`
+(9 testes). Cobrem: navegação (link no Sidebar), listagem (carregamento/vazio/erro/filtros/
+busca), campo ausente ("—") vs. valor real zero (nunca confundidos), painel admin
+ausente/presente por papel, avisos de uso responsável, rótulo "calculado" (nunca "validado"),
+avisos de origem PubChem real vs. sintética, proveniência, snapshots, conflito visível,
+validação de CID (máximo 10, rejeição de não-numérico), dry-run, submissão, progressão de
+polling controlada (setInterval/clearInterval interceptados seletivamente por valor de delay,
+sem interferir no polling interno do próprio Testing Library), cancelamento, encerramento do
+polling ao desmontar, erros 403/429/503 sempre exibidos.
+
+### Backend
+
+```
+ruff check src tests scripts   -> limpo (0 erros; 1 import mal-ordenado corrigido via --fix)
+mypy src scripts               -> Success: no issues found in 74 source files
+pytest (Postgres real, 7 lotes por limite de tempo do sandbox):
+  lote 1 (17 arquivos gerais)                              -> 176 passed, 2 skipped
+  lote 2 (jobs/materiais/orquestração/cancelamento)         -> 24 passed, 1 skipped
+  lote 3 (concorrência geométrica/segurança/dispatcher)     -> 42 passed
+  lote 4 (timeout/recuperação do worker)                    -> 17 passed
+  lote 5 (scientific_data_api + scientific_data_domain)     -> 24 passed
+  lote 6 (pubchem_connector/http_client/cli + ingestion_api/service) -> 89 passed
+  lote 7 (scientific_ingestion_concurrency)                 -> 1 passed
+  TOTAL: 373 passed, 3 skipped, 0 falhas (376 testes coletados -- bate exatamente com
+  `pytest --collect-only`)
+```
+
+Novos testes de API adicionados nesta fase (dentro de `test_scientific_data_api.py`, 24 testes
+no arquivo): `test_property_definitions_endpoint_lists_canonical_vocabulary` e
+`test_entity_conflicts_endpoint_shows_conflict_where_entity_is_either_side`.
+
+### Worker (C#/PicoGK)
+
+Nenhum arquivo `.cs` foi alterado nesta fase. `dotnet` não está disponível neste sandbox
+(ambiente resetado desde a última reinstalação) — a suíte do worker não pôde ser reexecutada
+aqui. Isto é documentado literalmente, não presumido aprovado.
+
+### PowerShell
+
+`scripts/Run-ScientificDataE2EOnly.ps1` (novo) validado via
+`[System.Management.Automation.Language.Parser]::ParseFile` -- 0 erros de sintaxe. Nenhum outro
+script `.ps1` foi modificado nesta fase.
+
+### Verificação end-to-end do contrato de API (sem Chromium disponível no sandbox)
+
+Como o sandbox não tem as bibliotecas nativas do Chromium (sem acesso root para instalá-las --
+mesma limitação já documentada para `vertical.spec.ts`/`viewer.spec.ts`), o E2E real
+(`scientific-data.spec.ts`) não pôde ser executado ponta a ponta aqui. Para reduzir o risco
+residual, o contrato de API subjacente a cada asserção do spec foi exercitado diretamente,
+contra uma API real + Postgres real (via `pgserver`) recém-seedado com a cadeia completa
+(`alembic upgrade head` + `seed_e2e_user.py` + `biomatcad_api.seed` +
+`biomatcad_api.seed_scientific_data`, esta rodada 2x para confirmar idempotência):
+
+```
+login researcher (demo@biomatcad.example)              -> 200 OK
+GET /api/v1/scientific-entities                          -> 200 OK, 5 entidades com os nomes exatos usados no spec
+GET /api/v1/scientific-entities/{chemical_id}/conflicts  -> 200 OK, 1 conflito (inchikey_shared_with_other_entity)
+login admin (admin@biomatcad.example)                    -> 200 OK
+GET /api/v1/scientific-entities/sources                  -> 200 OK, >= 1 fonte
+POST /api/v1/scientific-ingestion/requests/dry-run       -> 201, dry_run=true, status=queued
+POST /api/v1/scientific-ingestion/requests               -> 201, status=queued
+POST /api/v1/scientific-ingestion/requests/{id}/cancel   -> 200, status=cancelled
+POST /api/v1/scientific-ingestion/requests (como researcher) -> 403 Forbidden
+```
+
+Todas as chamadas retornaram exatamente o esperado pelo spec. **A execução real do Chromium em
+si permanece pendente no Windows do usuário** -- ver `apps/web/e2e/README.md`.
+
+Nenhum resultado acima foi declarado aprovado sem execução real correspondente no sandbox.
+Nenhum teste pré-existente foi enfraquecido ou removido nesta fase (159/159 Vitest e 373/376
+pytest -- os mesmos totais de antes desta fase mais os testes novos, nenhuma contagem menor).

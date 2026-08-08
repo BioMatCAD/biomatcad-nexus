@@ -1259,6 +1259,124 @@ oficial confirmando o CID solicitado; (2) hash SHA-256 do payload preservado; (3
 real provada por duas submissões da mesma lista de CIDs produzindo o mesmo hash e nenhuma nova
 versão de `RawSourceRecord` na segunda vez.
 
+### Adendo de Interface Científica Mínima (Fases L-T, mesma Rodada 2, branch `incremento-2.3-dados-cientificos`)
+
+Após a entrega inicial das Fases A-K acima, foi identificado que a lacuna "Adendo de Interface
+Científica Mínima" — explicitamente parte do escopo da Rodada 2 — não tinha sido implementada:
+até então, o Incremento 2.3 só era observável via API/CLI/testes, sem nenhuma tela real para um
+usuário autenticado visualizar entidades científicas, propriedades/proveniência, conflitos, ou
+operar o piloto PubChem. Este adendo fecha essa lacuna, sem alterar nada do backend "já
+concluído" das Fases A-K além de duas extensões aditivas mínimas (ver Fase L).
+
+- **Fase L (auditoria)**: mapeamento objetivo do que já existia (rotas de leitura da Rodada 1,
+  rotas de ingestão da Rodada 2, `apiClient`/`demoClient`, `Sidebar`, componentes de
+  tabela/badge/alerta/vazio/carregamento reutilizáveis, padrão de teste Vitest com
+  login real via `AuthContext` + `fetch` mockado) e do que faltava. Only 2 extensões aditivas
+  foram necessárias no backend, ambas cobertas por teste e adicionadas **antes** de qualquer
+  rota estática colidir com `/{entity_id}`:
+  - `GET /api/v1/scientific-entities/property-definitions` (vocabulário canônico de
+    propriedades, qualquer usuário autenticado).
+  - `GET /api/v1/scientific-entities/sources` (lista de `ScientificSource`, usada para o
+    seletor de fonte do painel de ingestão).
+  - `GET /api/v1/scientific-entities/{entity_id}/biological-evidence`,
+    `.../raw-source-records`, `.../conflicts` (sub-recursos por entidade, reaproveitando
+    exatamente os modelos e o padrão de autorização já existentes).
+  Nenhuma rota, schema, migração ou regra de autorização das Fases A-K foi redesenhada.
+- **Fase M (listagem)**: nova página `apps/web/src/pages/ScientificDataPage.tsx`, rota
+  `/app/scientific-data` (ver nota de nomenclatura abaixo), item "Dados científicos" no
+  `Sidebar`. Mostra nome preferido, tipo, CID PubChem (quando presente), InChIKey (quando
+  presente), massa molecular (quando presente), visibilidade global/organizacional, badge de
+  estado de revisão, data de criação; busca por nome e filtros por tipo/estado de revisão;
+  estados de carregamento/vazio/erro explícitos; painel administrativo de ingestão PubChem
+  (ver Fase O) somente para `role in {admin, superadmin}`.
+- **Fase N (detalhe)**: nova página `apps/web/src/pages/ScientificEntityDetailPage.tsx`, rota
+  `/app/scientific-data/:entityId`, 11 abas: visão geral, identificadores, propriedades,
+  proveniência, snapshots, referências, evidências biológicas, produtos de fornecedor,
+  estruturas cristalográficas, conflitos, histórico de revisão. Cada propriedade mostra nome,
+  valor/unidade original, valor normalizado, condições, método, incerteza, tipo de evidência
+  (rótulo literal — "calculado" nunca é escrito nem lido como "validado", ver
+  `ScientificBadges.tsx::EVIDENCE_TYPE_LABEL`) e estado de revisão. A aba "Snapshots" expõe o
+  `RawSourceRecord` (conector, identificador externo, data de obtenção, SHA-256 truncado,
+  versão anterior) sem nunca mostrar o payload bruto completo.
+- **Fase O (painel PubChem)**: `apps/web/src/components/scientific/PubChemIngestionPanel.tsx`
+  — lista explícita de CIDs (validação local: só dígitos, máximo 10), botões Dry-run/Submeter/
+  Cancelar, status com Correlation ID e contadores (recebidos/criados/atualizados/inalterados/
+  rejeitados/conflitos), polling controlado (2s, encerrado explicitamente ao desmontar o
+  componente — nunca um intervalo órfão), conflitos detectados exibidos inline. Nunca busca por
+  nome, nunca importação em massa. Usuário `researcher` nunca vê este painel (gate por
+  `role` no `ScientificDataPage`) e recebe 403 real da API se tentar chamar o endpoint
+  diretamente (comportamento do backend da Rodada 2, inalterado).
+- **Fase P (avisos)**: `apps/web/src/components/scientific/ScientificDisclaimers.tsx` — três
+  avisos, sempre visíveis (nunca condicionais em nenhum caminho de sucesso): uso exclusivamente
+  para pesquisa; fonte externa importada exige curadoria; dado sintético de demonstração nunca
+  atribuído ao PubChem. Nenhuma linguagem de recomendação clínica/farmacêutica em lugar algum.
+- **Fase Q (testes de componente)**: 31 novos testes Vitest (`tests/ScientificDataPage.test.tsx`
+  12, `tests/ScientificEntityDetailPage.test.tsx` 9, `tests/PubChemIngestionPanel.test.tsx` 9),
+  cobrindo navegação, listagem (carregamento/vazio/erro/filtros), campo ausente vs. valor real
+  zero (nunca confundidos), rótulo "calculado" (nunca "validado"), avisos de origem
+  PubChem/sintética, conflito visível, proveniência, painel ausente para pesquisador/presente
+  para admin, validação de CID (máximo 10, rejeição de não-numérico), dry-run, submissão,
+  progressão de polling controlada (via substituição direcionada de `setInterval`/
+  `clearInterval` por valor de delay — nunca interferindo no polling interno do próprio
+  Testing Library), cancelamento, encerramento do polling ao desmontar, erros 403/429/503
+  sempre exibidos. **Total da suíte Vitest: 159 (128 preexistentes + 31 novos), 0 regressões.**
+  `tsc --noEmit`, `eslint --max-warnings 0`, `npm run build` e `npm run build:pages` limpos.
+- **Fase R (E2E)**: `apps/web/e2e/scientific-data.spec.ts` (9 testes, cobrindo os 12 cenários
+  pedidos), usando exclusivamente o seed sintético (`python -m biomatcad_api.seed` +
+  `biomatcad_api.seed_scientific_data`, ambos adicionados ao `globalSetup` do Playwright em
+  `apps/web/e2e/global-setup.ts`), Postgres e API reais, nenhuma chamada ao PubChem real. Os
+  cenários de dry-run/submissão/cancelamento criam uma `ScientificIngestionRequest` real no
+  banco via a API real, mas como nenhum dispatcher de ingestão é iniciado nesta suíte, a
+  solicitação nunca é processada — permanece `queued` (estado real, nunca fabricado) até ser
+  cancelada pelo próprio teste, provando exatamente o contrato observável sem tocar a rede
+  externa. Roteiro Windows independente `scripts/Run-ScientificDataE2EOnly.ps1` (PowerShell 7,
+  `-RepoPath` absoluto obrigatório, prepara migrações via `alembic upgrade head`, inicia
+  somente a API rastreada por PID, delega o seed sintético/científico e o frontend ao próprio
+  `globalSetup`/`webServer` do Playwright, roda **exclusivamente**
+  `npx playwright test e2e/scientific-data.spec.ts` — nunca repete `vertical.spec.ts`/
+  `viewer.spec.ts` nem a matriz geométrica —, encerra somente o processo da API que ele mesmo
+  iniciou, nunca chama o PubChem real, nunca depende do PicoGK). Validado neste sandbox via:
+  `npx playwright test --list` (24 testes totais, 9 do novo spec, listados corretamente);
+  cadeia completa de seed (migrações + 3 scripts, 2 execuções) rodada 2x contra Postgres real
+  com contagens estáveis (idempotência confirmada); contrato completo da API exercido
+  diretamente (login researcher/admin, listagem de entidades, conflito visível dos dois lados
+  do relacionamento, dry-run/submissão/cancelamento, 403 real para pesquisador) — tudo com
+  resultado esperado. **A execução real do Chromium em si permanece pendente no Windows do
+  usuário**, pelo mesmo bloqueio de infraestrutura (bibliotecas nativas do Chromium ausentes,
+  sem acesso root) já documentado para `vertical.spec.ts`/`viewer.spec.ts` desde incrementos
+  anteriores — não uma limitação nova nem específica desta interface.
+- **Fase S (verificação)**: frontend (`tsc --noEmit`, `eslint --max-warnings 0`, `vitest run`
+  159/159, `npm run build`, `npm run build:pages`, `playwright test --list`) e backend (`ruff
+  check`, `mypy`, suíte completa `pytest` contra PostgreSQL real: **376 testes, 373 passed + 3
+  skipped, 0 falhas**, rodada em 7 lotes por limite de tempo do sandbox, nunca a suíte inteira
+  de uma vez) — todos limpos. Worker C#/PicoGK: nenhum arquivo `.cs` alterado nesta rodada;
+  `dotnet` não está disponível neste sandbox (ambiente resetado) — suíte do worker não pôde ser
+  reexecutada aqui, documentado literalmente em vez de presumido aprovado. Roteiro PowerShell
+  novo (`Run-ScientificDataE2EOnly.ps1`) validado via
+  `[System.Management.Automation.Language.Parser]::ParseFile` (0 erros de sintaxe).
+- **Fase T (documentação)**: esta seção, `docs/data/connectors/PUBCHEM_CONNECTOR.md`
+  (referência à interface administrativa), `docs/data/INGESTION_OPERATIONS.md` (novo),
+  `REQUIREMENTS_MATRIX.md`, `ROADMAP.md`, `TEST_EVIDENCE.md`, `README.md`,
+  `apps/web/e2e/README.md`.
+
+**Nota de nomenclatura (decisão consciente, não um desvio silencioso)**: as instruções desta
+rodada pediam literalmente a rota `/scientific-data`. Todas as demais páginas autenticadas do
+produto (materiais, projetos, jobs, observabilidade) usam o prefixo `/app/` (roteador protegido
+por `ProtectedRoute` + `AuthenticatedLayout`) — por isso as rotas reais são
+`/app/scientific-data` e `/app/scientific-data/:entityId`, preservando a arquitetura de rotas já
+estabelecida em vez de introduzir uma exceção inconsistente. O item de navegação no `Sidebar`
+("Dados científicos") aponta para o caminho real.
+
+**Lacunas conhecidas e deliberadamente não resolvidas nesta rodada** (documentadas em vez de
+fabricadas ou escondidas): (1) a listagem não tem paginação de servidor — aceitável dado o
+tamanho pequeno do seed sintético atual, mas precisará de extensão se o volume real crescer;
+(2) a coluna "Fórmula molecular" não aparece na listagem — o conector PubChem calcula fórmula/
+SMILES/InChI em `normalize()`, mas `reconcile()`/`persist()` (Rodada 2, já concluída) só
+persistem o InChIKey como `ScientificIdentifier`; expandir o `persist()` para reter
+fórmula/SMILES/InChI foi deliberadamente deixado de fora deste adendo por ser uma mudança no
+backend "já concluído" da Rodada 2, fora do escopo de uma interface mínima — backlog explícito
+para uma rodada futura, não uma omissão silenciosa.
+
 ## Como executar hoje
 
 Ver `README.md` (seção atualizada) para os comandos completos de backend e frontend, incluindo
