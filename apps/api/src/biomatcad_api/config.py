@@ -77,6 +77,23 @@ class Settings(BaseSettings):
             )
         return v
 
+    @field_validator("cors_allowed_origins")
+    @classmethod
+    def validate_cors_allowed_origins(cls, v: list[str], info) -> list[str]:  # type: ignore[no-untyped-def]
+        # Correcao real (Incremento 2.2, Fase C -- auditoria de seguranca do ambiente de
+        # pesquisa): o comentario acima do campo ja dizia "nunca *** fora de development", mas
+        # nenhum validador de fato impedia CORS_ALLOWED_ORIGINS=* via variavel de ambiente em
+        # local-network/staging/production -- era so uma convencao de codigo, nao uma garantia.
+        # Mesmo padrao ja usado em validate_database_url acima: falha alto e cedo no startup,
+        # nunca silenciosamente em runtime.
+        env = info.data.get("environment")
+        if "*" in v and env in (Environment.LOCAL_NETWORK, Environment.STAGING, Environment.PRODUCTION):
+            raise ValueError(
+                "CORS_ALLOWED_ORIGINS não pode conter '*' em local-network/staging/production "
+                "-- defina uma lista explícita de origens confiáveis."
+            )
+        return v
+
     @property
     def is_sqlite(self) -> bool:
         return self.database_url.startswith("sqlite")
