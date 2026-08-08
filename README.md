@@ -101,16 +101,31 @@ e o gate final de confirmação (opcional).
 
 ## Escopo do Incremento 2.3 — Dados Científicos
 
-Este incremento está **em desenvolvimento** e ainda não possui código implementado. O escopo
-planejado cobre:
+Este incremento está **em desenvolvimento** (branch `incremento-2.3-dados-cientificos`).
+Rodada 1 (fundação canônica, proveniência e curadoria) e Rodada 2 (infraestrutura de ingestão
+e primeiro conector real, PubChem PUG REST) estão implementadas e testadas — ver
+`IMPLEMENTATION_STATUS.md` para o inventário completo com evidências, e
+`docs/data/connectors/PUBCHEM_CONNECTOR.md` para o contrato do conector PubChem.
 
-- Banco de dados científico de materiais e propriedades.
+Escopo coberto até aqui:
+
+- Banco de dados científico de materiais e propriedades, com proveniência completa por
+  observação (`docs/data/SCIENTIFIC_DATA_MODEL.md`).
 - Rastreabilidade de proveniência dos dados (origem, método de obtenção, incerteza).
-- Ingestão de dados científicos.
-- Curadoria e validação de dados antes do uso em receitas/simulações.
+- Primeiro conector real de ingestão externa (PubChem), com fila persistente, cliente HTTP
+  restrito por allowlist, registro bruto versionado por checksum, e reconciliação que nunca
+  funde entidades automaticamente.
+- Curadoria: todo dado externo entra sempre como não revisado (`DRAFT`); promoção a
+  `REVIEWED` exige decisão humana explícita, nunca automática.
 
-Nenhuma dessas capacidades deve ser considerada implementada até que apareça registrada, com
-evidência de teste correspondente, em `IMPLEMENTATION_STATUS.md` e `TEST_EVIDENCE.md`.
+O conector PubChem foi validado até aqui apenas por teste de contrato sintético — o sandbox de
+desenvolvimento bloqueia a rede real para `pubchem.ncbi.nlm.nih.gov` (ver seção de bloqueio de
+rede em `docs/data/connectors/PUBCHEM_CONNECTOR.md`). A execução real contra a API oficial do
+PubChem depende de rodar `apps/api/scripts/Run-PubChemPilotWindows.ps1` em uma máquina Windows
+com rede normal.
+
+Nenhuma capacidade deve ser considerada implementada até que apareça registrada, com evidência
+de teste correspondente, em `IMPLEMENTATION_STATUS.md` e `TEST_EVIDENCE.md`.
 
 ## Limitações e uso responsável
 

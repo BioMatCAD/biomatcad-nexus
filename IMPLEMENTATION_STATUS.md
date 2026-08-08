@@ -1196,6 +1196,69 @@ observação/identificador/fonte/referência/fornecedor/produto/estrutura crista
 seed nesta rodada); qualquer dado clínico ou de paciente real. **O Incremento 2.3 não é
 declarado completo por esta rodada** — esta é apenas a Rodada 1 (fundação).
 
+## Incremento 2.3 (Rodada 2) — Infraestrutura de Ingestão e Conector PubChem Piloto (branch `incremento-2.3-dados-cientificos`, WIP)
+
+Construída sobre a Rodada 1 (fundação canônica acima), esta rodada implementou o primeiro
+conector real de ingestão externa (PubChem PUG REST) e a infraestrutura comum de conectores
+que qualquer fonte futura (ChEBI, ChEMBL, Crossref, etc.) reaproveitará. Ver
+`docs/data/connectors/PUBCHEM_CONNECTOR.md` para o contrato completo e
+`docs/data/connectors/PUBCHEM_MUTATION_TESTING.md` para o registro do exercício de mutation
+testing manual.
+
+- **Fases B-C (contrato + registro bruto)**: `services/connectors/base.py` (contrato comum
+  `ScientificDataConnector`: validate_request → fetch → normalize → reconcile → persist,
+  aplicado a qualquer conector futuro), `models/scientific_ingestion.py` (3 tabelas novas,
+  aditivas: `raw_source_records`, `scientific_ingestion_requests`, `ingestion_conflicts`, mais
+  1 coluna nullable em `property_observations`), migração `511279411501` (revisão anterior:
+  `4920cd8fd160`, a da Rodada 1 — downgrade remove só o que esta rodada acrescentou).
+- **Fase E (cliente HTTP seguro)**: `services/connectors/http_client.py::AllowlistedHttpsClient`
+  — allowlist de host, TLS sempre verificado, sem redirecionamento automático, rate limit
+  (máx. 4/s), retry/backoff só para falhas transitórias, limite de tamanho de resposta.
+- **Fase D (fila + dispatcher)**: `scripts/scientific_ingestion_dispatcher.py`, processo
+  independente do dispatcher geométrico, mesmo padrão de claim atômico
+  (`SELECT ... FOR UPDATE SKIP LOCKED`) provado livre de dupla reivindicação por
+  `tests/test_scientific_ingestion_concurrency.py`.
+- **Fase F (conector PubChem)**: `services/connectors/pubchem.py` — mapeamento de propriedades
+  documentadas do PUG REST (peso molecular, fórmula, SMILES, InChI/InChIKey), CID como
+  identificador primário único de reconciliação.
+- **Fase G (reconciliação)**: identidade de entidade decidida somente por CID; colisão de
+  InChIKey com entidade diferente nunca fundida automaticamente (`IngestionConflict`); entidade
+  nova sempre `CurationState.DRAFT`, nunca promovida a `REVIEWED` automaticamente.
+- **Fases G-H (operação)**: API administrativa `/api/v1/scientific-ingestion` (7 endpoints,
+  todos `require_admin`, sem busca livre nem importação em massa — máximo 10 CIDs por
+  solicitação) + CLI `scripts/pubchem_ingest_cli.py`.
+- **Fase I (piloto Windows real)**: `scripts/Run-PubChemPilotWindows.ps1` — único meio capaz
+  de provar o conector contra a rede oficial do PubChem, pois o sandbox de desenvolvimento
+  bloqueia `pubchem.ncbi.nlm.nih.gov` na camada TLS (`SSL: WRONG_VERSION_NUMBER`, confirmado
+  repetidamente via `curl` e via o próprio `AllowlistedHttpsClient` de produção — nunca uma
+  falha do PubChem ou do conector). **Execução real no Windows do usuário ainda pendente** —
+  ver seção de bloqueio de rede em `docs/data/connectors/PUBCHEM_CONNECTOR.md`.
+- **Fase J (testes + mutation testing)**: 90 testes novos específicos deste conector
+  (`test_pubchem_connector.py`: 21, `test_pubchem_http_client.py`: 18,
+  `test_pubchem_ingest_cli.py`: 7, `test_scientific_ingestion_api.py`: 14,
+  `test_scientific_ingestion_concurrency.py`: 1, `test_scientific_ingestion_service.py`: 29),
+  todos rodando contra PostgreSQL real, nenhum dependente de rede (payloads via
+  `synthetic_contract_fixture`, rotulados como tal no código). 7 mutações manuais aplicadas
+  (allowlist de host, autorização, dry-run, atomicidade do claim, idempotência de
+  `RawSourceRecord`, registro de conflito de InChIKey, não-promoção a `REVIEWED`) — todas as 7
+  mataram pelo menos um teste dedicado e foram revertidas; ver
+  `docs/data/connectors/PUBCHEM_MUTATION_TESTING.md` para o registro literal, incluindo a
+  nuance da mutação de idempotência não detectada pelo teste pré-existente de contadores
+  agregados. Suíte completa do backend re-verificada após os reverts: 363 passed, 3 skipped
+  (excluindo `test_e2e_seed_fixture.py`, que exige >175s e já era verificado separadamente).
+  `ruff`/`mypy` limpos.
+- **Fase K (documentação)**: `docs/data/connectors/PUBCHEM_CONNECTOR.md`,
+  `docs/data/connectors/PUBCHEM_MUTATION_TESTING.md`, esta seção.
+
+**Nenhum dado real do PubChem foi obtido nesta rodada** — o bloqueio de rede do sandbox impediu
+qualquer chamada real. Todo o piloto foi validado por teste de contrato sintético (formato
+documentado da API, valores químicos publicamente conhecidos, nunca capturados ao vivo). **A
+Rodada 2 não é declarada cientificamente aprovada** até que `Run-PubChemPilotWindows.ps1` seja
+executado com sucesso em uma máquina Windows real, com evidência literal de: (1) resposta
+oficial confirmando o CID solicitado; (2) hash SHA-256 do payload preservado; (3) idempotência
+real provada por duas submissões da mesma lista de CIDs produzindo o mesmo hash e nenhuma nova
+versão de `RawSourceRecord` na segunda vez.
+
 ## Como executar hoje
 
 Ver `README.md` (seção atualizada) para os comandos completos de backend e frontend, incluindo

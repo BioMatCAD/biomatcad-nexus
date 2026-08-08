@@ -218,6 +218,25 @@ coleta de dados externa nem importação em massa — ver `docs/data/SOURCE_REGI
 | PM-ONLY (seed sintético) | Conjunto de dados de teste exclusivamente sintético, cobrindo os 5 tipos de entidade obrigatórios | `python -m biomatcad_api.seed_scientific_data`, idempotente: 5 entidades canônicas, 2 observações conflitantes de fontes distintas (coexistindo), 1 observação supplier-declared, 1 fornecedor+produto fictício, 1 referência bibliográfica fictícia, 1 estrutura cristalográfica sintética, 1 execução de ingestão fictícia, estados draft/reviewed/rejected. Nenhum DOI/PMID/CAS/CID/accession real | **Implementado e verificado (idempotência confirmada por dupla execução contra PostgreSQL real, sem duplicação de linha em nenhuma das 12 tabelas)** |
 | PM-ONLY (documentação científica) | Documentar o modelo, a política de proveniência/curadoria, o registro de fontes candidatas e a política de licenciamento | `docs/data/SCIENTIFIC_DATA_MODEL.md`, `docs/data/PROVENANCE_AND_CURATION.md`, `docs/data/SOURCE_REGISTRY_POLICY.md`, `docs/data/LICENSING_AND_REDISTRIBUTION.md` — nenhum DOI/patente/validação clínica/aprovação regulatória inventados; 8 fontes candidatas documentadas (PubChem, ChEBI, ChEMBL, Crossref, Europe PMC/PubMed, COD, RCSB PDB, fornecedores comerciais), todas com `redistribution_status` tratado como não confirmado por padrão | **Documentado nesta rodada** |
 
+## K. Incremento 2.3 (Rodada 2) — Infraestrutura de Ingestão e Conector PubChem Piloto (branch `incremento-2.3-dados-cientificos`, WIP)
+
+Escopo: primeiro conector real de ingestão externa (PubChem PUG REST) e infraestrutura comum
+de conectores reaproveitável por fontes futuras. Ver `docs/data/connectors/PUBCHEM_CONNECTOR.md`
+para o contrato completo.
+
+| ID | Requisito relacionado | O que foi implementado nesta rodada | Status |
+|---|---|---|---|
+| PM-ONLY (contrato de conector) | Contrato comum reaproveitável por qualquer conector futuro | `ScientificDataConnector` (validate_request → fetch → normalize → reconcile → persist); regras de identidade por CID, não-fusão automática de InChIKey colidente, não-promoção automática a `REVIEWED` | **Implementado e testado (21 testes de conector + 29 de serviço de ingestão)** |
+| PM-ONLY (registro bruto) | Preservar payload bruto de cada fonte com versionamento e checksum | `RawSourceRecord` — payload JSON canônico + SHA-256; mesmo checksum reaproveita linha, checksum diferente cria nova versão com `predecessor_record_id` | **Testado (2 testes dedicados de idempotência a nível de registro, adicionados após mutation testing expor lacuna de cobertura no nível de resumo agregado)** |
+| PM-ONLY (cliente HTTP seguro) | Nunca requisitar host arbitrário; TLS sempre verificado; rate limit/retry/backoff | `AllowlistedHttpsClient` — allowlist de host, sem redirecionamento automático, retry só em falhas transitórias, limite de tamanho de resposta | **Testado (18 testes dedicados, incluindo rejeição de path com URL/host embutido)** |
+| PM-ONLY (fila + dispatcher) | Fila persistente com claim atômico, processo de dispatcher independente | `ScientificIngestionRequest` + `scripts/scientific_ingestion_dispatcher.py`, mesmo padrão de `SELECT ... FOR UPDATE SKIP LOCKED` de `GeometryJob` | **Testado (1 teste de concorrência real com 2 conexões independentes, 24 solicitações, nenhuma dupla reivindicação)** |
+| PM-ONLY (operação admin) | API administrativa + CLI, sem busca livre nem importação em massa | `/api/v1/scientific-ingestion` (7 endpoints, `require_admin`) + `scripts/pubchem_ingest_cli.py`; máximo 10 CIDs por solicitação | **Testado (14 testes de API + 7 de CLI)** |
+| PM-ONLY (piloto real Windows) | Provar o conector contra a rede oficial do PubChem | `scripts/Run-PubChemPilotWindows.ps1` — dry-run, persistência real, prova de idempotência por dupla submissão | **Escrito e validado por parser PowerShell; execução real ainda PENDENTE (sandbox bloqueia a rede — ver `docs/data/connectors/PUBCHEM_CONNECTOR.md`)** |
+| PM-ONLY (mutation testing) | Provar que os testes realmente detectam regressão nos pontos críticos | 7 mutações manuais (allowlist, autorização, dry-run, atomicidade do claim, idempotência de `RawSourceRecord`, conflito de InChIKey, não-promoção a `REVIEWED`) | **7 de 7 mataram teste dedicado; todas revertidas — ver `docs/data/connectors/PUBCHEM_MUTATION_TESTING.md`** |
+
+**Nenhum dado real do PubChem foi ingerido nesta rodada.** A Rodada 2 permanece WIP até a
+execução real do roteiro Windows por um humano, fora deste sandbox.
+
 ## Resumo de bloqueios remanescentes antes da Fase 1
 
 1. **`ARCH-DIVERGE-01`:** resolvido definitivamente pelo ADR-0002 (atualizado 2026-07-27):
