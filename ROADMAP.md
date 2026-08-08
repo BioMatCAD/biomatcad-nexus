@@ -284,6 +284,32 @@ permanece válido e não foi alterado nesta rodada:
 Esta reexecução é opcional/confirmatória, não bloqueante -- o empacotamento final v2.2 pode
 prosseguir sem ela, dado que nada no diff desta rodada altera o caminho feliz já comprovado.
 
+## Incremento 2.3, Rodada 1 (fundação canônica, proveniência e curadoria) — concluída
+
+A partir do commit `e10d23d`, branch `incremento-2.3-dados-cientificos`: fundação persistente
+do banco de dados científico (12 novas entidades, migração real verificada contra PostgreSQL em
+3 cenários, API mínima de leitura/criação/revisão, seed sintético idempotente, 22 testes novos,
+documentação completa em `docs/data/`) — ver `IMPLEMENTATION_STATUS.md` para o detalhamento
+completo e `REQUIREMENTS_MATRIX.md` seção J. **Esta rodada NÃO declara o Incremento 2.3
+completo** — é deliberadamente apenas a fundação.
+
+## Próximo (Incremento 2.3, Rodada 2 e além — candidatas, não decididas)
+
+1. **Conector de ingestão real para uma única fonte candidata** (mais provável: Crossref, por
+   ter o escopo mais restrito — apenas metadados bibliográficos — e a licença de metadados mais
+   claramente aberta, CC0) — só depois de uma confirmação formal da licença vigente, nunca
+   assumida. Ver `docs/data/SOURCE_REGISTRY_POLICY.md` e `docs/data/LICENSING_AND_REDISTRIBUTION.md`.
+2. **Interface administrativa de curadoria** além da API mínima desta rodada — listagem/edição
+   de observações pendentes de revisão, fila de revisão para curadores.
+3. **Backfill opcional e auditável** de `MaterialRecord.scientific_entity_id` para os registros
+   existentes do Incremento 2.1, se e quando fizer sentido consolidar os dois modelos.
+4. **Camada de agregação/reconciliação de observações divergentes** — hoje elas apenas
+   coexistem; uma futura funcionalidade de "valor consolidado" (com metodologia explícita, nunca
+   uma média silenciosa) poderia ajudar o `DesignAdvisor` a consumir esses dados.
+5. Carregar dados reais de materiais (AP-07) permanece condicionado à mesma cautela de sempre —
+   nenhum valor inventado, e agora com a estrutura desta rodada disponível para armazená-los com
+   proveniência completa quando isso for decidido.
+
 ## Dependências deferidas (Incremento 2.1.1)
 
 17 vulnerabilidades npm de **tooling de desenvolvimento apenas** (ESLint 8.x e sua cadeia —

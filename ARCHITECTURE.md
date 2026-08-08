@@ -387,6 +387,54 @@ dependente de execução em Windows pelo usuário.
   Windows pelo usuário — ver `TEST_EVIDENCE.md`, seção "Rodada Voronoi", para o registro
   detalhado do que foi e não foi provado nesta sessão.
 
+## Incremento 2.3 (Rodada 1) — Fundação Canônica, Proveniência e Curadoria (branch `incremento-2.3-dados-cientificos`)
+
+Objetivo desta rodada: tornar o sistema capaz de armazenar dado científico com proveniência
+completa (fonte, data de acesso, método/condições, unidade, incerteza, licença, estado de
+revisão) para materiais, biomateriais, substâncias químicas, fármacos, formulações,
+nanomateriais, produtos de fornecedor, estruturas cristalográficas e evidência bibliográfica —
+**sem** nenhuma coleta de dados externa nem importação em massa de bases reais. Essa parte
+permanece explicitamente para uma rodada futura (ver `docs/data/SOURCE_REGISTRY_POLICY.md`).
+
+- **12 novas entidades** (`apps/api/src/biomatcad_api/models/scientific_data.py`):
+  `ScientificEntity`, `ScientificIdentifier`, `ScientificSource`, `BibliographicReference`,
+  `PropertyDefinition`, `PropertyObservation`, `BiologicalEvidence`, `Supplier`,
+  `SupplierProduct`, `CrystalStructureReference`, `IngestionRun`, `ReviewDecision`. Documentação
+  detalhada do contrato em `docs/data/SCIENTIFIC_DATA_MODEL.md`.
+- **Compatibilidade aditiva**: `MaterialRecord` (Incremento 2.1) ganha apenas uma coluna nova e
+  nullable (`scientific_entity_id`), sempre `NULL` para registros pré-existentes, sem nenhum
+  backfill. `GeometryJob.material_id` e `manifest_service.py` — os dois pontos que dependem de
+  `MaterialRecord` — continuam absolutamente intocados. Nenhum endpoint/teste do Incremento
+  2.1/2.2 foi alterado.
+- **Migração real** (`alembic/versions/4920cd8fd160_...py`), verificada contra PostgreSQL real
+  (nunca SQLite) em três cenários: banco vazio, banco já populado com um `MaterialRecord`
+  pré-existente (preservado sem alteração), e downgrade completo e reversível.
+- **Deduplicação por fingerprint determinístico** (SHA-256, `compute_observation_fingerprint`):
+  a única forma de duas observações serem tratadas como "a mesma" é terem entidade, propriedade,
+  fonte, valor, unidade, método e condições idênticos. Qualquer divergência gera um fingerprint
+  diferente e as duas linhas coexistem — nunca há sobrescrita silenciosa de um valor científico
+  divergente.
+- **API mínima de pesquisa** (`routers/scientific_data.py`, prefixo
+  `/api/v1/scientific-entities`): leitura com escopo por organização (registro global se
+  `organization_id IS NULL`, privado caso contrário); escrita (criação de entidade) e revisão
+  exigem `require_admin`, reaproveitando exatamente o mecanismo já existente em `routers/auth.py`.
+  Criação de observação/identificador/fonte/referência/fornecedor/produto/estrutura
+  cristalográfica **não** é exposta via API nesta rodada — só pelo seed sintético
+  (`seed_scientific_data.py`), por instrução explícita de não construir ainda uma interface
+  administrativa extensa.
+- **Seed científico sintético** (`python -m biomatcad_api.seed_scientific_data`, idempotente):
+  popula 5 entidades canônicas (uma de cada tipo obrigatório), 2 observações conflitantes de
+  fontes sintéticas distintas para a mesma propriedade (nunca sobrescritas), 1 observação
+  supplier_declared, 1 fornecedor+produto fictício, 1 referência bibliográfica fictícia, 1
+  estrutura cristalográfica sintética, 1 execução de ingestão fictícia (nenhum conector real
+  existe), e os três estados de curadoria (draft/reviewed/rejected). Nenhum DOI/PMID/CAS/CID/
+  accession real é usado em nenhum lugar do seed.
+- **O que permanece deliberadamente fora desta rodada**: qualquer conector de ingestão real
+  contra PubChem/ChEBI/ChEMBL/Crossref/Europe PMC/PubMed/Crystallography Open Database/RCSB PDB
+  ou bases de fornecedor; qualquer dado clínico ou de paciente real; qualquer interface
+  administrativa extensa de curadoria; backfill de `MaterialRecord.scientific_entity_id` para
+  registros existentes. Ver `ROADMAP.md` para o encadeamento sugerido de rodadas futuras.
+
 ## Próximo incremento sugerido
 
 Ver `REQUIREMENTS_MATRIX.md`, `ROADMAP.md` e `docs/adr/` para prioridades. O Prompt Mestre

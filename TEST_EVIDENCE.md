@@ -2506,3 +2506,78 @@ Auditoria manual: nenhum caminho absoluto hardcoded não-substituível; todo Sto
 
 Nenhum destes resultados foi declarado aprovado sem execução real correspondente no sandbox.
 Nenhum teste foi enfraquecido ou removido nestas fases.
+
+## 31. Incremento 2.3, Rodada 1 — Fundação Canônica, Proveniência e Curadoria (2026-08-08)
+
+Branch `incremento-2.3-dados-cientificos`, a partir do commit `e10d23d`. Evidência de sandbox
+(sem Windows nesta rodada, já que não há geometria/PicoGK/UI envolvidos).
+
+**Fase C — migração Alembic contra PostgreSQL real (via `pgserver`, nunca SQLite):**
+```
+=== alembic upgrade head (banco vazio) ===
+INFO [alembic.runtime.migration] Running upgrade ... -> 4920cd8fd160, incremento 2.3: fundacao do banco de dados cientifico
+(upgrade limpo, sem erro)
+
+=== ciclo completo: upgrade parcial -> popular MaterialRecord -> upgrade head -> downgrade -> reupgrade ===
+1) alembic upgrade c32e9b0f0f3c (estado Incremento 2.1.1)
+2) INSERT manual de 1 organization + 1 material_records (via psycopg2, fora do SQLAlchemy)
+3) alembic upgrade head -> MaterialRecord preservado (name inalterado), scientific_entity_id = NULL
+4) alembic downgrade c32e9b0f0f3c -> as 12 tabelas novas desaparecem; MaterialRecord permanece intacto
+Resultado: PASSED (test_scientific_data_migration_preserves_populated_materials_and_downgrade_is_reversible)
+```
+
+**Fase D+E — API mínima + seed sintético (smoke test via `pgserver`):**
+```
+python -m biomatcad_api.seed
+python -m biomatcad_api.seed_scientific_data   # primeira execução
+python -m biomatcad_api.seed_scientific_data   # segunda execução (idempotência)
+
+Contagem de linhas idêntica após a 2a execução em todas as 12 tabelas:
+scientific_entities: 5 | scientific_identifiers: 1 | scientific_sources: 2
+bibliographic_references: 1 | property_definitions: 1 | property_observations: 3
+biological_evidence: 1 | suppliers: 1 | supplier_products: 1
+crystal_structure_references: 1 | ingestion_runs: 1 | review_decisions: 2
+-> nenhuma duplicação (seed idempotente confirmado)
+```
+
+**Fase F — suíte completa (Postgres real efêmero via `pgserver`):**
+```
+--- Backend (apps/api) ---
+ruff check .    -> All checks passed!
+mypy src        -> Success: no issues found in 54 source files
+alembic upgrade head -> OK
+pytest -q       -> 281 passed, 3 skipped (2 pré-existentes + 1 gated por PG_ADMIN_URL)
+
+Detalhamento dos 281 aprovados: 259 pré-existentes do Incremento 2.1/2.2 (sem regressão) + 8
+testes novos de API (test_scientific_data_api.py) + 14 testes novos de domínio
+(test_scientific_data_domain.py) = 281.
+
+Testes gated por PG_ADMIN_URL (executados separadamente com Postgres administrativo real via
+pgserver, ambos APROVADOS):
+  test_alembic_upgrade_head_runs_cleanly_on_empty_database -> PASSED
+  test_scientific_data_migration_preserves_populated_materials_and_downgrade_is_reversible -> PASSED
+```
+
+**Mutation testing manual (Fase F):**
+- Inserção de uma observação com fingerprint idêntico a uma já existente (mesma entidade,
+  propriedade, fonte, valor, unidade, método, condições) -> rejeitada pela constraint de banco
+  `uq_property_observation_fingerprint` (`IntegrityError`), confirmando que a deduplicação atua
+  no nível de banco, não apenas de aplicação.
+- Inserção de um identificador com mesmo `namespace`+`identifier_normalized` de um já existente
+  -> rejeitada pela constraint `uq_identifier_namespace_normalized`.
+- Tentativa de criação de entidade científica por um usuário `researcher` (não-admin) via API ->
+  `403 Forbidden`, auditado via `AuditEvent` (mesmo padrão já usado para a suíte clínica).
+- Tentativa de leitura de uma entidade privada de outra organização -> `404 Not Found` (nunca
+  `403`, para não confirmar a existência do registro a quem não deveria vê-lo).
+- Exclusão lógica (`is_active = False`) de uma entidade com observações e identificadores
+  relacionados -> ambos permanecem consultáveis após a exclusão lógica (nenhuma evidência
+  apagada).
+
+**Frontend/worker**: nenhum arquivo alterado nesta rodada (o Incremento 2.3 Rodada 1 é
+exclusivamente backend). Não foi necessário reexecutar `tsc`/`eslint`/`vitest`/`dotnet test`
+para esta rodada especificamente, já que a suíte completa do backend (que inclui a verificação
+de que `GeometryJob`/`manifest_service.py` continuam funcionando sem regressão) já cobre o único
+ponto de acoplamento real entre os dois domínios.
+
+Nenhum resultado acima foi declarado aprovado sem execução real correspondente no sandbox.
+Nenhum teste pré-existente foi enfraquecido ou removido nesta rodada.

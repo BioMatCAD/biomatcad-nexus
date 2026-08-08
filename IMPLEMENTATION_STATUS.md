@@ -1152,6 +1152,50 @@ O bundle preserva histórico completo (branches, tags, todos os commits) — dif
 `biomatcad-nexus-scaffold-v2.1.zip`, que é uma foto (snapshot) de um único commit via
 `git archive`, sem histórico.
 
+## Incremento 2.3 (Rodada 1) — Fundação Canônica, Proveniência e Curadoria (branch `incremento-2.3-dados-cientificos`)
+
+A partir do commit `e10d23d` (README modernizado registrando o encerramento formal do
+Incremento 2.2 e o início do Incremento 2.3), esta rodada implementou a fundação persistente do
+banco de dados científico — sem nenhuma coleta de dados externa nem importação em massa.
+
+- **Fase A (auditoria)**: mapeamento do modelo `MaterialRecord` existente, dos dois pontos
+  reais de dependência (`GeometryJob.material_id`, `manifest_service.py`), do mecanismo de
+  autenticação/autorização (`get_current_user`/`require_admin`), e do padrão de seed idempotente
+  (`_ensure_user` em `seed.py`) — todos reaproveitados sem reinvenção.
+- **Fase B (modelo de domínio)**: 12 novas entidades em
+  `apps/api/src/biomatcad_api/models/scientific_data.py` — ver `docs/data/SCIENTIFIC_DATA_MODEL.md`
+  para o contrato completo.
+- **Fase C (migração)**: `alembic/versions/4920cd8fd160_...py`, verificada em três cenários
+  reais contra PostgreSQL (nunca SQLite): banco vazio, banco já populado (preserva
+  `MaterialRecord` existente, `scientific_entity_id` fica `NULL`), e downgrade completo.
+- **Fase D (API mínima)**: `routers/scientific_data.py`, prefixo `/api/v1/scientific-entities`
+  — 8 endpoints (listagem/detalhe + 6 sub-rotas de leitura relacionada + criação de entidade +
+  criação de decisão de revisão), com escopo de organização e autorização admin-only para
+  escrita/revisão.
+- **Fase E (seed sintético)**: `python -m biomatcad_api.seed_scientific_data` (idempotente) —
+  5 entidades canônicas, observações conflitantes de fontes distintas, 1 fornecedor+produto
+  fictício, 1 referência bibliográfica fictícia, 1 estrutura cristalográfica sintética, 1
+  execução de ingestão fictícia, estados draft/reviewed/rejected. Nenhum identificador real
+  (DOI/PMID/CAS/CID/accession) em nenhum lugar do seed.
+- **Fase F (testes)**: 14 testes de domínio (`tests/test_scientific_data_domain.py`) + 8 testes
+  de API (`tests/test_scientific_data_api.py`) + 1 novo teste de migração real
+  (`test_scientific_data_migration_preserves_populated_materials_and_downgrade_is_reversible`,
+  gated por `PG_ADMIN_URL`, já presente no CI). Suíte completa: **281 passed, 3 skipped** (sem
+  nenhuma regressão dos 259 testes pré-existentes do Incremento 2.1/2.2).
+- **Fase G (documentação)**: `docs/data/SCIENTIFIC_DATA_MODEL.md`,
+  `docs/data/PROVENANCE_AND_CURATION.md`, `docs/data/SOURCE_REGISTRY_POLICY.md`,
+  `docs/data/LICENSING_AND_REDISTRIBUTION.md`, além desta seção e das atualizações em
+  `ARCHITECTURE.md`/`REQUIREMENTS_MATRIX.md`/`ROADMAP.md`/`TEST_EVIDENCE.md`.
+
+**O que foi deliberadamente deixado para uma rodada futura** (nunca implementado nesta rodada):
+qualquer conector de ingestão real contra bases externas (PubChem, ChEBI, ChEMBL, Crossref,
+Europe PMC/PubMed, Crystallography Open Database, RCSB PDB, fornecedores comerciais); backfill
+de `MaterialRecord.scientific_entity_id` para registros existentes; interface administrativa
+extensa de curadoria (a API desta rodada é deliberadamente mínima); criação via API de
+observação/identificador/fonte/referência/fornecedor/produto/estrutura cristalográfica (só via
+seed nesta rodada); qualquer dado clínico ou de paciente real. **O Incremento 2.3 não é
+declarado completo por esta rodada** — esta é apenas a Rodada 1 (fundação).
+
 ## Como executar hoje
 
 Ver `README.md` (seção atualizada) para os comandos completos de backend e frontend, incluindo
@@ -1163,6 +1207,7 @@ cd apps/api
 pip install -e ".[dev]"
 alembic upgrade head
 python -m biomatcad_api.seed
+python -m biomatcad_api.seed_scientific_data  # opcional: dados científicos sintéticos (Incremento 2.3)
 uvicorn biomatcad_api.main:app --reload
 
 # Frontend
