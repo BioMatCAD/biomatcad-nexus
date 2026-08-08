@@ -539,3 +539,96 @@ def test_process_request_dry_run_detects_existing_entity(db_session, monkeypatch
     finished = process_request(db_session, request=dry_claim)
     assert finished.summary["results"][0]["would_create_new_entity"] is False
     assert finished.summary["results"][0]["existing_entity_id"] is not None
+
+
+# --- _persist_raw_source_record: idempotência real por checksum (Fase J, alvo de mutação) --
+
+
+def test_persist_raw_source_record_same_payload_reuses_existing_row(db_session):
+    """Mesmo CID + mesmo payload (mesmo checksum SHA-256 do JSON canônico) -- NUNCA duplica,
+    devolve a versão já existente. Este é o alvo direto da mutação "idempotência" da Fase J:
+    remover o atalho de checksum em `_persist_raw_source_record` faz este teste falhar (uma
+    segunda linha seria criada para o mesmo payload)."""
+    from datetime import datetime, timezone
+
+    from biomatcad_api.models.scientific_ingestion import ParsingStatus, RawSourceRecord
+
+    admin = create_admin(db_session, email="raw-idem-admin1@biomatcad.example")
+    source = _make_source(db_session)
+    connector = _fake_connector({})  # nenhum fetch real necessário para este teste
+
+    request = submit_ingestion_request(
+        db_session, organization_id=admin.organization_id, requested_by_user_id=admin.id,
+        connector_id="pubchem_pug_rest", source_id=source.id, external_ids=["2244"],
+    )
+
+    fetch_result = svc.FetchResult(
+        external_id="2244",
+        requested_endpoint="/rest/pug/compound/cid/2244/property/MolecularWeight/JSON",
+        http_status=200,
+        content_type="application/json",
+        fetched_at=datetime.now(timezone.utc),
+        payload_json={"PropertyTable": {"Properties": [{"CID": 2244, "MolecularWeight": "180.16"}]}},
+        parsing_status=ParsingStatus.PARSED,
+    )
+
+    first = svc._persist_raw_source_record(db_session, connector=connector, request=request, fetch_result=fetch_result)
+    second = svc._persist_raw_source_record(db_session, connector=connector, request=request, fetch_result=fetch_result)
+
+    assert first.id == second.id
+    count = (
+        db_session.query(RawSourceRecord)
+        .filter(
+            RawSourceRecord.source_id == source.id,
+            RawSourceRecord.connector_id == connector.connector_id,
+            RawSourceRecord.external_record_id == "2244",
+        )
+        .count()
+    )
+    assert count == 1
+
+
+def test_persist_raw_source_record_changed_payload_creates_new_version_with_predecessor(db_session):
+    """Mesmo CID + payload ALTERADO (checksum diferente) -- sempre uma NOVA linha, com
+    `predecessor_record_id` apontando para a versão anterior (nunca sobrescrita/apagada)."""
+    from datetime import datetime, timezone
+
+    from biomatcad_api.models.scientific_ingestion import ParsingStatus, RawSourceRecord
+
+    admin = create_admin(db_session, email="raw-idem-admin2@biomatcad.example")
+    source = _make_source(db_session)
+    connector = _fake_connector({})
+
+    request = submit_ingestion_request(
+        db_session, organization_id=admin.organization_id, requested_by_user_id=admin.id,
+        connector_id="pubchem_pug_rest", source_id=source.id, external_ids=["2244"],
+    )
+
+    fetch_result_v1 = svc.FetchResult(
+        external_id="2244", requested_endpoint="/rest/pug/compound/cid/2244/property/MolecularWeight/JSON",
+        http_status=200, content_type="application/json", fetched_at=datetime.now(timezone.utc),
+        payload_json={"PropertyTable": {"Properties": [{"CID": 2244, "MolecularWeight": "180.16"}]}},
+        parsing_status=ParsingStatus.PARSED,
+    )
+    fetch_result_v2 = svc.FetchResult(
+        external_id="2244", requested_endpoint="/rest/pug/compound/cid/2244/property/MolecularWeight/JSON",
+        http_status=200, content_type="application/json", fetched_at=datetime.now(timezone.utc),
+        payload_json={"PropertyTable": {"Properties": [{"CID": 2244, "MolecularWeight": "180.17"}]}},  # alterado
+        parsing_status=ParsingStatus.PARSED,
+    )
+
+    first = svc._persist_raw_source_record(db_session, connector=connector, request=request, fetch_result=fetch_result_v1)
+    second = svc._persist_raw_source_record(db_session, connector=connector, request=request, fetch_result=fetch_result_v2)
+
+    assert second.id != first.id
+    assert second.predecessor_record_id == first.id
+    count = (
+        db_session.query(RawSourceRecord)
+        .filter(
+            RawSourceRecord.source_id == source.id,
+            RawSourceRecord.connector_id == connector.connector_id,
+            RawSourceRecord.external_record_id == "2244",
+        )
+        .count()
+    )
+    assert count == 2
