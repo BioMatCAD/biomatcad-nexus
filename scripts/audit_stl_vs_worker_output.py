@@ -45,7 +45,7 @@ def read_text_auto_encoding(path: Path) -> str:
     comum quando `dotnet`/PowerShell gravam a saída redirecionada em codificações diferentes
     dependendo da versão/locale do Windows)."""
     raw = path.read_bytes()
-    if raw.startswith(b"\xff\xfe\x00\x00") or raw.startswith(b"\x00\x00\xfe\xff"):
+    if raw.startswith((b"\xff\xfe\x00\x00", b"\x00\x00\xfe\xff")):
         return raw.decode("utf-32")
     if raw.startswith(b"\xff\xfe"):
         return raw.decode("utf-16-le")
