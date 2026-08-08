@@ -12,13 +12,12 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from biomatcad_api.models.geometry_job import GeometryJob, JobStatus
+from biomatcad_api.models.geometry_job import JobStatus
 from biomatcad_api.models.geometry_recipe import GeometryRecipe, RecipeStatus
 from biomatcad_api.models.project import BioMatProject
 from biomatcad_api.services.geometry_job_service import create_design_run_and_job
 from biomatcad_api.services.observability_service import (
     _dispatcher_status_file_path,
-    build_observability_status,
     check_dispatcher,
     check_queue,
     check_storage,
@@ -303,7 +302,7 @@ def test_observability_status_isola_jobs_entre_organizacoes(client, db_session):
 
 
 def test_observability_status_estrutura_completa(client, db_session):
-    user = create_researcher(db_session, email="full-shape@biomatcad.example")
+    create_researcher(db_session, email="full-shape@biomatcad.example")
     from .factories import RESEARCHER_PASSWORD
 
     token = login(client, "full-shape@biomatcad.example", RESEARCHER_PASSWORD)

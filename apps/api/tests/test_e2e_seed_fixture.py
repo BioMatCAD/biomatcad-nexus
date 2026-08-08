@@ -57,7 +57,13 @@ def _run_seed(env_overrides: dict) -> dict:
     env.setdefault("ENVIRONMENT", "test")
     env.setdefault("API_SECRET_KEY", "test-secret-key-not-for-production-not-for-production")
     result = subprocess.run(
-        [sys.executable, str(SEED_SCRIPT)], cwd=API_ROOT, env=env, capture_output=True, text=True, timeout=120
+        [sys.executable, str(SEED_SCRIPT)],
+        cwd=API_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
     )
     assert result.returncode == 0, (
         f"seed_e2e_user.py falhou (rc={result.returncode}).\nstdout={result.stdout}\nstderr={result.stderr}"
@@ -271,7 +277,7 @@ def test_artifact_correto_e_manifest_incorreto_e_reconciliado_preservando_id(tmp
 def test_registros_alheios_ao_fixture_permanecem_intactos(tmp_path):
     """Cenário 6: um usuário/organização/job REAL (não pertencente ao fixture E2E) coexistindo
     no mesmo banco -- a reconciliação nunca deve tocar nele, byte a byte e linha a linha."""
-    env, db_path, storage_dir = _make_env(tmp_path, "coexisting")
+    env, db_path, _storage_dir = _make_env(tmp_path, "coexisting")
     _run_seed(env)
 
     # Insere um registro "alheio" diretamente via SQL puro (simula um usuário/job real de
@@ -338,7 +344,13 @@ def test_saida_do_seed_nunca_expoe_a_senha_sintetica_em_texto_claro(tmp_path):
     seed_env.setdefault("ENVIRONMENT", "test")
     seed_env.setdefault("API_SECRET_KEY", "test-secret-key-not-for-production-not-for-production")
     result = subprocess.run(
-        [sys.executable, str(SEED_SCRIPT)], cwd=API_ROOT, env=seed_env, capture_output=True, text=True, timeout=120
+        [sys.executable, str(SEED_SCRIPT)],
+        cwd=API_ROOT,
+        env=seed_env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
     )
     assert result.returncode == 0, (
         f"seed_e2e_user.py falhou (rc={result.returncode}).\nstdout={result.stdout}\nstderr={result.stderr}"

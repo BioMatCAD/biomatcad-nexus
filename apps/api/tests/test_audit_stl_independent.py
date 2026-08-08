@@ -12,7 +12,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from audit_stl_independent import (  # noqa: E402
+from audit_stl_independent import (
     StlParseError,
     audit_stl,
     box_signed_distance_mm,

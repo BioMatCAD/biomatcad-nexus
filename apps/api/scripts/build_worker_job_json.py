@@ -42,7 +42,7 @@ def main() -> int:
 
     api_src = repo_root / "apps" / "api" / "src"
     sys.path.insert(0, str(api_src))
-    from biomatcad_api.services.recipe_service import validate_and_canonicalize  # noqa: E402
+    from biomatcad_api.services.recipe_service import validate_and_canonicalize
 
     with open(recipe_path, encoding="utf-8") as f:
         recipe_body = json.load(f)

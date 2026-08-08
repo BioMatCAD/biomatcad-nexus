@@ -81,8 +81,8 @@ if _IS_POSTGRES_TEST_DB:
 
 os.environ["DATABASE_URL"] = _database_url_with_isolated_schema()
 
-from biomatcad_api import models  # noqa: F401,E402
-from biomatcad_api.db import Base  # noqa: E402
+from biomatcad_api import models  # noqa: F401
+from biomatcad_api.db import Base
 
 
 @pytest.fixture(scope="session")

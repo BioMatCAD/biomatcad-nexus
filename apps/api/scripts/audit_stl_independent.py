@@ -179,8 +179,7 @@ def audit_stl(stl_path: Path, recipe: dict, dedupe_tolerance_mm: float = 1e-4) -
     max_violation = 0.0
     for v in vertices:
         sdf = domain_sdf(v, domain)
-        if sdf > max_violation:
-            max_violation = sdf
+        max_violation = max(max_violation, sdf)
 
     xs = [v[0] for v in vertices]
     ys = [v[1] for v in vertices]

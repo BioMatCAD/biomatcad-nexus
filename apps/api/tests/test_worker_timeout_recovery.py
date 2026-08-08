@@ -331,9 +331,11 @@ def _make_fake_worker_repo_with_large_output_script(tmp_path: Path, *, hang_afte
         "    sys.stdout.flush()",
         "    sys.stderr.write(chunk)",
         "    sys.stderr.flush()",
-        "result = {'stl_path': '/fake/scaffold.stl', 'metrics': {'vertex_count': 1}, "
-        "'worker_version': 'fake-pipe-test', 'dotnet_version': 'fake', 'picogk_version': 'fake', "
-        "'duration_seconds': 0.01}",
+        (
+            "result = {'stl_path': '/fake/scaffold.stl', 'metrics': {'vertex_count': 1}, "
+            "'worker_version': 'fake-pipe-test', 'dotnet_version': 'fake', 'picogk_version': 'fake', "
+            "'duration_seconds': 0.01}"
+        ),
         "print(json.dumps(result), flush=True)",
     ]
     if hang_after_output:
@@ -396,16 +398,16 @@ def test_execute_cancelamento_continua_funcionando_com_drenagem_continua(tmp_pat
     monkeypatch.setattr(worker_client_module, "STARTUP_OVERHEAD_SECONDS", 5)
     monkeypatch.setattr(worker_client_module, "POLL_INTERVAL_SECONDS", 0.1)
 
-    worker_script = "\n".join([
-        "import sys, time",
-        "chunk = ('Y' * 8192) + chr(10)",
-        "while True:",
-        "    sys.stdout.write(chunk)",
-        "    sys.stdout.flush()",
-        "    sys.stderr.write(chunk)",
-        "    sys.stderr.flush()",
-        "    time.sleep(0.01)",
-    ]) + "\n"
+    worker_script = (
+        "import sys, time\n"
+        "chunk = ('Y' * 8192) + chr(10)\n"
+        "while True:\n"
+        "    sys.stdout.write(chunk)\n"
+        "    sys.stdout.flush()\n"
+        "    sys.stderr.write(chunk)\n"
+        "    sys.stderr.flush()\n"
+        "    time.sleep(0.01)\n"
+    )
     repo_root = _make_fake_worker_repo(tmp_path / "fake-repo", worker_script)
     client = DotnetPicoGkWorkerClient(repo_root=repo_root, dotnet_bin=sys.executable)
 

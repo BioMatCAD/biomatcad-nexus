@@ -17,7 +17,7 @@ from pathlib import Path
 import psutil
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-import verify_full_pipeline_sha256 as gate  # noqa: E402
+import verify_full_pipeline_sha256 as gate
 
 
 def test_timeout_efetivo_nunca_e_menor_que_o_orcamento_interno_do_worker():

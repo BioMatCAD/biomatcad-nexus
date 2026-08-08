@@ -27,7 +27,10 @@ from biomatcad_api.models.geometry_recipe import GeometryRecipe
 from biomatcad_api.models.user import User
 from biomatcad_api.services.recipe_service import canonicalize_recipe
 from biomatcad_api.services.storage import StorageAdapter, sha256_of_bytes
-from biomatcad_api.services.topology_providers import UnknownTopologyProviderError, get_topology_provider
+from biomatcad_api.services.topology_providers import (
+    UnknownTopologyProviderError,
+    get_topology_provider,
+)
 
 
 def _current_git_commit(repo_root: Path) -> str | None:
@@ -79,6 +82,7 @@ def build_and_store_manifest(
     # create_design_run_and_job já rejeita antes de criar o job), registra o kind bruto sem
     # provider_class/version em vez de quebrar a montagem do manifesto de um job já concluído.
     topology_kind = recipe.canonical_json.get("topology", {}).get("kind")
+    topology_provider_summary: dict[str, str | None]
     try:
         provider_info = get_topology_provider(topology_kind)
         topology_provider_summary = {
