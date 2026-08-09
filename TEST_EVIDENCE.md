@@ -2672,3 +2672,127 @@ si permanece pendente no Windows do usuário** -- ver `apps/web/e2e/README.md`.
 Nenhum resultado acima foi declarado aprovado sem execução real correspondente no sandbox.
 Nenhum teste pré-existente foi enfraquecido ou removido nesta fase (159/159 Vitest e 373/376
 pytest -- os mesmos totais de antes desta fase mais os testes novos, nenhuma contagem menor).
+
+## Execução Windows real `scientific-data-e2e-windows-run1-7of9` (commit `4d24b4a`): 7/9 aprovados, 2 REPROVADOS, exit code 1 — veredito REPROVADO preservado; 2 seletores frágeis do teste corrigidos (produção não alterada) (2026-08-09)
+
+**Este registro não substitui nem reclassifica o resultado histórico abaixo — ele é preservado
+literalmente, como instruído.**
+
+Esta foi a **primeira execução real no Windows** do E2E científico (`scientific-data.spec.ts`),
+via `scripts/Run-ScientificDataE2EOnly.ps1`, contra o commit `4d24b4a` (o mesmo commit da
+Fase R/S acima, onde o E2E só tinha sido verificado por contrato de API, nunca por Chromium
+real). Evidência bruta: `SCIENTIFIC_DATA_E2E_ONLY_REPORT.json`, `SCIENTIFIC_DATA_E2E_ONLY_REPORT.md`,
+`scientific-data-e2e-output.log`, 2 `error-context.md` e 2 `trace.zip`, todos inspecionados
+integralmente antes de qualquer edição.
+
+**Veredito histórico literal, preservado sem reclassificação**: 9 testes executados; **7
+aprovados, 2 REPROVADOS**; Playwright saiu com **exit code 1**; roteiro geral **REPROVADO**
+(`overall_ok: false`). Todos os passos de infraestrutura (API, migração, alembic, seeds,
+`API_SECRET_KEY` de 64 caracteres, `npm ci`) foram `ok: true` — as 2 falhas são exclusivamente
+dos dois testes abaixo. **Nenhuma chamada real ao PubChem ocorreu** (confirmado pela inspeção de
+`0-trace.network` em ambos os `trace.zip`: toda requisição de rede capturada é para
+`/api/v1/scientific-*` local, HTTP 200; nenhuma requisição para `pubchem.ncbi.nlm.nih.gov`).
+
+**Falha 1 — "3-4. detalhe de entidade sintética mostra propriedades e proveniência reais"**:
+`getByText(/Fonte Sintética (Alfa|Beta) de Demonstração/)` violou o strict mode do Playwright
+por casar simultaneamente com 2 elementos do DOM (a entrada de proveniência Alfa E a Beta). O
+snapshot ARIA real capturado em `error-context.md` mostra 3 `<li data-testid="provenance-entry">`
+corretos e distintos (Beta, um sem fonte, e Alfa com referência bibliográfica) — **a produção
+renderizou exatamente o contrato esperado (duas fontes conflitantes nunca fundidas)**; o defeito
+era do seletor do teste, não da interface. **Confirmado, não presumido.**
+
+**Falha 2 — "6-7. login administrativo mostra o painel de ingestão na listagem"**:
+`getByText(/No máximo 10 CIDs? por solicitação/i)` nunca casou porque o texto real em produção
+(`PubChemIngestionPanel.tsx`, linha do parágrafo do disclaimer) é literalmente
+"Lista explícita de CIDs (números do PubChem), **máximo 10 por solicitação**. Nunca busca por
+nome, [...]" — sem o prefixo "No" nem o substantivo "CIDs" depois do número. O snapshot ARIA real
+mostra o painel inteiro (`pubchem-ingestion-panel`) renderizado e funcional: cabeçalho,
+disclaimer, o próprio parágrafo com o texto real acima, seletor de fonte, campo de CIDs, botão
+Dry-run, botão Submeter ingestão — a asserção de visibilidade do painel na linha anterior já
+tinha passado. **O defeito era de expectativa textual literal do teste, não de UX ausente** —
+nenhum requisito de produto exige essa frase exata; a orientação de limite já é comunicada pelo
+texto real (não removida, apenas redigida de forma diferente da que o teste assumia).
+
+**Correção aplicada — somente em `apps/web/e2e/scientific-data.spec.ts`, produção intocada**:
+
+1. Proveniência: substituído o `getByText()` ambíguo por
+   `page.getByTestId("provenance-entry").filter({ hasText: "Fonte Sintética Alfa de Demonstração" })`
+   (e o equivalente para Beta), cada um afirmado com `.toHaveCount(1)` e `.toBeVisible()` —
+   prova explicitamente que as duas fontes conflitantes aparecem separadamente, sem usar
+   `.first()` (que teria mascarado uma eventual fusão indevida das duas entradas).
+2. Painel administrativo: substituída a asserção de frase editorial por asserções escopadas ao
+   próprio painel (`page.getByTestId("pubchem-ingestion-panel")`): `getByLabel("Lista de CIDs")`,
+   `getByRole("button", { name: "Dry-run" })`, `getByRole("button", { name: "Submeter ingestão" })`
+   — todas visíveis. O teste dedicado já existente mais adiante no mesmo spec
+   ("validação local rejeita mais de 10 CIDs e entrada não numérica...") continua sendo o único
+   lugar que verifica o limite de 10 CIDs — nenhuma duplicação de cobertura foi introduzida.
+
+Nenhum seletor usa `force: true`, `sleep` arbitrário ou timeout aumentado. Ambos usam
+`data-testid` ou papel/rótulo acessível já existentes na produção.
+
+**Mutation check real (não apenas teórico) — provado via testes de componente Vitest que
+espelham exatamente os mesmos seletores da correção acima**, já que o Chromium real não está
+disponível neste sandbox (ver abaixo):
+
+- Novo teste `tests/ScientificEntityDetailPage.test.tsx` ("proveniência mostra as duas fontes
+  conflitantes... nunca fundidas"), usando o mesmo padrão `getByTestId` + filtro por texto +
+  contagem exata. **Mutação real aplicada**: `ScientificEntityDetailPage.tsx`, trocado
+  `data.provenance.map(...)` por `data.provenance.slice(0, 1).map(...)` (simula uma regressão
+  que descarta silenciosamente a segunda fonte conflitante) — o novo teste **falhou de verdade**
+  (`expected [] to have a length of 1 but got +0`). Mutação revertida via cópia do arquivo
+  original; árvore de produção confirmada limpa (`git diff` vazio) e o teste voltou a passar.
+- Novo teste `tests/PubChemIngestionPanel.test.tsx` ("painel expõe os controles administrativos
+  essenciais..."), escopado ao `data-testid="pubchem-ingestion-panel"`. **Duas mutações reais
+  aplicadas separadamente**: (a) remoção do botão "Dry-run" do JSX de
+  `PubChemIngestionPanel.tsx` — o teste **falhou de verdade** (não encontrou o botão); (b)
+  remoção do `data-testid="pubchem-ingestion-panel"` do `<section>` — o teste **falhou de
+  verdade** (`findByTestId` não encontrou o painel). Ambas as mutações revertidas via cópia do
+  arquivo original; árvore de produção confirmada limpa (`git diff` vazio) e o teste voltou a
+  passar nos dois casos.
+
+Isso prova, com execução real (não com raciocínio teórico sobre a API do Playwright), que:
+remover uma das duas entradas de proveniência quebra a cobertura; remover o painel ou um
+controle administrativo essencial quebra a cobertura — exatamente como pedido.
+
+**Verificação completa pós-correção (neste sandbox)**:
+
+```
+npx tsc --noEmit                 -> limpo (0 erros)
+npx eslint . --max-warnings 0    -> limpo (0 erros, 0 avisos)
+npx vitest run                   -> 27 arquivos de teste, 161 passed (159 anteriores + 2 novos
+                                     testes de regressão do mutation check), 0 falhas
+npm run build                    -> OK (dist/assets/index-BRLjPcmq.js, 916.43 kB)
+npm run build:pages              -> OK (modo demo)
+npx playwright test --list       -> 24 testes em 3 arquivos; os 9 do scientific-data.spec.ts
+                                     continuam corretamente listados (linhas deslocadas, mesmos
+                                     nomes)
+```
+
+**Tentativa real de execução Playwright neste sandbox** (não presumida, efetivamente rodada):
+`pgserver` + `alembic upgrade head` + `uvicorn` real + `npx playwright test
+e2e/scientific-data.spec.ts --project=chromium`, com todas as variáveis de ambiente necessárias
+(`E2E_PYTHON_BIN`, `API_BASE_URL`, `VITE_API_BASE_URL`, `CI=true`). Resultado: **exit code 1**,
+os 9 testes falharam todos com a mesma causa, `chrome-headless-shell: error while loading shared
+libraries: libXdamage.so.1: cannot open shared object file: No such file or directory` — a mesma
+limitação de infraestrutura (biblioteca nativa do X11 ausente, sem acesso root) já documentada
+em todas as rodadas anteriores de E2E deste projeto, **confirmada persistente**, não uma
+regressão da correção. Por isso, **a correção dos dois seletores não pôde ser validada por uma
+execução real de Chromium neste sandbox** — apenas por `tsc`/`eslint`/`playwright --list` (todos
+limpos) e pelo mutation check via Vitest acima, que prova a sensibilidade real dos seletores ao
+mesmo tipo de regressão que os dois testes originais deveriam detectar.
+
+**Este documento NÃO declara o E2E científico aprovado.** O veredito histórico da rodada
+`scientific-data-e2e-windows-run1-7of9` (7/9, exit 1, REPROVADO) permanece registrado acima,
+sem alteração. A correção aplicada é, pela evidência disponível (snapshots ARIA reais +
+inspeção de rede/console dos `trace.zip` + mutation check real), consistente com "defeito do
+teste, não da interface" para as duas falhas — mas essa hipótese só será definitivamente
+confirmada por uma **segunda execução real no Windows**, com o mesmo roteiro, contra o novo
+commit desta correção. Comandos exatos para essa segunda execução: ver
+`apps/web/e2e/README.md`, seção "Execução Windows run1 (7/9)...".
+
+Nenhum arquivo de produção (`apps/web/src/**`) foi alterado nesta correção — apenas
+`apps/web/e2e/scientific-data.spec.ts` e os dois arquivos de teste Vitest citados acima
+(confirmado via `git diff` vazio em `PubChemIngestionPanel.tsx` e
+`ScientificEntityDetailPage.tsx` após a reversão das mutações). O piloto PubChem real não foi
+executado nem alterado nesta correção. Nenhum arquivo de backend, geometria, golden recipe,
+release 2.2 ou branch protegida foi tocado.

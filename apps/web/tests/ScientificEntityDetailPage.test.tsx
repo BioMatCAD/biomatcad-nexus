@@ -262,6 +262,46 @@ describe("ScientificEntityDetailPage -- proveniência, snapshots e rótulos de o
     vi.unstubAllGlobals();
   });
 
+  it("proveniência mostra as duas fontes conflitantes (Alfa e Beta) como entradas separadas, nunca fundidas", async () => {
+    // Regressão de componente que sustenta a correção do E2E científico (rodada Windows 7/9,
+    // commit 4d24b4a). O E2E real mostrou, na produção, duas entradas de proveniência
+    // (Fonte Sintética Alfa e Fonte Sintética Beta) renderizadas separadamente -- prova de que
+    // duas fontes conflitantes nunca são fundidas em uma só. Este teste reproduz o mesmo
+    // contrato aqui, em nível de componente, usando exatamente o mesmo padrão de seletor
+    // (data-testid + filtro por texto + contagem exata) usado no spec.ts corrigido, para que
+    // uma regressão futura (ex.: alguém trocar o .map por algo que só renderize a primeira
+    // entrada) quebre também este teste, não só o E2E manual.
+    vi.stubGlobal(
+      "fetch",
+      mockFetch({
+        provenance: [
+          {
+            observation_id: "obs-alfa",
+            reference: null,
+            source: { id: "src-alfa", name: "Fonte Sintética Alfa de Demonstração", source_type: "connector", base_url: null, publisher: null, license: null, version: null, accessed_at: null, redistribution_status: "allowed" },
+          },
+          {
+            observation_id: "obs-beta",
+            reference: null,
+            source: { id: "src-beta", name: "Fonte Sintética Beta de Demonstração", source_type: "connector", base_url: null, publisher: null, license: null, version: null, accessed_at: null, redistribution_status: "allowed" },
+          },
+        ],
+      }),
+    );
+    renderDetail();
+    const user = userEvent.setup();
+    await screen.findByRole("heading", { name: "Ácido acetilsalicílico (detalhe)" });
+    await user.click(screen.getByRole("button", { name: "Proveniência" }));
+    const entries = await screen.findAllByTestId("provenance-entry");
+    const alfaEntries = entries.filter((el) => el.textContent?.includes("Fonte Sintética Alfa de Demonstração"));
+    const betaEntries = entries.filter((el) => el.textContent?.includes("Fonte Sintética Beta de Demonstração"));
+    expect(alfaEntries).toHaveLength(1);
+    expect(betaEntries).toHaveLength(1);
+    expect(alfaEntries[0]).toBeVisible();
+    expect(betaEntries[0]).toBeVisible();
+    vi.unstubAllGlobals();
+  });
+
   it("dados de origem PubChem real mostram o aviso de fonte externa importada", async () => {
     vi.stubGlobal(
       "fetch",

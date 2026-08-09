@@ -69,7 +69,21 @@ test.describe("Interface científica -- pesquisador (leitura)", () => {
     await page.getByRole("button", { name: "Proveniência" }).click();
     const provenanceEntries = page.getByTestId("provenance-entry");
     await expect(provenanceEntries.first()).toBeVisible();
-    await expect(page.getByText(/Fonte Sintética (Alfa|Beta) de Demonstração/)).toBeVisible();
+    // Correção pós-execução Windows real (rodada 7/9, ver TEST_EVIDENCE.md): a 1a execução real
+    // provou que a produção está correta -- as DUAS fontes conflitantes (Alfa/Beta, mesma
+    // propriedade, valores divergentes 12.3/15.7 GPa, nunca fundidas) aparecem como entradas de
+    // proveniência SEPARADAS, exatamente como o domínio exige (Rodada 1). O defeito era do
+    // seletor do teste: um `getByText()` solto com alternância (Alfa|Beta) casava as DUAS
+    // entradas ao mesmo tempo, violando o strict mode do Playwright. A correção usa o
+    // data-testid estável já existente + `.filter({ hasText })`, provando explicitamente que
+    // Alfa e Beta aparecem cada uma exatamente uma vez -- nunca com `.first()` cego, que
+    // esconderia a ausência de uma das duas fontes.
+    const alphaProvenanceEntry = provenanceEntries.filter({ hasText: "Fonte Sintética Alfa de Demonstração" });
+    const betaProvenanceEntry = provenanceEntries.filter({ hasText: "Fonte Sintética Beta de Demonstração" });
+    await expect(alphaProvenanceEntry).toHaveCount(1);
+    await expect(betaProvenanceEntry).toHaveCount(1);
+    await expect(alphaProvenanceEntry).toBeVisible();
+    await expect(betaProvenanceEntry).toBeVisible();
   });
 
   test("5. painel administrativo de ingestão PubChem NÃO aparece para pesquisador", async ({ page }) => {
@@ -103,8 +117,20 @@ test.describe("Interface científica -- administrador (painel de ingestão PubCh
   test("6-7. login administrativo mostra o painel de ingestão na listagem", async ({ page }) => {
     await login(page, ADMIN_EMAIL, ADMIN_PASSWORD);
     await goToScientificData(page);
-    await expect(page.getByTestId("pubchem-ingestion-panel")).toBeVisible();
-    await expect(page.getByText(/No máximo 10 CIDs? por solicitação/i)).toBeVisible();
+    const panel = page.getByTestId("pubchem-ingestion-panel");
+    await expect(panel).toBeVisible();
+    // Correção pós-execução Windows real (rodada 7/9, ver TEST_EVIDENCE.md): o painel, o campo
+    // de CIDs e os botões de dry-run/submissão estavam TODOS presentes e funcionais na
+    // execução real (confirmado pelos testes 8-12, que dependem exatamente destes elementos) --
+    // a falha era só uma frase editorial (`/No máximo 10 CIDs? por solicitação/i`) que assumia
+    // um texto exato ("No máximo... CIDs...") não garantido pelo contrato; a produção mostra
+    // literalmente "máximo 10 por solicitação", sem o prefixo "No" nem a palavra "CIDs" logo
+    // após o número -- uma mudança de redação válida que nunca deveria quebrar o teste. Em vez
+    // de fixar a frase, provamos os elementos FUNCIONAIS estáveis (nunca texto editorial), sem
+    // duplicar a validação de limite/entrada não numérica já coberta pelo teste dedicado abaixo.
+    await expect(panel.getByLabel("Lista de CIDs")).toBeVisible();
+    await expect(panel.getByRole("button", { name: "Dry-run" })).toBeVisible();
+    await expect(panel.getByRole("button", { name: "Submeter ingestão" })).toBeVisible();
   });
 
   test("8. dry-run cria uma solicitação real (queued), nunca persiste entidade nenhuma", async ({ page }) => {

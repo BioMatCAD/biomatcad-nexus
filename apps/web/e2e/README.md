@@ -503,3 +503,43 @@ para instalar as dependências nativas do navegador):
 **A execução real do Chromium em si permanece pendente no Windows do usuário.** Isso não é uma
 limitação nova desta interface — é a mesma limitação de ambiente já registrada para os outros
 dois specs deste diretório.
+
+## Execução Windows run1 (7/9): `scientific-data-e2e-windows-run1-7of9` (commit `4d24b4a`) — REPROVADO; 2 seletores corrigidos; segunda execução pendente
+
+**Veredito histórico preservado, não reclassificado**: primeira execução real do Windows deste
+spec (`Run-ScientificDataE2EOnly.ps1`, commit `4d24b4a`) — **9 testes, 7 aprovados, 2
+REPROVADOS, exit code 1, roteiro geral REPROVADO**. Nenhuma chamada real ao PubChem ocorreu.
+Detalhamento completo (evidência bruta, classificação de cada falha, correção aplicada, mutation
+check real) em `TEST_EVIDENCE.md`, seção "Execução Windows real
+`scientific-data-e2e-windows-run1-7of9`...".
+
+Resumo das duas falhas e por que foram classificadas como defeito do teste, não da interface:
+
+1. **Proveniência** (`getByText` ambíguo -- strict mode) -- corrigido com
+   `getByTestId("provenance-entry").filter({ hasText })` + `toHaveCount(1)` para Alfa e Beta
+   separadamente.
+2. **Painel administrativo** (frase editorial que não existe literalmente em produção) --
+   corrigido com asserções sobre os controles funcionais (`getByLabel("Lista de CIDs")`,
+   botões "Dry-run"/"Submeter ingestão"), escopadas ao painel.
+
+Nenhuma alteração em produção. Mutation check real via testes de componente Vitest (Chromium
+indisponível neste sandbox — mesma limitação `libXdamage.so.1` de sempre, reconfirmada nesta
+rodada) prova que ambos os seletores detectam a regressão correspondente se ela ocorrer de
+verdade.
+
+**Este spec continua sem confirmação de execução real de Chromium após a correção.** A segunda
+execução real no Windows é necessária para confirmar que os 9/9 passam de fato. Comandos exatos
+(mesmo roteiro de sempre, agora contra o commit desta correção):
+
+```powershell
+pwsh .\scripts\Run-ScientificDataE2EOnly.ps1 `
+    -RepoPath C:\Users\adler\Documents\GitHub\biomatcad-nexus-v2.2.1-test `
+    -DatabaseUrl "postgresql+psycopg://biomatcad:biomatcad@localhost:5432/biomatcad"
+```
+
+Confirme antes de rodar que a árvore de trabalho está exatamente no commit desta correção
+(`git log -1 --oneline` deve mostrar o commit isolado descrito em `TEST_EVIDENCE.md`) e que
+nenhuma alteração local pendente existe (`git status` limpo). Ao final, os artefatos relevantes
+para uma nova auditoria, se houver qualquer falha, são os mesmos de sempre:
+`SCIENTIFIC_DATA_E2E_ONLY_REPORT.json`/`.md`, o log de saída, e as pastas
+`test-results/**/error-context.md` + `test-results/**/trace.zip` do Playwright.

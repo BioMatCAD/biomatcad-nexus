@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { useEffect, type ReactNode } from "react";
@@ -223,6 +223,25 @@ describe("PubChemIngestionPanel -- validação de CIDs", () => {
     const user = userEvent.setup();
     await user.type(input, "2244, abc, 702");
     expect(await screen.findByRole("alert")).toHaveTextContent(/apenas números são aceitos/i);
+  });
+});
+
+describe("PubChemIngestionPanel -- regressão de componente que sustenta o E2E (rodada Windows 7/9)", () => {
+  it("painel expõe os controles administrativos essenciais: campo de CIDs, Dry-run e Submeter ingestão", async () => {
+    // Regressão de componente que sustenta a correção do E2E científico (rodada Windows
+    // 7/9, commit 4d24b4a, falha 2). O E2E real mostrou, na produção, o painel administrativo
+    // totalmente funcional (campo de CIDs, botão Dry-run, botão Submeter ingestão) -- a falha
+    // do E2E era do texto literal esperado, não de um controle ausente. Este teste reproduz o
+    // mesmo contrato funcional aqui, em nível de componente, escopado ao próprio painel
+    // (data-testid="pubchem-ingestion-panel"), sem depender de nenhuma frase editorial --
+    // exatamente como a correção do spec.ts. Uma regressão futura que remova qualquer um
+    // desses controles quebra este teste também, não só o E2E manual.
+    vi.stubGlobal("fetch", mockFetch({}));
+    renderPanel();
+    const panel = await screen.findByTestId("pubchem-ingestion-panel");
+    expect(within(panel).getByLabelText("Lista de CIDs")).toBeVisible();
+    expect(within(panel).getByRole("button", { name: "Dry-run" })).toBeVisible();
+    expect(within(panel).getByRole("button", { name: "Submeter ingestão" })).toBeVisible();
   });
 });
 

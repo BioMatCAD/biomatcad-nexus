@@ -1377,6 +1377,20 @@ fórmula/SMILES/InChI foi deliberadamente deixado de fora deste adendo por ser u
 backend "já concluído" da Rodada 2, fora do escopo de uma interface mínima — backlog explícito
 para uma rodada futura, não uma omissão silenciosa.
 
+**Correção pós-primeira-execução-Windows (2026-08-09, mesmo commit-base `4d24b4a` da Fase R)**:
+a primeira execução real no Windows de `scientific-data.spec.ts` retornou **7/9 aprovados** (2
+falhas, exit code 1, veredito REPROVADO — preservado literalmente, não reclassificado). Ambas
+as falhas foram diagnosticadas, com evidência real (snapshots ARIA + `trace.zip`), como defeito
+do seletor do teste (strict-mode violation na proveniência; expectativa de frase editorial
+exata no painel administrativo), não da interface — a produção renderizou exatamente o
+contrato esperado nos dois casos. Corrigidos ambos os seletores (somente em
+`apps/web/e2e/scientific-data.spec.ts`, nenhuma linha de produção alterada), com mutation check
+real (via testes de componente Vitest, já que o Chromium segue indisponível neste sandbox —
+`libXdamage.so.1`) provando que cada seletor corrigido de fato detecta a regressão
+correspondente. Detalhamento completo em `TEST_EVIDENCE.md` e `apps/web/e2e/README.md`. **Este
+adendo permanece sem confirmação de execução Chromium real pós-correção** — uma segunda
+execução real no Windows do usuário ainda é necessária.
+
 ## Como executar hoje
 
 Ver `README.md` (seção atualizada) para os comandos completos de backend e frontend, incluindo
