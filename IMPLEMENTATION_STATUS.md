@@ -1259,6 +1259,32 @@ oficial confirmando o CID solicitado; (2) hash SHA-256 do payload preservado; (3
 real provada por duas submissões da mesma lista de CIDs produzindo o mesmo hash e nenhuma nova
 versão de `RawSourceRecord` na segunda vez.
 
+**Run 1 do piloto Windows real (2026-08-09): `final_status: FAILED_PREFLIGHT`, `PilotExitCode=1`
+-- defeito confirmado no preflight do roteiro, não no PostgreSQL nem no PubChem, corrigido.**
+Na primeira execução real de `Run-PubChemPilotWindows.ps1` no Windows do usuário, o Passo 1
+(`postgres_connectivity`) falhou e o roteiro abortou antes de consultar o PubChem. Evidência: os
+serviços `postgresql-x64-14` e `postgresql-x64-18` estavam `Running`, a porta 5432 estava
+acessível -- **o PostgreSQL nunca esteve indisponível nesta execução**. Causa raiz confirmada:
+o Passo 1 fazia `psycopg2.connect()` normalizando a `DatabaseUrl` apenas com
+`.replace('postgresql+psycopg2://', 'postgresql://')`; a URL oficial fornecida era
+`postgresql+psycopg://...` (dialeto psycopg 3, o mesmo já documentado como padrão do projeto em
+`tests/test_database_driver_contract.py`), que não batia com esse `.replace()` e chegava
+intacta a `psycopg2.connect()`, que rejeitou com `invalid dsn: missing "=" after
+"postgresql+psycopg://..."`. Corrigido extraindo a normalização para uma função explícita e
+testável (`scripts/db_url_normalization.py::to_psycopg2_dsn`, baseada em
+`urllib.parse.urlsplit`/`urlunsplit`, nunca substituição textual de prefixo), que aceita os três
+dialetos (`postgresql://`, `postgresql+psycopg2://`, `postgresql+psycopg://`) e preserva o
+restante da URL byte a byte; o Passo 1 do `.ps1` agora delega a
+`scripts/pubchem_pilot_preflight_check.py`, que também nunca deixa uma senha vazar para o
+log/relatório mesmo que a mensagem de exceção do psycopg2 inclua o DSN completo (mascaramento
+via `mask_database_url`, testado). A `DatabaseUrl` usada por todos os demais passos (alembic,
+seed, dispatcher) continua exatamente no formato fornecido -- só a cópia isolada passada a
+`psycopg2.connect()` neste preflight precisava de normalização, já que o SQLAlchemy resolve
+ambos os dialetos nativamente em todo o resto do roteiro. Nenhuma chamada ao PubChem ocorreu
+nesta execução (o preflight aborta antes do Passo 5). **A Fase I continua pendente de uma
+execução real com sucesso** -- esta correção remove o bloqueio confirmado do preflight; ver
+`TEST_EVIDENCE.md` para o detalhamento completo e os comandos exatos da Run 2.
+
 ### Adendo de Interface Científica Mínima (Fases L-T, mesma Rodada 2, branch `incremento-2.3-dados-cientificos`)
 
 Após a entrega inicial das Fases A-K acima, foi identificado que a lacuna "Adendo de Interface

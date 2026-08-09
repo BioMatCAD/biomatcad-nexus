@@ -2796,3 +2796,93 @@ Nenhum arquivo de produção (`apps/web/src/**`) foi alterado nesta correção �
 `ScientificEntityDetailPage.tsx` após a reversão das mutações). O piloto PubChem real não foi
 executado nem alterado nesta correção. Nenhum arquivo de backend, geometria, golden recipe,
 release 2.2 ou branch protegida foi tocado.
+
+## Piloto PubChem Windows -- Run 1 (`FAILED_PREFLIGHT`, `PilotExitCode=1`): defeito confirmado no preflight, PostgreSQL nunca esteve indisponível, corrigido (2026-08-09)
+
+**Veredito histórico preservado, não reclassificado**: primeira execução real de
+`scripts/Run-PubChemPilotWindows.ps1` no Windows do usuário -- `final_status: FAILED_PREFLIGHT`,
+`PilotExitCode=1`. PostgreSQL estava acessível em `localhost:5432`; os serviços
+`postgresql-x64-14` e `postgresql-x64-18` estavam `Running`. **O PubChem não foi consultado; a
+ingestão não foi iniciada** -- o roteiro abortou no Passo 1 (`postgres_connectivity`), antes de
+qualquer submissão.
+
+**Causa confirmada (não presumida)**: o Passo 1 fazia `psycopg2.connect()` sobre uma URL
+normalizada por uma única linha `python -c "...replace('postgresql+psycopg2://',
+'postgresql://')..."`. A URL oficial fornecida na Run 1 foi
+`postgresql+psycopg://biomatcad:***@localhost:5432/biomatcad` -- o dialeto psycopg 3, já
+documentado como o dialeto recomendado do projeto em `apps/api/tests/test_database_driver_contract.py`
+desde o Incremento 2.1.1. Esse `.replace()` só reconhecia o sufixo `+psycopg2`, então a URL
+oficial passou intacta para `psycopg2.connect()`, que rejeitou com `psycopg2.ProgrammingError:
+invalid dsn: missing "=" after "postgresql+psycopg://..."`. **Isto nunca foi uma falha do
+PostgreSQL nem do PubChem** -- foi inteiramente um defeito de normalização de string neste
+roteiro especifico, que já havia sido corrigido corretamente em outro lugar do projeto
+(`scripts/gate_preflight_check.py`, que usa `SQLAlchemy.create_engine()` -- resolve os dois
+dialetos nativamente, nunca precisou de normalização manual) mas nunca tinha sido usado por este
+piloto especificamente, que fazia sua própria chamada direta a `psycopg2.connect()`.
+
+**Correção aplicada**:
+
+1. Nova função pura e testável `scripts/db_url_normalization.py::to_psycopg2_dsn` -- usa
+   `urllib.parse.urlsplit`/`urlunsplit` (nunca substituição textual de prefixo), aceita
+   explicitamente os três dialetos exigidos (`postgresql://`, `postgresql+psycopg2://`,
+   `postgresql+psycopg://`) e rejeita qualquer outro com
+   `UnsupportedDatabaseUrlDialectError` em vez de produzir silenciosamente um DSN inválido.
+2. Nova função `mask_database_url` (mesma regex de `Get-MaskedDatabaseUrl` do `.ps1`) -- mascara
+   qualquer credencial `esquema://usuario:senha@` encontrada em qualquer texto, inclusive dentro
+   de uma mensagem de exceção maior (comportamento real observado: a mensagem de erro do
+   `psycopg2.ProgrammingError` ecoa o início do DSN rejeitado).
+3. Novo script isolado `scripts/pubchem_pilot_preflight_check.py` substitui a linha `python -c`
+   embutida no Passo 1 do `.ps1` -- lê `DATABASE_URL` do ambiente, normaliza com
+   `to_psycopg2_dsn`, tenta `psycopg2.connect().close()`, e nunca imprime uma exceção sem
+   primeiro mascará-la com `mask_database_url`.
+4. `scripts/Run-PubChemPilotWindows.ps1`, Passo 1: delega a este novo script em vez da linha
+   `python -c` frágil; o `stderr` capturado também é mascarado uma segunda vez em PowerShell
+   (`Get-MaskedDatabaseUrl`) antes de entrar no relatório -- defesa em profundidade, nunca confia
+   numa única camada para não expor senha em log/relatório/mensagem de erro.
+5. **A `DatabaseUrl` usada por todos os passos seguintes (alembic, seed, ensure_pubchem_source,
+   CLI de ingestão, dispatcher) continua exatamente no formato fornecido pelo usuário, sem
+   nenhuma conversão** -- confirmado por inspeção: nenhum desses passos chama `psycopg2.connect()`
+   diretamente, todos passam por SQLAlchemy (via `biomatcad_api.db`), que já resolve
+   `postgresql+psycopg://` e `postgresql+psycopg2://` nativamente (mesma prova de
+   `test_database_driver_contract.py`). Só a cópia isolada usada por este preflight específico
+   precisava de normalização.
+
+**Testes novos** (`apps/api/tests/test_pubchem_pilot_db_url_normalization.py`, 15 testes):
+normalização dos três prefixos exigidos para o mesmo DSN esperado; preservação byte a byte de
+usuário/senha (inclusive caractere especial escapado)/host/porta/nome do banco/query string para
+os três prefixos; URL sem credenciais explícitas; rejeição de dialetos/drivers não suportados
+(`postgresql+asyncpg://`, `postgresql+pg8000://`, `mysql://`) sem produzir DSN inválido
+silenciosamente; mensagem de erro de rejeição não contém a senha da URL rejeitada; mascaramento
+de credenciais em URL isolada, dentro de mensagem de erro maior (reproduzindo o formato real do
+`psycopg2.ProgrammingError` desta Run 1), preservação de texto sem nenhuma credencial, e
+mascaramento de múltiplas ocorrências no mesmo texto.
+
+**Verificação adicional real (integração, não só unitária)**: neste sandbox, um `pgserver` real
+foi iniciado e o script `pubchem_pilot_preflight_check.py` foi executado de verdade contra ele
+com `DATABASE_URL` no formato `postgresql+psycopg://...` (reproduzindo exatamente o cenário da
+Run 1) -- **sucesso, `exit 0`, stdout `OK`**; repetido com `postgresql+psycopg2://...` --
+sucesso também (dialeto que já funcionava antes, confirmando ausência de regressão); e com uma
+senha propositalmente errada -- **falha real, `exit 1`, e a senha errada não aparece em nenhum
+lugar do stderr capturado** (confirmado programaticamente, não apenas assumido).
+
+**Verificação completa nesta rodada**:
+
+```
+[System.Management.Automation.Language.Parser]::ParseFile(Run-PubChemPilotWindows.ps1) -> 0 erros de sintaxe
+pytest tests/test_pubchem_pilot_db_url_normalization.py                       -> 15 passed
+pytest tests/test_database_driver_contract.py tests/test_pubchem_connector.py
+       tests/test_pubchem_http_client.py tests/test_pubchem_ingest_cli.py
+       tests/test_pubchem_pilot_db_url_normalization.py                       -> 65 passed, 0 falhas
+ruff check src tests scripts                                                  -> limpo (0 erros)
+mypy src scripts                                                              -> Success: no issues found in 76 source files
+```
+
+**Este documento não declara o piloto PubChem aprovado.** A Fase I (piloto real controlado)
+continua pendente de uma execução com sucesso -- esta correção remove o bloqueio confirmado do
+preflight; **nenhuma chamada real ao PubChem ocorreu nesta correção** (o preflight nunca chegou
+a passar do Passo 1 na Run 1, e o piloto não foi executado nesta correção, conforme instruído).
+Nenhum arquivo de backend/domínio/dados científicos/lógica de ingestão foi alterado além do
+estritamente necessário para o preflight (dois arquivos novos em `scripts/`, um teste novo, e a
+única linha do Passo 1 do `.ps1`). Comandos exatos para a Run 2: ver seção "Como executar hoje"
+de `docs/data/connectors/PUBCHEM_CONNECTOR.md` e o comando de exemplo do próprio
+`Run-PubChemPilotWindows.ps1` -- reproduzido também no resumo de entrega desta correção.

@@ -208,6 +208,18 @@ retornado bate com o solicitado (`services/connectors/pubchem.py::fetch`, erro e
 `cid_mismatch` caso contrário) — nunca escolhido de memória sem essa confirmação em tempo
 real.
 
+**Run 1 (2026-08-09): `FAILED_PREFLIGHT` corrigido.** A primeira execução real no Windows
+abortou no Passo 1 com `PilotExitCode=1`, mesmo com o PostgreSQL real acessível (serviços
+`Running`, porta 5432 aberta) — o PubChem sequer chegou a ser consultado. Causa confirmada:
+normalização de URL frágil (`.replace('postgresql+psycopg2://', 'postgresql://')`), que não
+cobria o dialeto `postgresql+psycopg://` (psycopg 3) usado na URL oficial fornecida. Corrigido
+com uma função explícita e testada em `scripts/db_url_normalization.py::to_psycopg2_dsn`
+(aceita `postgresql://`, `postgresql+psycopg2://` e `postgresql+psycopg://`, preserva o resto
+da URL via `urlsplit`/`urlunsplit`) e um script de preflight isolado
+(`scripts/pubchem_pilot_preflight_check.py`) que nunca deixa a senha vazar para o log/relatório
+mesmo dentro de uma mensagem de exceção. Ver `TEST_EVIDENCE.md` para o detalhamento completo e
+`IMPLEMENTATION_STATUS.md` (Fase I) para o registro na matriz de fases.
+
 **Comando de exemplo:**
 
 ```powershell
@@ -229,13 +241,15 @@ Este piloto foi construído para ser removível sem afetar o restante do Increme
    `base.py`, `pubchem.py`, `http_client.py`, `registry.py`),
    `scripts/scientific_ingestion_dispatcher.py`, `scripts/pubchem_ingest_cli.py`,
    `scripts/ensure_pubchem_source.py`, `scripts/pubchem_pilot_report.py`,
-   `scripts/Run-PubChemPilotWindows.ps1`.
+   `scripts/Run-PubChemPilotWindows.ps1`, `scripts/pubchem_pilot_preflight_check.py`,
+   `scripts/db_url_normalization.py` (usado apenas pelo preflight deste piloto).
 3. Remover o registro do router em `main.py` (`app.include_router(scientific_ingestion.router)`
    e o import correspondente).
 4. Remover os arquivos de teste específicos: `tests/test_pubchem_connector.py`,
    `tests/test_pubchem_http_client.py`, `tests/test_pubchem_ingest_cli.py`,
    `tests/test_scientific_ingestion_api.py`, `tests/test_scientific_ingestion_concurrency.py`,
-   `tests/test_scientific_ingestion_service.py`.
+   `tests/test_scientific_ingestion_service.py`,
+   `tests/test_pubchem_pilot_db_url_normalization.py`.
 5. Remover esta pasta de documentação (`docs/data/connectors/`).
 
 Nenhum outro módulo do sistema (materiais/projetos/receitas/jobs geométricos, dados

@@ -180,9 +180,21 @@ function Invoke-PythonJson {
 # ---- 1. PostgreSQL real acessivel -----------------------------------------------------------
 Write-Log "-- Passo 1: verificando conexao real com PostgreSQL --"
 $env:DATABASE_URL = $DatabaseUrl
-$dbCheck = Invoke-PythonJson -ScriptArgs @("-c", "import psycopg2, os, sys; url = os.environ['DATABASE_URL'].replace('postgresql+psycopg2://', 'postgresql://'); psycopg2.connect(url).close(); print('OK')")
+# Delegado a scripts/pubchem_pilot_preflight_check.py (nunca mais um replace() textual embutido
+# aqui -- ver docstring do script para o defeito real da Run 1 que motivou essa extracao). Esse
+# script aceita postgresql://, postgresql+psycopg2:// e postgresql+psycopg:// via
+# scripts/db_url_normalization.py::to_psycopg2_dsn, normalizando SOMENTE a copia isolada que ele
+# passa a psycopg2.connect() -- a DATABASE_URL usada por todos os passos seguintes (alembic,
+# seed, dispatcher) continua exatamente como fornecida, sem nenhuma conversao (o SQLAlchemy ja
+# resolve os dois dialetos nativamente).
+$dbCheck = Invoke-PythonJson -ScriptArgs @("scripts/pubchem_pilot_preflight_check.py")
 if ($dbCheck.ExitCode -ne 0 -or $dbCheck.Stdout.Trim() -ne "OK") {
-    Add-Step -Name "postgres_connectivity" -Ok $false -Detail "Falha ao conectar em $maskedDbUrl. stderr: $($dbCheck.Stderr)"
+    # Mascara qualquer credencial que porventura apareca no stderr (o script Python ja mascara
+    # por conta propria, mas mascarar de novo aqui e barato e evita que uma mudanca futura no
+    # script perca essa garantia silenciosamente -- nunca confie em uma unica camada para nao
+    # expor senha em log/relatorio).
+    $maskedStderr = Get-MaskedDatabaseUrl -Url $dbCheck.Stderr
+    Add-Step -Name "postgres_connectivity" -Ok $false -Detail "Falha ao conectar em $maskedDbUrl. stderr: $maskedStderr"
     Write-Log "[FALHA] PostgreSQL nao acessivel -- ver detalhes no relatorio."
     Write-ReportAndExit -ExitCode 1 -FinalStatus "FAILED_PREFLIGHT"
 }
