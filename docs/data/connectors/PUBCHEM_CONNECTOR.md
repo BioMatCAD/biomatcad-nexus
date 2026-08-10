@@ -174,7 +174,10 @@ consegue, ver seção de bloqueio de rede acima). Parâmetros: `-RepoPath` (obri
 `-OutputDir` (obrigatório), `-DatabaseUrl` (padrão
 `postgresql+psycopg2://biomatcad:biomatcad@localhost:5432/biomatcad`), `-Cids` (padrão
 `2244, 702, 5090` — aspirina/etanol/ibuprofeno; máximo rígido de 3), `-PythonBin` (padrão
-`<RepoPath>\apps\api\.venv\Scripts\python.exe`).
+`<RepoPath>\apps\api\.venv\Scripts\python.exe`), `-PollIntervalSeconds` (padrão `3.0`) e
+`-TimeoutSeconds` (padrão `300.0`) — novos desde a correção da Run 2 (ver abaixo): controlam o
+intervalo/prazo com que o roteiro acompanha o `request_id` exato de cada submissão até estado
+terminal.
 
 Sequência executada (aborta com relatório de falha em qualquer passo malsucedido):
 
@@ -186,17 +189,33 @@ Sequência executada (aborta com relatório de falha em qualquer passo malsucedi
    senha nova.
 4. Garante um `ScientificSource` real "PubChem" (`ensure_pubchem_source.py`, idempotente).
 5. Submete um **dry run** dos CIDs informados (`pubchem_ingest_cli.py --dry-run`).
-6. Processa a fila uma única vez (`scientific_ingestion_dispatcher.py --once`) — este é o
-   passo que de fato bate na rede oficial do PubChem.
-7. Exibe o diff do dry run (nenhuma entidade científica foi persistida neste passo).
+6. Acompanha o `request_id` EXATO do dry run até estado terminal via
+   `pubchem_pilot_wait_and_validate.py --kind dry_run` (drena a fila internamente, reprocessando
+   até esse request específico terminar ou até `-TimeoutSeconds` esgotar — nunca aceita
+   `queued`/`running` como sucesso, e nunca se contenta com "algum" request ter sido processado;
+   ver a correção da Run 2 abaixo). É este passo que de fato bate na rede oficial do PubChem.
+7. Exibe o diff do dry run e valida (`pubchem_pilot_validation.py::validate_dry_run_report`) que
+   o estado terminal é `succeeded`, `started_at`/`finished_at` estão preenchidos, e **zero**
+   `RawSourceRecord` foi persistido para qualquer CID esperado (nenhuma entidade científica pode
+   ter sido persistida neste passo).
 8. Submete a MESMA lista de CIDs como solicitação real (`dry_run=false`).
-9. Processa a fila novamente (`--once`) — desta vez persiste (`RawSourceRecord` +
-   `ScientificEntity`/`PropertyObservation` em rascunho, nunca revisado).
+9. Acompanha esse `request_id` até estado terminal (`--kind real`) e valida
+   (`validate_real_report`) que o estado é `succeeded`, sem erro, e que existe exatamente 1
+   `RawSourceRecord` por CID esperado com pelo menos 1 versão e SHA-256 não vazio — desta vez
+   persiste de fato (`RawSourceRecord` + `ScientificEntity`/`PropertyObservation` em rascunho,
+   nunca revisado).
 10. Submete a MESMA lista de CIDs uma segunda vez (prova de idempotência).
-11. Processa a fila mais uma vez (`--once`).
-12. Compara os relatórios das rodadas 9 e 11: o SHA-256 do payload de cada CID deve ser
-    idêntico, e nenhuma nova versão de `RawSourceRecord` deve ter sido criada — prova real de
-    idempotência, não apenas assumida.
+11. Acompanha esse segundo `request_id` até estado terminal e valida da mesma forma.
+12. Compara os relatórios das rodadas 9 e 11 via
+    `pubchem_pilot_check_idempotency.py::validate_idempotency`: o SHA-256 do payload de cada CID
+    esperado deve ser idêntico, nenhuma nova versão de `RawSourceRecord` deve ter sido criada, e
+    a lista de CIDs comparados nunca pode ser vazia — prova real de idempotência, não apenas
+    assumida.
+
+Ao final, uma **agregação fail-closed** relê todos os passos registrados no relatório: só
+declara `final_status=SUCCEEDED`/`exit 0` se literalmente todos tiverem `ok=true` — qualquer
+passo com `ok=false` reprova o piloto (`FAILED_VALIDATION`), mesmo que nenhum `exit` anterior
+tenha disparado (correção adicionada após a Run 2, ver abaixo).
 
 Nunca imprime segredos (senha do usuário sintético, `DATABASE_URL` com credenciais) no console
 ou no relatório — apenas o e-mail do usuário administrador e a URL do banco com a senha
@@ -220,6 +239,30 @@ da URL via `urlsplit`/`urlunsplit`) e um script de preflight isolado
 mesmo dentro de uma mensagem de exceção. Ver `TEST_EVIDENCE.md` para o detalhamento completo e
 `IMPLEMENTATION_STATUS.md` (Fase I) para o registro na matriz de fases.
 
+**Run 2 (2026-08-10): `final_status: SUCCEEDED`/`exit 0` — `INVALID_FALSE_POSITIVE` confirmado,
+NUNCA um piloto aprovado, roteiro corrigido.** A segunda execução real produziu relatório JSON
+com SHA-256 `83c22b55db98e5a4daea6f9e9fcabdee0aac56c1d1429510be0fce023bb8610f` e log de texto com
+SHA-256 `85aaf81d87d7fe7b6abf32879234ac06eebd7a50432c3726e4a1e87b43275225`, mas o próprio
+relatório se contradizia: `dry_run_result.ok=false` (`status=queued`);
+`real_result_1`/`real_result_2` com `status=queued`, sem `started_at`/`finished_at`, todos os
+CIDs com `version_count=0`; `idempotency_proof.extra` com os três CIDs `ok=false` ("sem
+RawSourceRecord") — e, ainda assim, `final_status=SUCCEEDED`. Causa raiz: (1)
+`claim_next_queued_request` é um FIFO global sem escopo por `request_id` (correto para
+produção), e o antigo `Invoke-DispatcherOnce` só conferia a contagem processada pelo
+dispatcher `--once`, nunca se o request processado era o que o próprio roteiro tinha acabado de
+submeter — uma solicitação `queued` mais antiga, deixada por uma execução anterior no banco
+persistente do Windows, foi processada no lugar, e a solicitação da Run 2 nunca saiu de
+`queued`; (2) a condição antiga `-Ok ($report.status -ne "failed")` aceitava `"queued"` como
+sucesso; (3) o laço de idempotência tinha um ramo que fazia `continue` sem nunca propagar
+`$idempotencyOk = $false`; (4) o roteiro não tinha nenhuma agregação fail-closed final — só
+abortava nas condições explicitamente codificadas, nenhuma das quais disparou aqui. Corrigido
+com `scripts/pubchem_pilot_wait_for_terminal.py` (acompanha o `request_id` exato até estado
+terminal, com timeout explícito), `scripts/pubchem_pilot_validation.py` (validações fail-closed
+puras), os novos CLIs `pubchem_pilot_wait_and_validate.py`/`pubchem_pilot_check_idempotency.py`,
+e uma agregação fail-closed final adicionada ao `.ps1`. Ver `TEST_EVIDENCE.md` para o
+detalhamento completo (incluindo os 22 testes que reproduzem literalmente a Run 2 e provam a
+rejeição) e `IMPLEMENTATION_STATUS.md` (Fase I).
+
 **Comando de exemplo:**
 
 ```powershell
@@ -242,14 +285,18 @@ Este piloto foi construído para ser removível sem afetar o restante do Increme
    `scripts/scientific_ingestion_dispatcher.py`, `scripts/pubchem_ingest_cli.py`,
    `scripts/ensure_pubchem_source.py`, `scripts/pubchem_pilot_report.py`,
    `scripts/Run-PubChemPilotWindows.ps1`, `scripts/pubchem_pilot_preflight_check.py`,
-   `scripts/db_url_normalization.py` (usado apenas pelo preflight deste piloto).
+   `scripts/db_url_normalization.py` (usado apenas pelo preflight deste piloto),
+   `scripts/pubchem_pilot_wait_for_terminal.py`, `scripts/pubchem_pilot_validation.py`,
+   `scripts/pubchem_pilot_wait_and_validate.py`, `scripts/pubchem_pilot_check_idempotency.py`
+   (adicionados na correção do falso positivo da Run 2).
 3. Remover o registro do router em `main.py` (`app.include_router(scientific_ingestion.router)`
    e o import correspondente).
 4. Remover os arquivos de teste específicos: `tests/test_pubchem_connector.py`,
    `tests/test_pubchem_http_client.py`, `tests/test_pubchem_ingest_cli.py`,
    `tests/test_scientific_ingestion_api.py`, `tests/test_scientific_ingestion_concurrency.py`,
    `tests/test_scientific_ingestion_service.py`,
-   `tests/test_pubchem_pilot_db_url_normalization.py`.
+   `tests/test_pubchem_pilot_db_url_normalization.py`,
+   `tests/test_pubchem_pilot_validation.py`, `tests/test_pubchem_pilot_wait_for_terminal.py`.
 5. Remover esta pasta de documentação (`docs/data/connectors/`).
 
 Nenhum outro módulo do sistema (materiais/projetos/receitas/jobs geométricos, dados

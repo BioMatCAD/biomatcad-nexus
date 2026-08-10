@@ -2883,6 +2883,141 @@ preflight; **nenhuma chamada real ao PubChem ocorreu nesta correção** (o prefl
 a passar do Passo 1 na Run 1, e o piloto não foi executado nesta correção, conforme instruído).
 Nenhum arquivo de backend/domínio/dados científicos/lógica de ingestão foi alterado além do
 estritamente necessário para o preflight (dois arquivos novos em `scripts/`, um teste novo, e a
-única linha do Passo 1 do `.ps1`). Comandos exatos para a Run 2: ver seção "Como executar hoje"
+única linha do Passo 1 do `.ps1`). Comandos exatos para a Run 2: ver seção "Comando de exemplo"
 de `docs/data/connectors/PUBCHEM_CONNECTOR.md` e o comando de exemplo do próprio
 `Run-PubChemPilotWindows.ps1` -- reproduzido também no resumo de entrega desta correção.
+
+## Piloto PubChem Windows -- Run 2 (`final_status: SUCCEEDED`, `PilotExitCode=0`): `INVALID_FALSE_POSITIVE` confirmado, roteiro corrigido (2026-08-10)
+
+**Veredito preservado, não reclassificado, nunca declarado piloto aprovado**: a segunda
+execução real de `scripts/Run-PubChemPilotWindows.ps1` no Windows do usuário produziu
+`final_status: SUCCEEDED`, `PilotExitCode=0`, relatório JSON com SHA-256
+`83c22b55db98e5a4daea6f9e9fcabdee0aac56c1d1429510be0fce023bb8610f` e log de texto com SHA-256
+`85aaf81d87d7fe7b6abf32879234ac06eebd7a50432c3726e4a1e87b43275225`. **Este resultado é um FALSO
+POSITIVO confirmado -- não uma prova real de que o conector PubChem funciona contra a rede
+oficial.** Nenhuma dessas evidências foi alterada, sobrescrita ou reclassificada como sucesso
+neste documento; permanecem registradas aqui exatamente como capturadas.
+
+**Evidência do falso positivo (literal, do relatório da Run 2)**:
+
+1. `dry_run_result`: `ok=false`, `status=queued` -- o dry run NUNCA terminou, mas o roteiro
+   antigo aceitava isso.
+2. `real_result_1` e `real_result_2`: `status=queued`, `started_at=null`, `finished_at=null`,
+   `summary=null`, `error=null`; todos os CIDs (2244/702/5090) com `version_count=0`,
+   `versions=[]` -- nenhuma das duas solicitações reais foi processada de fato.
+3. `idempotency_proof.extra`: os três CIDs (2244/702/5090) com `ok=false`, motivo "sem
+   RawSourceRecord" -- prova de idempotência nunca existiu.
+4. Apesar de (1)-(3), o relatório antigo continha `real_result_1.ok=true`,
+   `real_result_2.ok=true`, `idempotency_proof.ok=true`, `final_status=SUCCEEDED`, `exit code 0`
+   -- uma contradição interna que, por si só, já provava que o critério de aprovação do roteiro
+   estava quebrado.
+
+**Causa raiz confirmada (leitura completa do roteiro, do dispatcher e do serviço de ingestão --
+nunca presumida)**:
+
+- `claim_next_queued_request()` (`apps/api/src/biomatcad_api/services/scientific_ingestion_service.py`)
+  usa `SELECT ... FOR UPDATE SKIP LOCKED` ordenado por `created_at.asc()` -- um FIFO global
+  correto para um dispatcher de produção (que precisa poder processar qualquer solicitação da
+  fila), mas **sem nenhum escopo por `request_id`**. O antigo `Invoke-DispatcherOnce` chamava
+  `scientific_ingestion_dispatcher.py --once --limit 1` e só verificava o `exit code` do
+  dispatcher e a contagem global de "solicitações processadas" -- nunca conferia se a solicitação
+  processada era a que o PRÓPRIO roteiro tinha acabado de submeter. Como o banco Postgres do
+  Windows do usuário é persistente entre execuções, uma solicitação `queued` mais antiga (de uma
+  execução anterior) foi reivindicada e processada em vez da solicitação da Run 2, que permaneceu
+  `queued` para sempre.
+- **Bug A** (`real_result_1`/`real_result_2`): a condição antiga era
+  `-Ok ($realReportN.status -ne "failed")` -- **qualquer status diferente de `"failed"`,
+  incluindo `"queued"`, era aceito como sucesso**. Isto sozinho já bastava para o falso positivo.
+- **Bug B** (`idempotency_proof`): o laço antigo tinha um ramo
+  `if ($null -eq $rec1 -or $rec1.version_count -eq 0) { [void]$idempotencyDetails.Add(@{ ok=$false; ... }); continue }`
+  que **nunca propagava `$idempotencyOk = $false`** antes do `continue` -- o agregado
+  `$idempotencyOk` permanecia `$true` (seu valor inicial) mesmo com os três CIDs marcados
+  `ok=false` individualmente. Reproduzido literalmente em teste (ver abaixo).
+- **Falha sistêmica de desenho**: `Add-Step` só gravava booleanos no relatório; nada no roteiro
+  relia todos os passos ao final para decidir `final_status`. O roteiro só abortava nas poucas
+  condições explicitamente codificadas com `Write-ReportAndExit`, nenhuma das quais disparou na
+  Run 2 -- por isso ele caiu no `Write-ReportAndExit -ExitCode 0 -FinalStatus "SUCCEEDED"`
+  incondicional do final do arquivo. Esta é a causa raiz de mais alto nível: agregação
+  **fail-open**, quando deveria ser **fail-closed**.
+
+**Correção aplicada (camada Python, testável independentemente do PowerShell)**:
+
+1. `apps/api/scripts/pubchem_pilot_report.py` -- refatorado para expor
+   `build_pilot_report(db, request_id) -> dict | None` como função importável (antes só existia
+   inline em `main()`), reaproveitada por todo o resto da correção.
+2. `apps/api/scripts/pubchem_pilot_wait_for_terminal.py` (novo) -- `wait_for_request_terminal()`
+   acompanha o `request_id` EXATO: relê o relatório a cada iteração, e só retorna quando esse
+   request especifico atinge um estado terminal (`succeeded`/`partial`/`failed`/`cancelled`) --
+   nunca aceita `queued`/`running` como conclusão. Enquanto o alvo não termina, drena a fila
+   (`claim_next_queued_request` + `process_request`, em processo, sem depender do dispatcher
+   `--once` externo) -- exatamente o mecanismo que resolve "processar uma vez consome só o
+   primeiro item de uma fila preexistente". Tem timeout explícito e configurável
+   (`--timeout-seconds`, `--poll-interval-seconds`); ao esgotar, levanta
+   `RequestTerminalTimeoutError` (ou devolve `ok=false` na CLI) em vez de continuar
+   indefinidamente ou de aceitar o estado não-terminal.
+3. `apps/api/scripts/pubchem_pilot_validation.py` (novo) -- validações puras, sem acesso a
+   banco: `validate_dry_run_report` (exige status terminal `succeeded`, `started_at`/
+   `finished_at` preenchidos, `summary` coerente, e **zero** `RawSourceRecord` para qualquer CID
+   esperado); `validate_real_report` (exige status terminal `succeeded`, sem `error`, e
+   **exatamente 1** `RawSourceRecord` por CID esperado com pelo menos 1 versão e SHA-256 não
+   vazio -- substitui diretamente o Bug A); `validate_idempotency` (compara as duas rodadas reais
+   por CID -- hash idêntico e contagem de versões inalterada -- com
+   `overall_ok = bool(details) and all(d["ok"] for d in details)`, **rejeitando explicitamente
+   lista vazia e qualquer item `ok=false`** -- substitui diretamente o Bug B).
+4. `apps/api/scripts/pubchem_pilot_wait_and_validate.py` e
+   `apps/api/scripts/pubchem_pilot_check_idempotency.py` (novos) -- CLIs finas que combinam (2) e
+   (3) e imprimem sempre `{"ok", "reason", "report"/"details"}` em JSON, usadas pelo `.ps1`.
+5. `apps/api/scripts/Run-PubChemPilotWindows.ps1` -- os passos 5-12 foram reescritos para chamar
+   os CLIs acima (`Invoke-WaitAndValidate`, `Invoke-CheckIdempotency`) em vez do antigo
+   `Invoke-DispatcherOnce`/`Get-PilotReport`/laço de idempotência manual. **Nova agregação
+   fail-closed final**: antes de declarar `SUCCEEDED`/`exit 0`, o roteiro agora relê
+   `$report.steps` por inteiro e só prossegue se **literalmente todos** tiverem `ok=true`;
+   qualquer passo `ok=false` força `FAILED_VALIDATION`/`exit 1`, mesmo que nenhum `exit`
+   anterior tenha disparado -- a proteção sistêmica contra a falha de desenho descrita acima.
+   O comportamento de aborto por `NETWORK_UNREACHABLE_OR_ALL_CIDS_FAILED` (`exit 2`) para um
+   dry run cujo status terminal seja `"failed"` foi preservado.
+
+**Testes novos, reproduzindo literalmente a Run 2**:
+
+- `apps/api/tests/test_pubchem_pilot_validation.py` (16 testes, puros, sem banco): reproduz o
+  `real_result_1`/`real_result_2` literal da Run 2 (`status=queued`, `started_at=null`, todos os
+  CIDs `version_count=0`) e confirma que `validate_real_report` rejeita (`ok=false`); reproduz o
+  `idempotency_proof.extra` literal (três CIDs `ok=false`, "sem RawSourceRecord") e confirma que
+  `validate_idempotency` rejeita com lista vazia de sucesso e o agregado `ok=false` (prova direta
+  de que o Bug B não se repete); além de casos de aceite/rejeição para ambos os validadores e
+  cenários adicionais de idempotência (divergência de hash, nova versão na rodada 2).
+- `apps/api/tests/test_pubchem_pilot_wait_for_terminal.py` (6 testes, banco Postgres real via
+  `pgserver`): solicitação inexistente; solicitação já terminal; **drena uma solicitação antiga
+  parada na fila antes da solicitação-alvo** (reprodução direta da causa raiz da Run 2, agora
+  corrigida); timeout quando a solicitação nunca é processada; falha parcial de um CID; sucesso
+  completo de todos os CIDs seguido de re-submissão sem duplicação de versão na segunda rodada.
+
+**Verificação completa nesta correção** (executada com PostgreSQL real via `pgserver`, nunca
+SQLite, para validar de fato a garantia de concorrência/atomicidade da fila):
+
+```
+pwsh -ParseFile Run-PubChemPilotWindows.ps1                                    -> 0 erros de sintaxe
+pytest tests/test_pubchem_pilot_validation.py tests/test_pubchem_pilot_wait_for_terminal.py
+       tests/test_pubchem_pilot_db_url_normalization.py tests/test_scientific_ingestion_service.py
+                                                                                -> 66 passed
+pytest tests/test_scientific_ingestion_api.py tests/test_pubchem_connector.py
+       tests/test_pubchem_http_client.py tests/test_pubchem_ingest_cli.py
+       tests/test_database_driver_contract.py                                 -> 64 passed
+pytest tests/test_scientific_ingestion_concurrency.py tests/test_database_schema_isolation.py
+                                                                                -> 3 passed
+Smoke test end-to-end via subprocess real (CLI dos novos scripts, sem chamada real ao PubChem):
+  submissão real via pubchem_ingest_cli.py, request_id inexistente (exit 2),
+  timeout sem dispatcher (exit 1, status=queued preservado), check_idempotency com
+  request inexistente (exit 2)                                                -> todos conforme esperado
+ruff check src scripts tests                                                  -> limpo (0 erros)
+mypy src scripts                                                               -> Success: no issues found em 80 arquivos
+```
+
+**Nenhuma chamada real ao PubChem foi feita no sandbox durante esta correção** (todos os testes
+e o smoke test usam `dry_run`/submissões que nunca chegam a rede -- ou, no caso do smoke test,
+somente os caminhos de "não encontrado"/"timeout", que nunca reivindicam nem processam a
+solicitação). **Nenhum dado científico foi alterado ou fabricado para produzir um sucesso**.
+Este documento **não declara o piloto PubChem aprovado**: a Fase I continua pendente de uma
+execução real (Run 3) que atinja `final_status: SUCCEEDED` sob a nova agregação fail-closed.
+Comandos exatos para a Run 3: ver seção "Comando de exemplo" de
+`docs/data/connectors/PUBCHEM_CONNECTOR.md`.

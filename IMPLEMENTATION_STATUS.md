@@ -1285,6 +1285,41 @@ nesta execução (o preflight aborta antes do Passo 5). **A Fase I continua pend
 execução real com sucesso** -- esta correção remove o bloqueio confirmado do preflight; ver
 `TEST_EVIDENCE.md` para o detalhamento completo e os comandos exatos da Run 2.
 
+**Run 2 do piloto Windows real (2026-08-10): `final_status: SUCCEEDED`, `PilotExitCode=0` --
+`INVALID_FALSE_POSITIVE` confirmado, roteiro corrigido, veredito preservado (nunca
+reclassificado como piloto aprovado).** A segunda execução real produziu relatório JSON com
+SHA-256 `83c22b55db98e5a4daea6f9e9fcabdee0aac56c1d1429510be0fce023bb8610f` e log de texto com
+SHA-256 `85aaf81d87d7fe7b6abf32879234ac06eebd7a50432c3726e4a1e87b43275225`, mas o próprio
+relatório contém uma contradição interna: `dry_run_result.ok=false` (`status=queued`);
+`real_result_1`/`real_result_2` com `status=queued`, `started_at=null`, `finished_at=null`, e
+todos os CIDs (2244/702/5090) com `version_count=0`; `idempotency_proof.extra` com os três CIDs
+`ok=false` ("sem RawSourceRecord") -- e, apesar disso tudo, `final_status=SUCCEEDED`/`exit 0`.
+Causa raiz confirmada por leitura completa do roteiro, do dispatcher e do serviço de ingestão:
+(1) `claim_next_queued_request` é um FIFO global sem escopo por `request_id` (correto para
+produção), e o antigo `Invoke-DispatcherOnce` só verificava a contagem processada pelo
+dispatcher, nunca se a solicitação processada era a que o próprio roteiro tinha acabado de
+submeter -- uma solicitação `queued` mais antiga, deixada por uma execução anterior no banco
+persistente do Windows, foi processada no lugar; (2) Bug A: a condição antiga
+`-Ok ($report.status -ne "failed")` aceitava `"queued"` como sucesso; (3) Bug B: o laço de
+idempotência tinha um ramo que fazia `continue` sem nunca propagar `$idempotencyOk = $false`,
+deixando o agregado `$true` mesmo com todos os CIDs `ok=false`; (4) falha sistêmica de desenho:
+o roteiro só abortava nas poucas condições explicitamente codificadas, nenhuma das quais disparou
+aqui, e caía no `SUCCEEDED` incondicional do final do arquivo -- agregação fail-open em vez de
+fail-closed. Corrigido com uma camada Python testável independentemente
+(`scripts/pubchem_pilot_wait_for_terminal.py::wait_for_request_terminal`, que acompanha o
+`request_id` exato até estado terminal com timeout explícito, drenando a fila internamente;
+`scripts/pubchem_pilot_validation.py`, com `validate_dry_run_report`/`validate_real_report`/
+`validate_idempotency` fail-closed; CLIs `pubchem_pilot_wait_and_validate.py` e
+`pubchem_pilot_check_idempotency.py`) e uma agregação fail-closed final adicionada ao
+`.ps1` (relê todos os passos do relatório; só declara `SUCCEEDED` se literalmente todos tiverem
+`ok=true`). 22 testes novos reproduzem literalmente a Run 2 e prova que a correção rejeita
+exatamente esse cenário (`tests/test_pubchem_pilot_validation.py`: 16;
+`tests/test_pubchem_pilot_wait_for_terminal.py`: 6, incluindo o cenário exato de solicitação
+antiga bloqueando a fila). Nenhuma chamada real ao PubChem foi feita nesta correção; nenhum dado
+científico foi alterado para fabricar sucesso. **A Fase I continua pendente de uma execução real
+(Run 3) que atinja `SUCCEEDED` sob a nova agregação fail-closed** -- ver `TEST_EVIDENCE.md` para
+o detalhamento completo e os comandos exatos.
+
 ### Adendo de Interface Científica Mínima (Fases L-T, mesma Rodada 2, branch `incremento-2.3-dados-cientificos`)
 
 Após a entrega inicial das Fases A-K acima, foi identificado que a lacuna "Adendo de Interface
