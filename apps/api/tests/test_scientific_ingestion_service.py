@@ -23,6 +23,7 @@ from biomatcad_api.services.connectors.pubchem import PubChemConnector
 from biomatcad_api.services.scientific_ingestion_service import (
     IngestionRequestError,
     claim_next_queued_request,
+    claim_specific_request,
     list_conflicts_for_request,
     process_request,
     recover_orphaned_requests,
@@ -167,6 +168,64 @@ def test_claim_next_queued_request_skips_already_running(db_session):
     )
     claim_next_queued_request(db_session, dispatcher_id="d1")
     assert claim_next_queued_request(db_session, dispatcher_id="d2") is None
+
+
+# --- claim_specific_request (correção QUEUE_CONTAMINATION da Run 3 do piloto PubChem, ver
+# docs/data/connectors/PUBCHEM_CONNECTOR.md) -------------------------------------------------
+
+
+def test_claim_specific_request_returns_none_for_unknown_id(db_session):
+    assert claim_specific_request(db_session, request_id="does-not-exist", dispatcher_id="d1") is None
+
+
+def test_claim_specific_request_claims_only_target_never_an_older_one(db_session):
+    """Prova central da correção: mesmo com uma solicitação MAIS ANTIGA e queued disponível,
+    `claim_specific_request` reivindica SOMENTE o id pedido -- a mais antiga permanece
+    intocada. Isto é o oposto de `claim_next_queued_request` (FIFO global), que reivindicaria a
+    mais antiga primeiro."""
+    admin = create_admin(db_session)
+    source = _make_source(db_session)
+    older = submit_ingestion_request(
+        db_session, organization_id=admin.organization_id, requested_by_user_id=admin.id,
+        connector_id="pubchem_pug_rest", source_id=source.id, external_ids=["1"],
+    )
+    target = submit_ingestion_request(
+        db_session, organization_id=admin.organization_id, requested_by_user_id=admin.id,
+        connector_id="pubchem_pug_rest", source_id=source.id, external_ids=["2"],
+    )
+    claimed = claim_specific_request(db_session, request_id=target.id, dispatcher_id="d1")
+    assert claimed is not None
+    assert claimed.id == target.id
+    assert claimed.status == IngestionRequestStatus.RUNNING
+    assert claimed.claimed_by_dispatcher_id == "d1"
+
+    db_session.refresh(older)
+    assert older.status == IngestionRequestStatus.QUEUED
+    assert older.claimed_by_dispatcher_id is None
+
+
+def test_claim_specific_request_returns_none_when_already_running(db_session):
+    admin = create_admin(db_session)
+    source = _make_source(db_session)
+    request = submit_ingestion_request(
+        db_session, organization_id=admin.organization_id, requested_by_user_id=admin.id,
+        connector_id="pubchem_pug_rest", source_id=source.id, external_ids=["1"],
+    )
+    claim_specific_request(db_session, request_id=request.id, dispatcher_id="d1")
+    assert claim_specific_request(db_session, request_id=request.id, dispatcher_id="d2") is None
+
+
+def test_claim_specific_request_returns_none_when_already_terminal(db_session, monkeypatch):
+    admin = create_admin(db_session)
+    source = _make_source(db_session)
+    request = submit_ingestion_request(
+        db_session, organization_id=admin.organization_id, requested_by_user_id=admin.id,
+        connector_id="pubchem_pug_rest", source_id=source.id, external_ids=["2244"],
+    )
+    _patch_connector(monkeypatch, _fake_connector({"2244": _ok_response(2244)}))
+    claimed = claim_specific_request(db_session, request_id=request.id, dispatcher_id="d1")
+    process_request(db_session, request=claimed)
+    assert claim_specific_request(db_session, request_id=request.id, dispatcher_id="d2") is None
 
 
 # --- recover_orphaned_requests --------------------------------------------------------------

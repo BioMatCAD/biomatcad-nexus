@@ -1,16 +1,24 @@
-"""Testes de scripts/pubchem_pilot_wait_for_terminal.py (Incremento 2.3, Rodada 2, Fase I --
-correção do falso positivo confirmado na Run 2 do piloto PubChem Windows).
+"""Testes de scripts/pubchem_pilot_wait_for_terminal.py (Incremento 2.3, Rodada 2, Fase I).
 
-Causa real da Run 2: `Run-PubChemPilotWindows.ps1` chamava o dispatcher uma única vez
-(`--once --limit 1`) e confiava apenas na CONTAGEM devolvida ("Processada(s) 1 solicitação(ões)")
--- nunca verificava se a solicitação ESPECÍFICA que o próprio roteiro tinha acabado de submeter
-efetivamente saiu do estado `queued`. Como `claim_next_queued_request` reivindica sempre a
-solicitação mais antiga da fila inteira (FIFO global -- correto para produção), qualquer
-solicitação `queued` mais antiga e não relacionada, já existente no mesmo banco Postgres
-persistente, era processada de verdade a cada chamada, enquanto a solicitação do piloto ficava
-`queued` para sempre. Estes testes provam que `wait_for_request_terminal` resolve isso:
-acompanhando o `request_id` exato, drenando a fila item a item até alcançá-lo, com timeout
-explícito quando o processamento genuinamente nunca acontece.
+Histórico de duas correções:
+
+Run 2 (`INVALID_FALSE_POSITIVE`): `Run-PubChemPilotWindows.ps1` chamava o dispatcher uma única
+vez (`--once --limit 1`) e confiava apenas na CONTAGEM devolvida, nunca verificando se a
+solicitação ESPECÍFICA que o próprio roteiro tinha acabado de submeter efetivamente saiu do
+estado `queued`.
+
+Run 3 (`QUEUE_CONTAMINATION`, 2026-08-10, ver docs/data/connectors/PUBCHEM_CONNECTOR.md): a
+primeira correção deste módulo passou a acompanhar o `request_id` exato, mas ainda usava
+`claim_next_queued_request` (FIFO global) para "drenar a fila enquanto espera" -- e uma
+solicitação REAL antiga e não relacionada, já `queued` no mesmo banco persistente, foi
+reivindicada e PROCESSADA de verdade nesse meio-tempo, criando `RawSourceRecord`s reais
+atribuídos por engano a um dry run (que nunca poderia tê-los criado -- ver
+`services/scientific_ingestion_service.py::process_request`, ramo `dry_run`). Corrigido
+trocando `claim_next_queued_request` por `claim_specific_request` (reivindica SOMENTE o
+`request_id` alvo, nunca qualquer outra linha). Estes testes provam que `wait_for_request_terminal`
+agora NUNCA toca em nenhuma solicitação além da alvo, mesmo que uma mais antiga esteja
+esperando na fila -- e continua respeitando timeout explícito quando o processamento
+genuinamente nunca acontece.
 
 Nenhuma rede real é usada -- mesmo padrão de `test_scientific_ingestion_service.py`
 (`PubChemConnector` real com cliente HTTP fake injetado)."""
@@ -117,12 +125,15 @@ def test_wait_for_request_terminal_returns_immediately_when_already_terminal(db_
     assert report["status"] == "succeeded"
 
 
-def test_wait_for_request_terminal_drains_older_stale_request_first(db_session, monkeypatch):
-    """Reproduz o cenário real da Run 2: uma solicitação MAIS ANTIGA e não relacionada já está
-    'queued' no banco quando o piloto submete a sua. `wait_for_request_terminal` deve continuar
-    drenando a fila (processando a antiga primeiro, exatamente como o dispatcher real faria)
-    até que a solicitação que nos interessa também chegue a um estado terminal -- nunca parar
-    cedo demais só porque 'alguma' solicitação foi processada."""
+def test_wait_for_request_terminal_processes_only_target_never_touches_older_queued_request(
+    db_session, monkeypatch
+):
+    """Regressão direta da Run 3 (`QUEUE_CONTAMINATION`): uma solicitação MAIS ANTIGA e não
+    relacionada já está 'queued' no banco quando o piloto submete a sua. `wait_for_request_terminal`
+    deve reivindicar e processar SOMENTE a solicitação-alvo -- a antiga deve permanecer
+    exatamente como estava (`queued`, nunca reivindicada/processada). Isto é o oposto do
+    comportamento anterior (drenar a fila item a item), que foi a causa raiz confirmada da
+    contaminação na Run 3."""
     admin = create_admin(db_session)
     source = _make_source(db_session)
     old_request = submit_ingestion_request(
@@ -141,10 +152,31 @@ def test_wait_for_request_terminal_drains_older_stale_request_first(db_session, 
     )
     assert report["request_id"] == our_request.id
     assert report["status"] == "succeeded"
-    # Prova que a solicitação antiga TAMBÉM foi drenada (não ficou presa/ignorada) -- o
-    # dispatcher real de produção teria feito exatamente isso.
+    # Prova central desta correção: a solicitação antiga NUNCA foi tocada.
     db_session.refresh(old_request)
-    assert old_request.status == IngestionRequestStatus.SUCCEEDED
+    assert old_request.status == IngestionRequestStatus.QUEUED
+    assert old_request.started_at is None
+    assert old_request.claimed_by_dispatcher_id is None
+
+
+def test_wait_for_request_terminal_processes_target_normally_with_empty_queue(db_session, monkeypatch):
+    """Fila vazia (nenhuma outra solicitação além da nossa): execução normal, sem nenhum efeito
+    de contaminação a temer -- caso de base que deve continuar funcionando após a correção da
+    Run 3."""
+    admin = create_admin(db_session)
+    source = _make_source(db_session)
+    request = submit_ingestion_request(
+        db_session, organization_id=admin.organization_id, requested_by_user_id=admin.id,
+        connector_id="pubchem_pug_rest", source_id=source.id, external_ids=["2244"],
+    )
+    _patch_connector(monkeypatch, _fake_connector({"2244": _ok_response(2244)}))
+
+    report = wait_for_request_terminal(
+        db_session, request_id=request.id,
+        poll_interval_seconds=FAST_POLL_INTERVAL, timeout_seconds=FAST_TIMEOUT,
+    )
+    assert report["request_id"] == request.id
+    assert report["status"] == "succeeded"
 
 
 def test_wait_for_request_terminal_raises_timeout_when_never_processed(db_session, monkeypatch):
@@ -156,7 +188,7 @@ def test_wait_for_request_terminal_raises_timeout_when_never_processed(db_sessio
         db_session, organization_id=admin.organization_id, requested_by_user_id=admin.id,
         connector_id="pubchem_pug_rest", source_id=source.id, external_ids=["2244"],
     )
-    monkeypatch.setattr(wft, "claim_next_queued_request", lambda db, dispatcher_id: None)
+    monkeypatch.setattr(wft, "claim_specific_request", lambda db, request_id, dispatcher_id: None)
 
     with pytest.raises(RequestTerminalTimeoutError) as exc_info:
         wait_for_request_terminal(

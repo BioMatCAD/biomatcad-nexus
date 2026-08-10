@@ -3021,3 +3021,189 @@ Este documento **não declara o piloto PubChem aprovado**: a Fase I continua pen
 execução real (Run 3) que atinja `final_status: SUCCEEDED` sob a nova agregação fail-closed.
 Comandos exatos para a Run 3: ver seção "Comando de exemplo" de
 `docs/data/connectors/PUBCHEM_CONNECTOR.md`.
+
+## Piloto PubChem Windows -- Run 3 (`final_status: FAILED_VALIDATION`, `PilotExitCode=1`): `QUEUE_CONTAMINATION` confirmado, NUNCA o dry run, roteiro e validação corrigidos (2026-08-10)
+
+**Veredito preservado, não reclassificado, nunca declarado piloto aprovado**: a terceira
+execução real de `scripts/Run-PubChemPilotWindows.ps1` no Windows do usuário produziu
+`final_status: FAILED_VALIDATION`, `PilotExitCode=1`. O relatório antigo acusava incorretamente
+o dry run de ter persistido dados; a auditoria abaixo prova que essa acusação era
+temporalmente impossível e identifica a causa raiz real: uma solicitação real antiga, sobrevivente
+de uma execução anterior, foi drenada pela fila FIFO global enquanto o roteiro aguardava seu
+próprio dry run terminar. Nenhuma dessas evidências foi alterada, sobrescrita ou reclassificada
+como sucesso neste documento; permanecem registradas aqui exatamente como capturadas, e os dados
+persistidos durante esta execução (as três versões contaminantes de `RawSourceRecord`) foram
+preservados intactos como evidência.
+
+**Evidência literal do relatório/log da Run 3**:
+
+1. `request_id` do dry run: `bb30bdf9-e78d-401f-8f56-c43b12231b60` --
+   `created_at=2026-08-10T17:21:05.79856-03:00`,
+   `started_at=2026-08-10T17:21:27.071686-03:00`,
+   `finished_at=2026-08-10T17:21:31.593691-03:00`, `status=succeeded`.
+2. `dry_run_result.ok=false`, detalhe: "dry run: CID 2244 tem 1 RawSourceRecord(s) -- dry run
+   NUNCA deve persistir nada."
+3. As três versões de `RawSourceRecord` associadas aos CIDs esperados foram persistidas ANTES de
+   `started_at` do dry run: CID 2244 `created_at 17:21:18.070979`; CID 702 `created_at
+   17:21:19.652338`; CID 5090 `created_at 17:21:21.335769` -- todas entre 17:21:18 e 17:21:21,
+   enquanto o dry run só começou (`started_at`) às 17:21:27. Portanto a acusação "o dry run
+   persistiu" é **temporalmente impossível**: nada que o dry run faz pode ter causado uma escrita
+   concluída antes de ele sequer começar.
+4. O log de texto da Run 3 mostra uma janela de ~21s entre "Passo 5" (submissão do dry run às
+   17:21:06.2852984) e "Passo 6" terminar (17:21:31.9971483) -- consistente com o
+   `wait_for_request_terminal` (correção da Run 2) tendo reivindicado e processado uma outra
+   solicitação real enquanto aguardava a própria, antes de finalmente observar o dry run alvo em
+   estado terminal.
+5. `network_reachability.ok=true` com o detalhe antigo "estado terminal != failed" -- aceito
+   mesmo sem checar `fetch_errors` ou a presença de `preferred_name`/`formula` na resposta.
+6. Os três CIDs relatavam `missing_fields: ["CanonicalSMILES", "IsomericSMILES"]` de forma
+   determinística (nunca um subconjunto aleatório).
+
+**Causa raiz confirmada (leitura de código, sem suposição, para cada um dos itens acima)**:
+
+- **Acusação impossível ao dry run**: `process_request()`
+  (`apps/api/src/biomatcad_api/services/scientific_ingestion_service.py`) tem o ramo
+  `if request.dry_run: dry_run_diffs.append(...); continue` **antes** de qualquer chamada a
+  `_persist_raw_source_record` -- estruturalmente, nenhum dry run pode persistir
+  `RawSourceRecord`, independentemente de qualquer timestamp. A validação antiga
+  (`validate_dry_run_report`) exigia **zero registros absolutos** no banco para qualquer CID
+  esperado, em vez de comparar um delta -- por isso reprovou (corretamente, o resultado
+  `ok=false` estava certo) mas com o diagnóstico errado (a causa não era o dry run).
+- **Contaminação por fila real**: `wait_for_request_terminal()`
+  (`apps/api/scripts/pubchem_pilot_wait_for_terminal.py`), corrigido na Run 2 apenas para
+  reconhecer o estado terminal do `request_id` exato, ainda usava internamente
+  `claim_next_queued_request()` (FIFO global via `SELECT ... FOR UPDATE SKIP LOCKED` ordenado
+  por `created_at.asc()`) para "drenar a fila" enquanto aguardava -- mecanismo introduzido de
+  propósito na correção da Run 2 para resolver o cenário "uma solicitação antiga parada na fila
+  nunca é processada". Esse mesmo mecanismo, no ambiente Windows do usuário com banco Postgres
+  persistente entre execuções, reivindicou e processou uma solicitação real antiga e não
+  relacionada exatamente durante a janela de espera do dry run da Run 3, persistindo as três
+  versões de `RawSourceRecord` observadas.
+- **Ausência de proveniência por `request_id`**: `RawSourceRecord`
+  (`apps/api/src/biomatcad_api/models/scientific_ingestion.py`) não tem nenhuma coluna de
+  proveniência por solicitação -- é isolado apenas por
+  `(source_id, connector_id, external_record_id)`, deliberadamente, para permitir deduplicação
+  legítima entre solicitações distintas que buscam o mesmo CID. Não existe forma de provar com
+  certeza qual `request_id` específico criou uma dada versão; qualquer tentativa de atribuição
+  exata seria uma invenção não sustentada pelo esquema.
+- **`network_reachability` fail-open**: a condição antiga era
+  `-Ok $true -Detail "... (estado terminal != failed)"`, incondicional -- nunca checava
+  `fetch_errors` nem a presença de `preferred_name`/`formula` na resposta real.
+- **`CanonicalSMILES`/`IsomericSMILES` em `missing_fields`**: confirmado (via documentação
+  oficial do PubChemPy, `https://docs.pubchempy.org/en/latest/api.html`, sem nenhuma chamada real
+  adicional ao PubChem) que esses são nomes de campo **depreciados** da PUG REST API --
+  substituídos por `ConnectivitySMILES` (conectividade, sem estereoquímica) e `SMILES` (inclui
+  estereoquímica/isótopos), respectivamente. `services/connectors/pubchem.py` ainda requisitava
+  os nomes antigos (`REQUESTED_PROPERTY_FIELDS`), que a API real do PubChem já não retorna --
+  daí a divergência ser determinística e sempre nos mesmos dois campos.
+
+**Correção aplicada**:
+
+1. `apps/api/src/biomatcad_api/services/scientific_ingestion_service.py::claim_specific_request`
+   (novo) -- reivindica atomicamente **somente** o `request_id` informado (mesma primitiva de
+   bloqueio `SELECT ... FOR UPDATE SKIP LOCKED`, mas filtrada por `id`), nunca toca em nenhuma
+   outra linha da fila. `pubchem_pilot_wait_for_terminal.py::wait_for_request_terminal` foi
+   reescrito para chamá-la no lugar de `claim_next_queued_request` -- elimina a contaminação na
+   origem, em vez de apenas detectá-la depois.
+2. `apps/api/scripts/pubchem_pilot_queue_check.py` (novo) --
+   `find_contaminating_requests(db, connector_id, source_id, exclude_request_ids=())` detecta
+   qualquer solicitação `queued`/`running` pré-existente para o mesmo par conector/fonte. Rodado
+   como preflight, antes de qualquer submissão; falha explicitamente
+   (`FAILED_PREFLIGHT_QUEUE_CONTAMINATION`) sem tentar resolver a contaminação automaticamente
+   (nunca cancela/apaga a solicitação antiga -- decisão humana necessária).
+3. `apps/api/scripts/pubchem_pilot_capture_baseline.py` (novo) --
+   `capture_raw_record_baseline(db, connector_id, source_id, external_ids)` retorna, por CID, os
+   IDs de `RawSourceRecord` já existentes ANTES da submissão do dry run.
+4. `apps/api/scripts/pubchem_pilot_validation.py::validate_dry_run_report` -- reescrita para
+   receber esse baseline como parâmetro obrigatório e comparar por **delta** (IDs novos não
+   presentes no baseline) em vez de exigir zero registros absolutos. Qualquer delta detectado
+   vira `reason_code="queue_contamination"` -- nunca uma acusação ao dry run, já que o dry run é
+   estruturalmente incapaz de persistir. `validate_network_reachability` (nova função) exige
+   `status=="succeeded"` (nunca `"partial"` ou apenas `!= "failed"`), ausência de
+   `fetch_errors`, e uma resposta real por CID com `preferred_name` ou `formula`. `ValidationResult`
+   ganhou o campo `reason_code` para vereditos estáveis e parseáveis (`ok`, `invalid_status`,
+   `missing_data`, `queue_contamination`, `invalid_response`, `fetch_errors_present`).
+5. `apps/api/scripts/pubchem_pilot_wait_and_validate.py` -- ganhou `--baseline-file` (obrigatório
+   para `--kind dry_run`); roda `validate_network_reachability` e `validate_dry_run_report`
+   separadamente e devolve ambos os sub-resultados no JSON (`network_reachability`,
+   `dry_run_validation`), além do agregado.
+6. `apps/api/src/biomatcad_api/services/connectors/pubchem.py` --
+   `REQUESTED_PROPERTY_FIELDS` corrigido para `ConnectivitySMILES`/`SMILES` (em vez de
+   `CanonicalSMILES`/`IsomericSMILES`); `normalize()` lê as chaves correspondentes.
+7. `apps/api/scripts/Run-PubChemPilotWindows.ps1` -- novo "Passo 4.5" roda
+   `pubchem_pilot_queue_check.py` antes de qualquer submissão; novo "Passo 5a" captura o baseline
+   (`Invoke-CaptureBaseline`) antes de submeter o dry run; `network_reachability` e
+   `dry_run_result` agora são dois passos independentes no relatório, cada um refletindo o
+   veredito do seu próprio validador (`$dryRunWait.NetworkReachability`/`.DryRunValidation`) --
+   nunca mais um fail-open ou uma atribuição compartilhada incorreta.
+
+**Testes novos, reproduzindo literalmente a Run 3 e cobrindo os 7 cenários pedidos**:
+
+- `apps/api/tests/test_scientific_ingestion_service.py` (4 testes novos) --
+  `test_claim_specific_request_claims_only_target_never_an_older_one` prova diretamente que uma
+  solicitação real antiga permanece `queued`/intocada enquanto o `request_id` exato é
+  reivindicado (cenário "solicitação real antiga à frente do dry run").
+- `apps/api/tests/test_pubchem_pilot_wait_for_terminal.py` --
+  `test_wait_for_request_terminal_processes_only_target_never_touches_older_queued_request`
+  (renomeado e invertido a partir do antigo teste que **esperava** o dreno da fila -- a Run 3
+  provou que esse comportamento antigo era exatamente o defeito) e
+  `test_wait_for_request_terminal_processes_target_normally_with_empty_queue` (cenário "fila
+  vazia e execução normal").
+- `apps/api/tests/test_pubchem_pilot_validation.py` (33 testes no total) --
+  `test_validate_dry_run_report_accepts_preexisting_records_with_empty_delta` (cenário
+  "registros preexistentes com fila limpa"),
+  `test_validate_dry_run_report_rejects_new_record_delta_as_queue_contamination` (cenário
+  "ausência de delta" invertido/delta presente -> `queue_contamination`),
+  `test_validate_dry_run_report_rejects_concurrent_delta_not_attributable` (cenário "delta
+  concorrente não atribuível"),
+  `test_validate_dry_run_report_reproduces_literal_run3_evidence` (reproduz os hashes/IDs/
+  timestamps reais da Run 3 e prova que a validação corrigida reprova com
+  `reason_code="queue_contamination"`, nunca com uma acusação ao dry run),
+  `test_validate_network_reachability_accepts_succeeded_valid_response`,
+  `test_validate_network_reachability_rejects_partial_status`,
+  `test_validate_network_reachability_rejects_fetch_errors_present`,
+  `test_validate_network_reachability_rejects_response_without_name_or_formula`, e
+  parametrizados `test_validate_real_report_rejects_every_non_succeeded_status`/
+  `test_validate_dry_run_report_rejects_every_non_succeeded_status` sobre
+  `["cancelled", "queued", "running", "partial", "failed"]` (cenário "status cancelled/queued/
+  running rejeitado").
+- `apps/api/tests/test_pubchem_pilot_queue_check.py` (novo, 6 testes) --
+  `test_find_contaminating_requests_detects_old_real_request_ahead_of_dry_run`,
+  `test_find_contaminating_requests_detects_running_request_too`,
+  `test_find_contaminating_requests_ignores_different_source_or_connector`,
+  `test_find_contaminating_requests_ignores_terminal_requests`,
+  `test_find_contaminating_requests_excludes_given_request_ids`,
+  `test_find_contaminating_requests_empty_queue_is_clean`.
+- `apps/api/tests/test_pubchem_pilot_capture_baseline.py` (novo, 3 testes) --
+  `test_capture_baseline_empty_when_no_prior_records`,
+  `test_capture_baseline_reflects_preexisting_records`,
+  `test_capture_baseline_scoped_by_connector_and_source`.
+- `apps/api/tests/test_pubchem_connector.py` (3 testes novos) --
+  `test_requested_property_fields_use_current_not_deprecated_smiles_names`,
+  `test_normalize_maps_current_smiles_field_names_without_missing_fields`,
+  `test_normalize_flags_deprecated_smiles_field_names_as_missing`.
+
+**Verificação completa nesta correção** (executada com PostgreSQL real via `pgserver`, nunca
+SQLite):
+
+```
+pwsh -ParseFile Run-PubChemPilotWindows.ps1                                    -> 0 erros de sintaxe
+pytest tests/test_pubchem_pilot_wait_for_terminal.py tests/test_pubchem_pilot_validation.py
+       tests/test_pubchem_pilot_queue_check.py tests/test_pubchem_pilot_capture_baseline.py
+       tests/test_scientific_ingestion_service.py tests/test_pubchem_connector.py
+                                                                                -> 106 passed
+ruff check src scripts tests                                                  -> limpo (0 erros)
+mypy src                                                                       -> Success: no issues found em 63 arquivos
+```
+
+**Nenhuma chamada real ao PubChem foi feita no sandbox durante esta correção** (o payload usado
+para auditar `missing_fields` é o já preservado no relatório real da Run 3 -- item 10 solicitado
+pelo usuário; a deprecação de `CanonicalSMILES`/`IsomericSMILES` foi confirmada exclusivamente
+pela documentação oficial do PubChemPy). **Nenhum dado científico da Run 3 foi apagado ou
+alterado** -- as três versões de `RawSourceRecord` persistidas durante a contaminação continuam
+no banco como evidência.
+
+Este documento **não declara o piloto PubChem aprovado**: a Fase I continua pendente de uma
+execução real (Run 4) que atinja `final_status: SUCCEEDED` sob a fila limpa e a validação por
+delta. Comandos exatos para a Run 4 (banco PostgreSQL novo e isolado, preservando o banco atual
+como evidência): ver seção "Comando de exemplo" de `docs/data/connectors/PUBCHEM_CONNECTOR.md`.

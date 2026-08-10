@@ -184,6 +184,51 @@ def claim_next_queued_request(db: Session, *, dispatcher_id: str) -> ScientificI
     return request
 
 
+def claim_specific_request(
+    db: Session, *, request_id: str, dispatcher_id: str
+) -> ScientificIngestionRequest | None:
+    """Reivindica atomicamente APENAS a solicitação `request_id` informada -- nunca qualquer
+    outra linha da fila, mesmo que exista uma mais antiga pendente. Mesmo mecanismo de
+    `claim_next_queued_request` (`SELECT ... FOR UPDATE SKIP LOCKED`), mas filtrado por `id` em
+    vez de ordenado globalmente por `created_at`.
+
+    Existe especificamente para consumidores que precisam garantir progresso em UMA solicitação
+    própria sem nunca ter efeito colateral sobre o resto da fila -- caso de uso real: o piloto
+    Windows do conector PubChem (`scripts/Run-PubChemPilotWindows.ps1` via
+    `scripts/pubchem_pilot_wait_for_terminal.py`), que na Run 3 (2026-08-10) processou por
+    engano uma solicitação REAL antiga e não relacionada enquanto aguardava seu próprio dry run
+    terminar, porque a função de acompanhamento usava `claim_next_queued_request` (FIFO global)
+    para "drenar a fila enquanto espera" -- criando `RawSourceRecord`s reais atribuídos
+    erroneamente ao dry run (`QUEUE_CONTAMINATION`, ver
+    docs/data/connectors/PUBCHEM_CONNECTOR.md). Um dispatcher de produção real continua livre
+    para usar `claim_next_queued_request` normalmente em paralelo -- esta função nunca compete
+    por outras linhas, então não interfere nele.
+
+    Devolve `None` se a solicitação não existir, não estiver mais `queued` (já reivindicada por
+    outro processo, ou já terminal), ou estiver bloqueada por outra transação (nunca espera
+    indefinidamente por causa de `skip_locked=True`)."""
+    request = (
+        db.query(ScientificIngestionRequest)
+        .filter(
+            ScientificIngestionRequest.id == request_id,
+            ScientificIngestionRequest.status == IngestionRequestStatus.QUEUED,
+        )
+        .with_for_update(skip_locked=True)
+        .first()
+    )
+    if request is None:
+        return None
+    now = _utcnow()
+    request.status = IngestionRequestStatus.RUNNING
+    request.started_at = now
+    request.claimed_by_dispatcher_id = dispatcher_id
+    request.claimed_at = now
+    request.heartbeat_at = now
+    db.commit()
+    db.refresh(request)
+    return request
+
+
 def recover_orphaned_requests(
     db: Session, *, heartbeat_timeout_seconds: int = ORPHAN_HEARTBEAT_TIMEOUT_SECONDS
 ) -> list[str]:

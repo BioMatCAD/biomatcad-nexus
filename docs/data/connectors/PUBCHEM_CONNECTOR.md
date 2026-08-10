@@ -263,6 +263,61 @@ e uma agregação fail-closed final adicionada ao `.ps1`. Ver `TEST_EVIDENCE.md`
 detalhamento completo (incluindo os 22 testes que reproduzem literalmente a Run 2 e provam a
 rejeição) e `IMPLEMENTATION_STATUS.md` (Fase I).
 
+**Run 3 (2026-08-10): `FAILED_VALIDATION_QUEUE_CONTAMINATION` confirmado — NUNCA um piloto
+aprovado, contaminação por fila corrigida na origem.** A terceira execução real terminou com
+`PilotExitCode=1`/`final_status=FAILED_VALIDATION`. `request_id` do dry run
+`bb30bdf9-e78d-401f-8f56-c43b12231b60`: `created_at=2026-08-10T17:21:05.79856-03:00`,
+`started_at=2026-08-10T17:21:27.071686-03:00`, `finished_at=2026-08-10T17:21:31.593691-03:00`,
+`status=succeeded`. A validação antiga reprovou com "dry run: CID 2244 tem 1
+RawSourceRecord(s) -- dry run NUNCA deve persistir nada" — mas as três versões de
+`RawSourceRecord` envolvidas (CID 2244: `created_at 17:21:18.070979`; CID 702: `created_at
+17:21:19.652338`; CID 5090: `created_at 17:21:21.335769`) foram todas persistidas ANTES de
+`started_at=17:21:27.071686` do dry run, tornando essa acusação temporalmente impossível: o
+código de `process_request()` já garante estruturalmente que o ramo `dry_run` nunca chama
+`_persist_raw_source_record` (`if request.dry_run: dry_run_diffs.append(...); continue`, antes
+de qualquer persistência). Causa raiz confirmada por correlação de timestamps com o log da Run
+3: entre `started_at`/`finished_at` do dry run e o passo anterior havia uma janela de espera de
+~21s (17:21:06→17:21:27) em que `wait_for_request_terminal` — corrigido na Run 2 apenas para
+acompanhar o `request_id` exato até estado terminal, mas ainda usando `claim_next_queued_request`
+(FIFO global) internamente enquanto aguardava — reivindicou e processou uma solicitação real
+antiga, sobrevivente de uma execução anterior, persistindo as três versões de
+`RawSourceRecord` exatamente na janela observada. Como `RawSourceRecord` não tem (por design,
+para deduplicação legítima entre solicitações) nenhuma coluna de proveniência por
+`request_id` — é isolado apenas por `(source_id, connector_id, external_record_id)` — não há
+como atribuir com certeza qual `request_id` específico criou cada versão; a correção nunca tenta
+essa atribuição impossível e, em vez disso, classifica qualquer alteração não explicada como
+`QUEUE_CONTAMINATION`, nunca como acusação ao dry run. `network_reachability` também estava
+incorreto: aceitava qualquer estado terminal `!= failed` (inclusive `partial` ou uma resposta
+sem `preferred_name`/`formula`) como sucesso. E os três CIDs reportavam `CanonicalSMILES`
+e `IsomericSMILES` em `missing_fields` porque esses são nomes de campo **depreciados** da PUG
+REST API do PubChem (substituídos por `ConnectivitySMILES` e `SMILES`, respectivamente —
+confirmado na documentação oficial do PubChemPy) — o payload real da Run 3 nunca os retorna,
+então a divergência era determinística, não um problema de rede.
+
+Corrigido com: `services/scientific_ingestion_service.py::claim_specific_request` (reivindica
+atomicamente SOMENTE o `request_id` informado, via `SELECT ... FOR UPDATE SKIP LOCKED` filtrado
+por `id`, nunca toca em nenhuma outra linha da fila), usado agora por
+`pubchem_pilot_wait_for_terminal.py` no lugar de `claim_next_queued_request`;
+`scripts/pubchem_pilot_queue_check.py` (preflight que falha antes de qualquer submissão se
+houver solicitação `queued`/`running` antiga para o mesmo `connector_id`/`source_id`, com
+diagnóstico explícito, nunca resolve a contaminação automaticamente);
+`scripts/pubchem_pilot_capture_baseline.py` (captura, por CID, os `RawSourceRecord` já
+existentes antes da submissão do dry run); `pubchem_pilot_validation.py::validate_dry_run_report`
+reescrita para comparar esse baseline contra o estado final por delta (IDs novos não presentes
+no baseline) em vez de exigir zero registros absolutos — qualquer delta não atribuível vira
+`reason_code="queue_contamination"`, nunca uma acusação ao dry run;
+`validate_network_reachability` (nova função, exige `status=="succeeded"`, ausência de
+`fetch_errors` e uma resposta com `preferred_name` ou `formula`); e
+`services/connectors/pubchem.py` corrigido para requisitar `ConnectivitySMILES`/`SMILES` em vez
+dos nomes depreciados. O `.ps1` foi reescrito para: (1) rodar o preflight de limpeza da fila
+antes de qualquer submissão (`FAILED_PREFLIGHT_QUEUE_CONTAMINATION` se contaminada); (2)
+capturar o baseline antes do dry run; (3) reportar `network_reachability` e `dry_run_result`
+como dois passos independentes, cada um refletindo o veredito do seu próprio validador (nunca
+mais um fail-open compartilhado). Ver `TEST_EVIDENCE.md` para o detalhamento completo (incluindo
+os testes que reproduzem literalmente a evidência da Run 3) e `IMPLEMENTATION_STATUS.md` (Fase
+I). Os dados persistidos durante a Run 3 (incluindo as três versões contaminantes de
+`RawSourceRecord`) foram preservados como evidência, nunca apagados ou alterados.
+
 **Comando de exemplo:**
 
 ```powershell
@@ -288,7 +343,9 @@ Este piloto foi construído para ser removível sem afetar o restante do Increme
    `scripts/db_url_normalization.py` (usado apenas pelo preflight deste piloto),
    `scripts/pubchem_pilot_wait_for_terminal.py`, `scripts/pubchem_pilot_validation.py`,
    `scripts/pubchem_pilot_wait_and_validate.py`, `scripts/pubchem_pilot_check_idempotency.py`
-   (adicionados na correção do falso positivo da Run 2).
+   (adicionados na correção do falso positivo da Run 2), `scripts/pubchem_pilot_queue_check.py`,
+   `scripts/pubchem_pilot_capture_baseline.py` (adicionados na correção da contaminação por
+   fila da Run 3).
 3. Remover o registro do router em `main.py` (`app.include_router(scientific_ingestion.router)`
    e o import correspondente).
 4. Remover os arquivos de teste específicos: `tests/test_pubchem_connector.py`,
@@ -296,7 +353,8 @@ Este piloto foi construído para ser removível sem afetar o restante do Increme
    `tests/test_scientific_ingestion_api.py`, `tests/test_scientific_ingestion_concurrency.py`,
    `tests/test_scientific_ingestion_service.py`,
    `tests/test_pubchem_pilot_db_url_normalization.py`,
-   `tests/test_pubchem_pilot_validation.py`, `tests/test_pubchem_pilot_wait_for_terminal.py`.
+   `tests/test_pubchem_pilot_validation.py`, `tests/test_pubchem_pilot_wait_for_terminal.py`,
+   `tests/test_pubchem_pilot_queue_check.py`, `tests/test_pubchem_pilot_capture_baseline.py`.
 5. Remover esta pasta de documentação (`docs/data/connectors/`).
 
 Nenhum outro módulo do sistema (materiais/projetos/receitas/jobs geométricos, dados

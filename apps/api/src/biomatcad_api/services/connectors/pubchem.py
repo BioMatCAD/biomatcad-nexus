@@ -7,8 +7,22 @@ interface web), usando apenas o endpoint oficial documentado:
 
 Campos mapeados (apenas os estruturados e adequadamente compreendidos, listados
 explicitamente na Fase F): CID, Title, IUPACName, MolecularFormula, MolecularWeight,
-CanonicalSMILES, IsomericSMILES, InChI, InChIKey, XLogP, TPSA, HBondDonorCount,
+ConnectivitySMILES, SMILES, InChI, InChIKey, XLogP, TPSA, HBondDonorCount,
 HBondAcceptorCount, RotatableBondCount, Charge, Complexity.
+
+Correção da Run 3 do piloto Windows (2026-08-10, ver
+docs/data/connectors/PUBCHEM_CONNECTOR.md): esta rodada pedia `CanonicalSMILES`/`IsomericSMILES`
+-- os nomes de campo ANTIGOS do PUG REST, hoje DEPRECIADOS pelo PubChem (confirmado via
+documentação oficial do PubChemPy, que reflete o mesmo mapeamento do PUG REST: "canonical_smiles
+is deprecated, use connectivity_smiles instead" / "isomeric_smiles is deprecated, use smiles
+instead"). A resposta real do PubChem durante a Run 3 confirmou isso na prática: os 3 CIDs
+testados (2244/702/5090) retornaram sem as chaves `CanonicalSMILES`/`IsomericSMILES`, fazendo
+ambas aparecerem em `missing_fields` para TODOS os CIDs -- nunca um problema pontual de um
+composto específico. Corrigido solicitando os nomes ATUAIS (`ConnectivitySMILES` -- conectividade
+apenas, sem estereoquímica/isótopos, substitui `CanonicalSMILES`; `SMILES` -- inclui
+estereoquímica/isótopos, substitui `IsomericSMILES`). Os nomes semânticos internos
+(`canonical_smiles`/`isomeric_smiles` em `NormalizedExternalRecord`) permanecem inalterados --
+só a chave lida da resposta do PubChem mudou.
 
 Nunca importa: segurança, toxicidade, indicação terapêutica, dose, posologia, ou qualquer
 texto extenso de terceiros. Toda propriedade numérica calculada pelo PubChem é classificada
@@ -56,8 +70,10 @@ REQUESTED_PROPERTY_FIELDS = [
     "IUPACName",
     "MolecularFormula",
     "MolecularWeight",
-    "CanonicalSMILES",
-    "IsomericSMILES",
+    # ConnectivitySMILES/SMILES substituem os nomes depreciados CanonicalSMILES/IsomericSMILES
+    # (ver docstring do módulo -- correção confirmada na Run 3 do piloto Windows, 2026-08-10).
+    "ConnectivitySMILES",
+    "SMILES",
     "InChI",
     "InChIKey",
     "XLogP",
@@ -262,8 +278,10 @@ class PubChemConnector(ScientificDataConnector):
             formula=props.get("MolecularFormula"),
             inchi=props.get("InChI"),
             inchikey=props.get("InChIKey"),
-            canonical_smiles=props.get("CanonicalSMILES"),
-            isomeric_smiles=props.get("IsomericSMILES"),
+            # ConnectivitySMILES substitui CanonicalSMILES (deprecado); SMILES substitui
+            # IsomericSMILES (deprecado) -- ver docstring do módulo.
+            canonical_smiles=props.get("ConnectivitySMILES"),
+            isomeric_smiles=props.get("SMILES"),
             calculated_properties=calculated_properties,
             missing_fields=missing_fields,
             mapping_warnings=mapping_warnings,

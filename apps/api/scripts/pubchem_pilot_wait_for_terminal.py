@@ -1,24 +1,35 @@
 #!/usr/bin/env python3
 """Acompanha uma solicitação de ingestão ESPECÍFICA (por `request_id`) até um estado terminal,
-processando a fila enquanto espera -- correção do falso positivo confirmado na Run 2 do piloto
-PubChem Windows (`INVALID_FALSE_POSITIVE`, relatório com SHA-256
-`83c22b55db98e5a4daea6f9e9fcabdee0aac56c1d1429510be0fce023bb8610f`).
+reivindicando e processando SOMENTE essa solicitação -- nunca qualquer outra linha da fila.
 
-Causa real da Run 2: `Run-PubChemPilotWindows.ps1` chamava o dispatcher uma única vez
-(`scientific_ingestion_dispatcher.py --once --limit 1`) e só verificava a CONTAGEM devolvida
-("Processada(s) N solicitação(ões)."), nunca se a solicitação ESPECÍFICA que o próprio roteiro
-tinha acabado de submeter chegou a um estado terminal. `claim_next_queued_request()` reivindica
-sempre a solicitação MAIS ANTIGA da fila inteira (FIFO global, por design -- correto para um
-dispatcher de produção, que deve processar QUALQUER solicitação pendente, de qualquer
-organização). Se já existir qualquer solicitação `queued` mais antiga no mesmo banco Postgres
-persistente do usuário (de uma tentativa anterior, de outro teste manual, etc.), o dispatcher
-processa de verdade essa OUTRA solicitação a cada chamada -- e devolve `count=1`, uma contagem
-literalmente correta -- enquanto a solicitação que o piloto está esperando nunca é sequer
-reivindicada, permanecendo `queued` para sempre. Este módulo resolve isso ACOMPANHANDO o
-`request_id` exato, chamando o dispatcher repetidamente (drenando a fila item a item, na ordem
-real) até que ESSA solicitação especificamente atinja um estado terminal, com timeout explícito
-e polling limitado -- nunca aceita `queued`/`running` como sucesso, nunca se contenta com uma
-contagem global."""
+Histórico de duas correções nesta mesma função:
+
+Run 2 (`INVALID_FALSE_POSITIVE`, relatório SHA-256
+`83c22b55db98e5a4daea6f9e9fcabdee0aac56c1d1429510be0fce023bb8610f`): `Run-PubChemPilotWindows.ps1`
+chamava o dispatcher uma única vez (`--once --limit 1`) e só verificava a CONTAGEM devolvida,
+nunca se a solicitação ESPECÍFICA que o próprio roteiro tinha acabado de submeter chegou a um
+estado terminal -- uma solicitação `queued` mais antiga no mesmo banco persistente era
+processada no lugar, e a solicitação do piloto nunca saía de `queued`.
+
+Run 3 (`QUEUE_CONTAMINATION`, ver docs/data/connectors/PUBCHEM_CONNECTOR.md): a primeira
+correção deste módulo resolveu a Run 2 acompanhando o `request_id` exato, mas ainda chamava
+`claim_next_queued_request()` (FIFO global, `SELECT ... FOR UPDATE SKIP LOCKED` ordenado por
+`created_at`) a cada iteração para "drenar a fila enquanto espera" -- e isso tem um efeito
+colateral real: se existir qualquer OUTRA solicitação `queued` mais antiga (real, não
+relacionada) no mesmo banco persistente, esta função a reivindica e PROCESSA de verdade,
+criando `RawSourceRecord`s/entidades reais atribuídos por engano ao dry run que o piloto estava
+esperando (evidência literal da Run 3: 3 `RawSourceRecord`s criados entre 17:21:18 e 17:21:21,
+todos ANTES do `started_at` do próprio dry run às 17:21:27 -- uma atribuição temporalmente
+impossível, já que o ramo `dry_run` de `process_request()` nunca chama
+`_persist_raw_source_record`).
+
+Correção definitiva: esta função agora usa `claim_specific_request()`
+(`scientific_ingestion_service.py`), que reivindica SOMENTE a linha `request_id` informada --
+nunca qualquer outra. Nunca mais drena a fila global. Se a solicitação-alvo ainda não é
+`queued` no momento em que tentamos reivindicá-la (por exemplo, outro processo -- um dispatcher
+de produção real -- a reivindicou primeiro), esta função apenas aguarda e tenta de novo, sem
+tocar em nenhuma outra linha, sempre respeitando o timeout explícito e o polling limitado --
+nunca aceita `queued`/`running` como sucesso."""
 from __future__ import annotations
 
 import argparse
@@ -35,7 +46,7 @@ from biomatcad_api.models.scientific_ingestion import (
     IngestionRequestStatus,
 )
 from biomatcad_api.services.scientific_ingestion_service import (
-    claim_next_queued_request,
+    claim_specific_request,
     process_request,
 )
 
@@ -84,12 +95,12 @@ def wait_for_request_terminal(
     monotonic_fn: Callable[[], float] = time.monotonic,
 ) -> dict:
     """Loop de espera com timeout explícito e polling limitado (nunca um `while True` sem
-    limite): a cada iteração, tenta reivindicar e processar UMA solicitação da fila (que pode ou
-    não ser a que estamos esperando -- drenando assim qualquer backlog antigo item a item, na
-    ordem FIFO real do dispatcher de produção), depois relê o estado ATUAL de `request_id` a
-    partir de uma consulta nova (nunca um objeto ORM em cache). Retorna o relatório assim que o
-    estado for terminal. Levanta `RequestTerminalTimeoutError` se o timeout for atingido antes
-    disso, e `RequestNotFoundError` se `request_id` nunca existiu."""
+    limite): a cada iteração, tenta reivindicar SOMENTE `request_id` via
+    `claim_specific_request()` (nunca qualquer outra linha da fila -- ver docstring do módulo
+    para a correção da Run 3, `QUEUE_CONTAMINATION`), depois relê o estado ATUAL a partir de uma
+    consulta nova (nunca um objeto ORM em cache). Retorna o relatório assim que o estado for
+    terminal. Levanta `RequestTerminalTimeoutError` se o timeout for atingido antes disso, e
+    `RequestNotFoundError` se `request_id` nunca existiu."""
     dispatcher_id = dispatcher_id or "pubchem-pilot-wait-for-terminal"
     start = monotonic_fn()
     last_report: dict | None = None
@@ -106,16 +117,19 @@ def wait_for_request_terminal(
         if monotonic_fn() - start >= timeout_seconds:
             raise RequestTerminalTimeoutError(request_id, timeout_seconds, last_report)
 
-        claimed = claim_next_queued_request(db, dispatcher_id=dispatcher_id)
+        claimed = claim_specific_request(db, request_id=request_id, dispatcher_id=dispatcher_id)
         if claimed is not None:
             process_request(db, request=claimed)
-            # Processou algo (talvez a nossa, talvez uma solicitação antiga da fila) --
-            # verifica de novo imediatamente, sem dormir, já que há trabalho real acontecendo.
+            # Processou a NOSSA solicitação (nunca outra -- claim_specific_request nunca toca em
+            # nenhuma outra linha) -- verifica de novo imediatamente, sem dormir.
             continue
 
-        # Fila vazia neste instante e a nossa solicitação ainda não é terminal -- só faz
-        # sentido se outro processo a reivindicou concorrentemente e ainda não terminou (ou
-        # commitou). Espera um intervalo curto e tenta de novo, sempre respeitando o timeout.
+        # `claim_specific_request` devolveu None: ou a solicitação já não está mais `queued`
+        # (outro processo -- ex.: um dispatcher de produção real -- a reivindicou primeiro, ou
+        # ela já terminou entre a leitura do relatório acima e agora), ou ainda não existe
+        # nenhuma linha `queued` com esse id no instante exato desta tentativa. Em ambos os
+        # casos, NUNCA tentamos reivindicar outra linha da fila -- apenas esperamos um intervalo
+        # curto e checamos de novo, sempre respeitando o timeout.
         if monotonic_fn() - start >= timeout_seconds:
             raise RequestTerminalTimeoutError(request_id, timeout_seconds, last_report)
         sleep_fn(poll_interval_seconds)

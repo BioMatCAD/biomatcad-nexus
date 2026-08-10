@@ -279,6 +279,31 @@ $sourceId = $sourceJson.id
 Add-Step -Name "ensure_pubchem_source" -Ok $true -Detail "ScientificSource PubChem id=$sourceId (created=$($sourceJson.created))."
 Write-Log "[OK] ScientificSource PubChem id=$sourceId"
 
+# ---- 4.5. Preflight anti-contaminacao de fila (correcao QUEUE_CONTAMINATION da Run 3, ver
+# docs/data/connectors/PUBCHEM_CONNECTOR.md) --------------------------------------------------
+# Antes de submeter qualquer coisa nova, verifica se ja existe alguma solicitacao queued/running
+# ANTIGA para o mesmo connector_id/source_id -- a Run 3 provou que uma solicitacao real e nao
+# relacionada, sobrevivente de uma execucao anterior, pode ser reivindicada e processada
+# enquanto o piloto espera seu proprio dry run terminar, contaminando a evidencia com
+# RawSourceRecords atribuidos por engano. Falha rapido, com diagnostico explicito, em vez de
+# deixar o piloto inteiro rodar para so entao descobrir a contaminacao.
+Write-Log "-- Passo 4.5: verificando limpeza da fila (connector_id=pubchem_pug_rest, source_id=$sourceId) --"
+$queueCheckArgs = @("scripts/pubchem_pilot_queue_check.py", "--connector-id", "pubchem_pug_rest", "--source-id", $sourceId)
+$queueCheckResult = Invoke-PythonJson -ScriptArgs $queueCheckArgs
+if ([string]::IsNullOrWhiteSpace($queueCheckResult.Stdout)) {
+    Add-Step -Name "queue_cleanliness" -Ok $false -Detail "Script queue_check nao produziu saida. exit=$($queueCheckResult.ExitCode). stderr: $($queueCheckResult.Stderr)"
+    Write-Log "[FALHA] Nao foi possivel verificar a limpeza da fila."
+    Write-ReportAndExit -ExitCode 1 -FinalStatus "FAILED_PREFLIGHT_QUEUE_CONTAMINATION"
+}
+$queueCheckParsed = $queueCheckResult.Stdout.Trim() | ConvertFrom-Json
+if (-not [bool]$queueCheckParsed.ok) {
+    Add-Step -Name "queue_cleanliness" -Ok $false -Detail $queueCheckParsed.reason -Extra $queueCheckParsed.contaminating
+    Write-Log "[FALHA] $($queueCheckParsed.reason)"
+    Write-ReportAndExit -ExitCode 1 -FinalStatus "FAILED_PREFLIGHT_QUEUE_CONTAMINATION"
+}
+Add-Step -Name "queue_cleanliness" -Ok $true -Detail $queueCheckParsed.reason
+Write-Log "[OK] Fila limpa para connector_id=pubchem_pug_rest, source_id=$sourceId."
+
 function Submit-IngestionRequest {
     param([bool]$DryRun)
     $cliArgs = @("scripts/pubchem_ingest_cli.py", "--requested-by-email", $adminEmail, "--source-id", $sourceId)
@@ -292,15 +317,33 @@ function Submit-IngestionRequest {
     return @{ Ok = $true; RequestId = $parsed.id }
 }
 
+function Invoke-CaptureBaseline {
+    # Captura, por CID, os RawSourceRecord ja existentes ANTES da submissao do dry run --
+    # correcao do QUEUE_CONTAMINATION da Run 3 (ver docs/data/connectors/PUBCHEM_CONNECTOR.md):
+    # a validacao do dry run agora compara este baseline contra o estado final por DELTA, nunca
+    # exige zero registros absolutos (um CID pode legitimamente ja ter sido importado antes).
+    $baselineArgs = @("scripts/pubchem_pilot_capture_baseline.py", "--connector-id", "pubchem_pug_rest", "--source-id", $sourceId)
+    foreach ($cid in $Cids) { $baselineArgs += @("--cid", $cid) }
+    $result = Invoke-PythonJson -ScriptArgs $baselineArgs
+    if ($result.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($result.Stdout)) {
+        return @{ Ok = $false; Detail = "Falha ao capturar baseline de RawSourceRecord. exit=$($result.ExitCode). stderr: $($result.Stderr)" }
+    }
+    $baselinePath = Join-Path $OutputDir "_dry_run_baseline.json"
+    Set-Content -Path $baselinePath -Value $result.Stdout.Trim() -Encoding utf8
+    return @{ Ok = $true; Path = $baselinePath }
+}
+
 function Invoke-WaitAndValidate {
     # Acompanha o request_id EXATO ate estado terminal (nunca aceita queued/running como
-    # sucesso) e valida o relatorio final via scripts/pubchem_pilot_wait_and_validate.py --
-    # substitui o antigo par Invoke-DispatcherOnce+Get-PilotReport, que so verificava a
-    # contagem global do dispatcher e o status "!= failed" (falso positivo confirmado na Run 2:
-    # ver docs/data/connectors/PUBCHEM_CONNECTOR.md, INVALID_FALSE_POSITIVE). Devolve sempre o
-    # JSON {ok, reason, report} tal como o script Python o produziu -- nunca reinterpretado ou
-    # afrouxado aqui.
-    param([string]$RequestId, [string]$Kind)
+    # sucesso, e nunca reivindica nenhuma outra linha da fila -- ver
+    # scripts/pubchem_pilot_wait_for_terminal.py::claim_specific_request, correcao do
+    # QUEUE_CONTAMINATION da Run 3) e valida o relatorio final via
+    # scripts/pubchem_pilot_wait_and_validate.py. Para -Kind dry_run, exige -BaselineFile
+    # (produzido por Invoke-CaptureBaseline) e devolve tambem os sub-resultados
+    # NetworkReachability/DryRunValidation (dois passos reportados separadamente, ambos
+    # derivados do MESMO relatorio -- nunca uma segunda consulta de rede). Devolve sempre o
+    # JSON tal como o script Python o produziu -- nunca reinterpretado ou afrouxado aqui.
+    param([string]$RequestId, [string]$Kind, [string]$BaselineFile = $null)
     $cliArgs = @(
         "scripts/pubchem_pilot_wait_and_validate.py",
         "--request-id", $RequestId,
@@ -309,12 +352,21 @@ function Invoke-WaitAndValidate {
         "--timeout-seconds", $TimeoutSeconds
     )
     foreach ($cid in $Cids) { $cliArgs += @("--expected-cid", $cid) }
+    if ($Kind -eq "dry_run") {
+        $cliArgs += @("--baseline-file", $BaselineFile)
+    }
     $result = Invoke-PythonJson -ScriptArgs $cliArgs
     if ([string]::IsNullOrWhiteSpace($result.Stdout)) {
-        return @{ Ok = $false; Reason = "Script wait_and_validate nao produziu saida. exit=$($result.ExitCode). stderr: $($result.Stderr)"; Report = $null }
+        return @{ Ok = $false; Reason = "Script wait_and_validate nao produziu saida. exit=$($result.ExitCode). stderr: $($result.Stderr)"; Report = $null; NetworkReachability = $null; DryRunValidation = $null }
     }
     $parsed = $result.Stdout.Trim() | ConvertFrom-Json
-    return @{ Ok = [bool]$parsed.ok; Reason = $parsed.reason; Report = $parsed.report }
+    return @{
+        Ok = [bool]$parsed.ok
+        Reason = $parsed.reason
+        Report = $parsed.report
+        NetworkReachability = $parsed.network_reachability
+        DryRunValidation = $parsed.dry_run_validation
+    }
 }
 
 function Invoke-CheckIdempotency {
@@ -340,7 +392,16 @@ function Invoke-CheckIdempotency {
 }
 
 # ---- 5-7. DRY RUN: confirma resposta oficial sem persistir nada ----------------------------
-Write-Log "-- Passo 5: submetendo DRY RUN dos CIDs $($Cids -join ', ') --"
+Write-Log "-- Passo 5a: capturando baseline de RawSourceRecord por CID (antes da submissao) --"
+$baselineCapture = Invoke-CaptureBaseline
+if (-not $baselineCapture.Ok) {
+    Add-Step -Name "dry_run_baseline_capture" -Ok $false -Detail $baselineCapture.Detail
+    Write-Log "[FALHA] $($baselineCapture.Detail)"
+    Write-ReportAndExit -ExitCode 1 -FinalStatus "FAILED_PREFLIGHT_QUEUE_CONTAMINATION"
+}
+Add-Step -Name "dry_run_baseline_capture" -Ok $true -Detail "Baseline de RawSourceRecord capturado com sucesso antes da submissao do dry run."
+
+Write-Log "-- Passo 5b: submetendo DRY RUN dos CIDs $($Cids -join ', ') --"
 $dryRunSubmit = Submit-IngestionRequest -DryRun $true
 if (-not $dryRunSubmit.Ok) {
     Add-Step -Name "dry_run_submit" -Ok $false -Detail $dryRunSubmit.Detail
@@ -350,7 +411,7 @@ if (-not $dryRunSubmit.Ok) {
 Write-Log "[OK] Dry run enfileirado: $($dryRunSubmit.RequestId)"
 
 Write-Log "-- Passo 6: acompanhando o request_id exato do dry run ate estado terminal (timeout=${TimeoutSeconds}s) --"
-$dryRunWait = Invoke-WaitAndValidate -RequestId $dryRunSubmit.RequestId -Kind "dry_run"
+$dryRunWait = Invoke-WaitAndValidate -RequestId $dryRunSubmit.RequestId -Kind "dry_run" -BaselineFile $baselineCapture.Path
 $dryRunReport = $dryRunWait.Report
 if ($null -eq $dryRunReport) {
     Add-Step -Name "dry_run_result" -Ok $false -Detail $dryRunWait.Reason
@@ -365,18 +426,33 @@ if ($dryRunReport.status -eq "failed") {
     Add-Step -Name "network_reachability" -Ok $false -Detail "Todos os CIDs falharam na busca durante o dry run -- rede PubChem pode estar bloqueada/indisponivel neste ambiente Windows tambem. Ver fetch_errors." -Extra $dryRunReport.summary.fetch_errors
     Write-ReportAndExit -ExitCode 2 -FinalStatus "NETWORK_UNREACHABLE_OR_ALL_CIDS_FAILED"
 }
-Add-Step -Name "network_reachability" -Ok $true -Detail "Ao menos um CID foi confirmado com sucesso contra a resposta oficial do PubChem (estado terminal != failed)."
+
+# network_reachability so e Ok=true se: estado terminal succeeded (nunca "partial", nunca
+# apenas "!= failed"); summary.fetch_errors vazio; e uma resposta genuinamente valida
+# (preferred_name ou formula presentes) para cada CID esperado -- validado por
+# scripts/pubchem_pilot_validation.py::validate_network_reachability. Corrige o defeito
+# confirmado na Run 3 (item 9 da auditoria): o passo antigo aceitava qualquer status != failed.
+$networkResult = $dryRunWait.NetworkReachability
+Add-Step -Name "network_reachability" -Ok ([bool]$networkResult.ok) -Detail $networkResult.reason -Extra $dryRunReport.summary.fetch_errors
+if (-not [bool]$networkResult.ok) {
+    Write-Log "[FALHA] network_reachability reprovado: $($networkResult.reason)"
+    Write-ReportAndExit -ExitCode 1 -FinalStatus "FAILED_VALIDATION"
+}
 
 # dry_run_result so e Ok=true se: estado terminal succeeded; started_at/finished_at
-# preenchidos; summary coerente; ZERO RawSourceRecord persistido para qualquer CID esperado --
-# validado por scripts/pubchem_pilot_validation.py::validate_dry_run_report. Isto substitui o
-# antigo teste fail-open "status -eq succeeded -or status -eq partial", responsavel (junto com
-# o Bug A do passo real, abaixo) pelo falso positivo da Run 2 (ver
-# docs/data/connectors/PUBCHEM_CONNECTOR.md, INVALID_FALSE_POSITIVE).
-Add-Step -Name "dry_run_result" -Ok $dryRunWait.Ok -Detail $dryRunWait.Reason -Extra $dryRunReport
-if (-not $dryRunWait.Ok) {
-    Write-Log "[FALHA] Validacao do dry run reprovada: $($dryRunWait.Reason)"
-    Write-ReportAndExit -ExitCode 1 -FinalStatus "FAILED_VALIDATION"
+# preenchidos; summary coerente; e NENHUM RawSourceRecord NOVO (delta vazio contra o baseline
+# capturado no Passo 5a) para qualquer CID esperado -- validado por
+# scripts/pubchem_pilot_validation.py::validate_dry_run_report. Correcao da Run 3
+# (QUEUE_CONTAMINATION): a validacao antiga exigia zero RawSourceRecord ABSOLUTO, o que
+# reprovava incorretamente um CID que ja tinha registro de uma solicitacao real anterior e
+# legitima. Se houver delta, o veredito e sempre QUEUE_CONTAMINATION -- nunca uma acusacao ao
+# dry run (estruturalmente impossivel ele persistir qualquer coisa).
+$dryRunValidation = $dryRunWait.DryRunValidation
+Add-Step -Name "dry_run_result" -Ok ([bool]$dryRunValidation.ok) -Detail $dryRunValidation.reason -Extra $dryRunReport
+if (-not [bool]$dryRunValidation.ok) {
+    $dryRunFinalStatus = if ($dryRunValidation.reason_code -eq "queue_contamination") { "FAILED_VALIDATION_QUEUE_CONTAMINATION" } else { "FAILED_VALIDATION" }
+    Write-Log "[FALHA] Validacao do dry run reprovada ($($dryRunValidation.reason_code)): $($dryRunValidation.reason)"
+    Write-ReportAndExit -ExitCode 1 -FinalStatus $dryRunFinalStatus
 }
 
 # ---- 8-9. Persistencia real (primeira vez) --------------------------------------------------

@@ -45,8 +45,11 @@ def _aspirin_payload() -> dict:
                     "IUPACName": "2-acetyloxybenzoic acid",
                     "MolecularFormula": "C9H8O4",
                     "MolecularWeight": "180.16",
-                    "CanonicalSMILES": "CC(=O)OC1=CC=CC=C1C(=O)O",
-                    "IsomericSMILES": "CC(=O)OC1=CC=CC=C1C(=O)O",
+                    # ConnectivitySMILES/SMILES sao os nomes ATUAIS do PUG REST (substituem os
+                    # depreciados CanonicalSMILES/IsomericSMILES -- ver correcao da Run 3 do
+                    # piloto Windows, 2026-08-10, docs/data/connectors/PUBCHEM_CONNECTOR.md).
+                    "ConnectivitySMILES": "CC(=O)OC1=CC=CC=C1C(=O)O",
+                    "SMILES": "CC(=O)OC1=CC=CC=C1C(=O)O",
                     "InChI": "InChI=1S/C9H8O4/c1-6(10)13-8-5-3-2-4-7(8)9(11)12/h2-5H,1H3,(H,11,12)",
                     "InChIKey": "BSYNRYMUTXBXSQ-UHFFFAOYSA-N",
                     "XLogP": "1.2",
@@ -141,6 +144,61 @@ def test_fetch_and_normalize_valid_response():
     mw = next(p for p in normalized.calculated_properties if p.property_key == "molecular_weight")
     assert mw.value_numeric == pytest.approx(180.16)
     assert mw.unit == "g/mol"
+
+
+def test_requested_property_fields_use_current_not_deprecated_smiles_names():
+    """Regressão da Run 3 do piloto Windows (2026-08-10, QUEUE_CONTAMINATION -- ver
+    docs/data/connectors/PUBCHEM_CONNECTOR.md): o conector pedia os nomes de campo DEPRECIADOS
+    `CanonicalSMILES`/`IsomericSMILES`; a resposta real do PubChem (durante a Run 3) não incluía
+    mais essas chaves, fazendo ambas aparecerem em `missing_fields` para os 3 CIDs testados,
+    sempre -- nunca um problema pontual de composto. Este teste prova que o endpoint agora
+    solicita os nomes ATUAIS (`ConnectivitySMILES`/`SMILES`, que substituem os depreciados,
+    confirmado via documentação oficial do PubChemPy que reflete o mapeamento do PUG REST)."""
+    assert "ConnectivitySMILES" in REQUESTED_PROPERTY_FIELDS
+    assert "SMILES" in REQUESTED_PROPERTY_FIELDS
+    assert "CanonicalSMILES" not in REQUESTED_PROPERTY_FIELDS
+    assert "IsomericSMILES" not in REQUESTED_PROPERTY_FIELDS
+
+
+def test_normalize_maps_current_smiles_field_names_without_missing_fields():
+    """Complementa o teste acima: com uma resposta que usa os nomes ATUAIS (o formato real
+    esperado do PubChem hoje), `canonical_smiles`/`isomeric_smiles` devem ser preenchidos e
+    NUNCA aparecer em `missing_fields` -- reproduzindo o que a Run 4 deve observar na prática,
+    ao contrário da Run 3 (que usava os nomes depreciados e via ambos sempre ausentes)."""
+    payload = _aspirin_payload()
+    client = _FakeClient(200, json.dumps(payload).encode("utf-8"))
+    connector = PubChemConnector(client=client)
+    fetch_result = connector.fetch("2244")
+    normalized = connector.normalize(fetch_result)
+
+    assert normalized.canonical_smiles == "CC(=O)OC1=CC=CC=C1C(=O)O"
+    assert normalized.isomeric_smiles == "CC(=O)OC1=CC=CC=C1C(=O)O"
+    assert "ConnectivitySMILES" not in normalized.missing_fields
+    assert "SMILES" not in normalized.missing_fields
+
+
+def test_normalize_flags_deprecated_smiles_field_names_as_missing():
+    """Reprodução literal da causa raiz da Run 3: uma resposta que só contém os nomes
+    DEPRECIADOS (`CanonicalSMILES`/`IsomericSMILES`, sem os atuais) faz o conector reportar
+    `ConnectivitySMILES`/`SMILES` como `missing_fields` -- exatamente o sintoma observado nos 3
+    CIDs da Run 3 (2244/702/5090), todos com `missing_fields: ["CanonicalSMILES",
+    "IsomericSMILES"]` no relatório real. Prova que o comportamento é determinístico e
+    explicado pela mudança de nome de campo, não um defeito aleatório da rede."""
+    payload = _aspirin_payload()
+    props = payload["PropertyTable"]["Properties"][0]
+    del props["ConnectivitySMILES"]
+    del props["SMILES"]
+    props["CanonicalSMILES"] = "CC(=O)OC1=CC=CC=C1C(=O)O"
+    props["IsomericSMILES"] = "CC(=O)OC1=CC=CC=C1C(=O)O"
+    client = _FakeClient(200, json.dumps(payload).encode("utf-8"))
+    connector = PubChemConnector(client=client)
+    fetch_result = connector.fetch("2244")
+    normalized = connector.normalize(fetch_result)
+
+    assert "ConnectivitySMILES" in normalized.missing_fields
+    assert "SMILES" in normalized.missing_fields
+    assert normalized.canonical_smiles is None
+    assert normalized.isomeric_smiles is None
 
 
 def test_normalize_records_missing_fields_without_inventing_values():

@@ -1320,6 +1320,37 @@ científico foi alterado para fabricar sucesso. **A Fase I continua pendente de 
 (Run 3) que atinja `SUCCEEDED` sob a nova agregação fail-closed** -- ver `TEST_EVIDENCE.md` para
 o detalhamento completo e os comandos exatos.
 
+**Run 3 do piloto Windows real (2026-08-10): `final_status: FAILED_VALIDATION`,
+`PilotExitCode=1` -- `QUEUE_CONTAMINATION` confirmado, NUNCA o dry run, veredito preservado
+(nunca reclassificado como piloto aprovado).** A terceira execução real reprovou com o
+diagnóstico antigo "dry run persistiu RawSourceRecord" para os três CIDs -- mas as versões
+envolvidas foram persistidas entre 17:21:18 e 17:21:21, todas ANTES de `started_at=17:21:27` do
+dry run `bb30bdf9-e78d-401f-8f56-c43b12231b60`, tornando essa acusação temporalmente impossível
+(confirmado também por leitura de código: `process_request()` nunca chama
+`_persist_raw_source_record` no ramo `dry_run`). Causa raiz real: `wait_for_request_terminal`,
+corrigido na Run 2 para acompanhar o `request_id` exato até estado terminal, ainda usava
+`claim_next_queued_request` (FIFO global) internamente enquanto aguardava -- e reivindicou uma
+solicitação real antiga, sobrevivente de execução anterior, persistindo as três versões
+observadas durante a janela de espera. Como `RawSourceRecord` não tem coluna de proveniência por
+`request_id` (isolado apenas por `source_id`/`connector_id`/`external_record_id`, por design,
+para deduplicação legítima), a atribuição exata é estruturalmente impossível -- a correção nunca
+tenta essa atribuição, e classifica qualquer delta não explicado como `QUEUE_CONTAMINATION`.
+Corrigido com `claim_specific_request` (reivindica atomicamente só o `request_id` exato, nunca
+drena a fila), `pubchem_pilot_queue_check.py` (preflight que detecta fila contaminada antes de
+qualquer submissão), `pubchem_pilot_capture_baseline.py` (baseline de `RawSourceRecord` por CID
+antes do dry run), `validate_dry_run_report` reescrito para comparar por delta (nunca exigir
+zero absoluto), `validate_network_reachability` (novo, exige `succeeded` + sem `fetch_errors` +
+resposta válida), e o conector PubChem corrigido para requisitar `ConnectivitySMILES`/`SMILES`
+em vez dos nomes depreciados `CanonicalSMILES`/`IsomericSMILES` (causa confirmada dos
+`missing_fields` nos três CIDs, via documentação oficial do PubChemPy, sem chamada real
+adicional). 106 testes passaram nesta correção (Postgres real via `pgserver`), incluindo os 7
+cenários de regressão pedidos e a reprodução literal da evidência da Run 3. Nenhuma chamada real
+ao PubChem foi feita; nenhum dado científico foi apagado ou alterado (as três versões
+contaminantes permanecem no banco como evidência). **A Fase I continua pendente de uma execução
+real (Run 4), em banco PostgreSQL novo e isolado, que atinja `SUCCEEDED` sob a fila limpa e a
+validação por delta** -- ver `TEST_EVIDENCE.md` para o detalhamento completo e os comandos
+exatos.
+
 ### Adendo de Interface Científica Mínima (Fases L-T, mesma Rodada 2, branch `incremento-2.3-dados-cientificos`)
 
 Após a entrega inicial das Fases A-K acima, foi identificado que a lacuna "Adendo de Interface

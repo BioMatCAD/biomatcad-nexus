@@ -1,15 +1,23 @@
-"""Testes de scripts/pubchem_pilot_validation.py (Incremento 2.3, Rodada 2, Fase I -- correção
-do falso positivo confirmado na Run 2 do piloto PubChem Windows,
-`final_status=SUCCEEDED`/`exit code 0` apesar de `INVALID_FALSE_POSITIVE`).
+"""Testes de scripts/pubchem_pilot_validation.py (Incremento 2.3, Rodada 2, Fase I).
 
-Reproduz literalmente a evidência real preservada da Run 2 (relatório com SHA-256
+Reproduz literalmente a evidência real preservada de DUAS rodadas com veredito reprovado:
+
+Run 2 (`INVALID_FALSE_POSITIVE`, relatório SHA-256
 `83c22b55db98e5a4daea6f9e9fcabdee0aac56c1d1429510be0fce023bb8610f`): `dry_run_result` com
 `ok=false, status=queued`; `real_result_1`/`real_result_2` com `status=queued,
 started_at=null, finished_at=null, summary=null, error=null`, todos os CIDs com
 `version_count=0, versions=[]`; e `idempotency_proof.extra` com os 3 CIDs (2244, 702, 5090)
 todos `ok=false, sem RawSourceRecord` -- e prova que as novas funções de validação REJEITAM
 tudo isso, ao contrário do `.ps1` antigo (que aceitava `status != "failed"` como sucesso, e cujo
-loop de idempotência esquecia de propagar `ok=false` para o agregado)."""
+loop de idempotência esquecia de propagar `ok=false` para o agregado).
+
+Run 3 (`QUEUE_CONTAMINATION`, request_id `bb30bdf9-e78d-401f-8f56-c43b12231b60`, 2026-08-10, ver
+docs/data/connectors/PUBCHEM_CONNECTOR.md): `validate_dry_run_report` exigia ZERO
+RawSourceRecord ABSOLUTO por CID -- mas os 3 CIDs já tinham RawSourceRecords de uma solicitação
+REAL não relacionada, drenada da fila enquanto o dry run aguardava (ver correção em
+`scripts/pubchem_pilot_wait_for_terminal.py`). A nova validação usa BASELINE (capturado antes da
+submissão) + DELTA, nunca contagem absoluta -- e reprova como `QUEUE_CONTAMINATION` (nunca
+acusando o dry run) quando o delta não é vazio."""
 from __future__ import annotations
 
 import sys
@@ -20,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from pubchem_pilot_validation import (
     validate_dry_run_report,
     validate_idempotency,
+    validate_network_reachability,
     validate_real_report,
 )
 
@@ -97,8 +106,9 @@ def test_validate_dry_run_report_rejects_run2_evidence_queued_status():
         "error": None,
         "raw_source_records": _empty_raw_records(EXPECTED_CIDS),
     }
-    result = validate_dry_run_report(report, EXPECTED_CIDS)
+    result = validate_dry_run_report(report, EXPECTED_CIDS, baseline_record_ids={})
     assert result.ok is False
+    assert result.reason_code == "invalid_status"
     assert "queued" in result.reason
 
 
@@ -111,16 +121,20 @@ def test_validate_dry_run_report_accepts_succeeded_with_no_persistence():
         "error": None,
         "raw_source_records": _empty_raw_records(EXPECTED_CIDS),
     }
-    result = validate_dry_run_report(report, EXPECTED_CIDS)
+    result = validate_dry_run_report(report, EXPECTED_CIDS, baseline_record_ids={})
     assert result.ok is True
+    assert result.reason_code == "ok"
 
 
-def test_validate_dry_run_report_rejects_if_any_cid_was_persisted():
-    """Dry run nunca deve persistir nada -- se algum CID tiver version_count > 0, é um defeito
-    real de produto (dry run vazando para persistência real), não um falso positivo do teste."""
-    records = _empty_raw_records(EXPECTED_CIDS)
-    records[0]["version_count"] = 1
-    records[0]["versions"] = [_version("abc123")]
+def test_validate_dry_run_report_accepts_preexisting_records_with_empty_delta():
+    """Correção da Run 3 (item 7/11.2-3 da auditoria): um CID pode legitimamente já ter
+    RawSourceRecord de uma solicitação REAL anterior -- isso NUNCA deve reprovar o dry run,
+    desde que nenhum registro NOVO tenha aparecido durante a janela dele (delta vazio). Prova
+    que a validação não exige mais zero absoluto."""
+    records = [
+        {"external_id": "2244", "version_count": 1, "versions": [dict(_version("preexisting-hash"), id="rec-preexisting")]},
+        *_empty_raw_records(["702", "5090"]),
+    ]
     report = {
         "status": "succeeded",
         "started_at": "2026-08-09T00:00:01+00:00",
@@ -129,9 +143,69 @@ def test_validate_dry_run_report_rejects_if_any_cid_was_persisted():
         "error": None,
         "raw_source_records": records,
     }
-    result = validate_dry_run_report(report, EXPECTED_CIDS)
+    # Baseline capturado ANTES da submissão já mostrava o mesmo registro preexistente -- nenhum
+    # delta real.
+    baseline = {"2244": ["rec-preexisting"], "702": [], "5090": []}
+    result = validate_dry_run_report(report, EXPECTED_CIDS, baseline_record_ids=baseline)
+    assert result.ok is True
+    assert result.reason_code == "ok"
+
+
+def test_validate_dry_run_report_rejects_new_record_delta_as_queue_contamination():
+    """Reprodução direta da causa raiz da Run 3: um RawSourceRecord aparece no relatório final
+    do dry run que NÃO existia no baseline capturado antes da submissão -- estruturalmente
+    impossível de ter sido criado pelo próprio dry run. Deve reprovar como
+    `queue_contamination`, NUNCA como 'dry run persistiu dados' (a antiga mensagem incorreta da
+    Run 3)."""
+    records = _empty_raw_records(EXPECTED_CIDS)
+    records[0]["version_count"] = 1
+    records[0]["versions"] = [dict(_version("abc123"), id="rec-new-during-window")]
+    report = {
+        "status": "succeeded",
+        "started_at": "2026-08-09T00:00:01+00:00",
+        "finished_at": "2026-08-09T00:00:02+00:00",
+        "summary": {"dry_run": True, "results": [{"external_identifier": cid} for cid in EXPECTED_CIDS]},
+        "error": None,
+        "raw_source_records": records,
+    }
+    # Baseline vazio -- este registro não existia antes da submissão.
+    result = validate_dry_run_report(report, EXPECTED_CIDS, baseline_record_ids={})
     assert result.ok is False
-    assert "NUNCA" in result.reason or "persistir" in result.reason
+    assert result.reason_code == "queue_contamination"
+    assert "CONTAMINAÇÃO" in result.reason
+    assert "dry run" not in result.reason.split("CONTAMINAÇÃO")[0]  # nunca acusa o dry run
+
+
+def test_validate_dry_run_report_rejects_concurrent_delta_not_attributable():
+    """Delta concorrente não atribuível: o baseline mostra 1 versão preexistente, mas o
+    relatório final mostra 2 -- uma NOVA apareceu durante a janela do dry run, vinda de algum
+    lugar que não pode ser identificado (RawSourceRecord não tem coluna de proveniência por
+    request_id). Deve reprovar como queue_contamination mesmo havendo registros preexistentes
+    legítimos."""
+    records = [
+        {
+            "external_id": "2244",
+            "version_count": 2,
+            "versions": [
+                dict(_version("old-hash"), id="rec-preexisting"),
+                dict(_version("new-hash-during-window"), id="rec-concurrent-new"),
+            ],
+        },
+        *_empty_raw_records(["702", "5090"]),
+    ]
+    report = {
+        "status": "succeeded",
+        "started_at": "2026-08-09T00:00:01+00:00",
+        "finished_at": "2026-08-09T00:00:02+00:00",
+        "summary": {"dry_run": True, "results": [{"external_identifier": cid} for cid in EXPECTED_CIDS]},
+        "error": None,
+        "raw_source_records": records,
+    }
+    baseline = {"2244": ["rec-preexisting"], "702": [], "5090": []}
+    result = validate_dry_run_report(report, EXPECTED_CIDS, baseline_record_ids=baseline)
+    assert result.ok is False
+    assert result.reason_code == "queue_contamination"
+    assert "rec-concurrent-new" in result.reason
 
 
 def test_validate_dry_run_report_rejects_missing_started_at():
@@ -143,9 +217,144 @@ def test_validate_dry_run_report_rejects_missing_started_at():
         "error": None,
         "raw_source_records": [],
     }
-    result = validate_dry_run_report(report, [])
+    result = validate_dry_run_report(report, [], baseline_record_ids={})
     assert result.ok is False
+    assert result.reason_code == "missing_data"
     assert "started_at" in result.reason
+
+
+def test_validate_dry_run_report_reproduces_literal_run3_evidence():
+    """Reprodução literal da Run 3 (request_id bb30bdf9-e78d-401f-8f56-c43b12231b60): os 3 CIDs
+    (2244/702/5090) aparecem no relatório final do dry run com exatamente 1 RawSourceRecord
+    cada, todos criados DEPOIS que o baseline teria sido capturado (baseline vazio, pois nenhum
+    dos 3 CIDs tinha RawSourceRecord antes desta execução do piloto começar). A validação deve
+    reprovar como queue_contamination -- nunca aceitar como a Run 3 antiga aceitou
+    (final_status=SUCCEEDED nunca chegou a acontecer aqui porque dry_run_result.ok já era false,
+    mas com o motivo ERRADO: "dry run NUNCA deve persistir nada")."""
+    report = {
+        "status": "succeeded",
+        "dry_run": True,
+        "started_at": "2026-08-10T17:21:27.071686-03:00",
+        "finished_at": "2026-08-10T17:21:31.593691-03:00",
+        "summary": {
+            "dry_run": True,
+            "results": [{"external_identifier": cid} for cid in EXPECTED_CIDS],
+            "fetch_errors": [],
+        },
+        "error": None,
+        "raw_source_records": [
+            {
+                "external_id": "2244",
+                "version_count": 1,
+                "versions": [dict(_version("fb87b0e0e81640520c73486b861e5d0a"), id="d9f48f36-e73b-4e29-95e4-6abb817407e2")],
+            },
+            {
+                "external_id": "702",
+                "version_count": 1,
+                "versions": [dict(_version("35f7a7a17960241da394c3eb22b768db"), id="05689767-a5e1-4190-9b27-e763fd1064a3")],
+            },
+            {
+                "external_id": "5090",
+                "version_count": 1,
+                "versions": [dict(_version("1a7de573afaa7c44acd1cf998a449b50"), id="b14eeebe-bca3-4e2e-8b53-66beb496adc3")],
+            },
+        ],
+    }
+    baseline = {"2244": [], "702": [], "5090": []}
+    result = validate_dry_run_report(report, EXPECTED_CIDS, baseline_record_ids=baseline)
+    assert result.ok is False
+    assert result.reason_code == "queue_contamination"
+
+
+# --- validate_network_reachability -------------------------------------------------------------
+
+
+def test_validate_network_reachability_accepts_succeeded_valid_response():
+    report = {
+        "status": "succeeded",
+        "summary": {
+            "fetch_errors": [],
+            "results": [{"external_identifier": cid, "preferred_name": "X", "formula": "C1"} for cid in EXPECTED_CIDS],
+        },
+    }
+    result = validate_network_reachability(report, EXPECTED_CIDS)
+    assert result.ok is True
+
+
+def test_validate_network_reachability_rejects_partial_status():
+    """Corrige o defeito confirmado na Run 3 (item 9 da auditoria): o antigo passo aceitava
+    qualquer status != "failed", incluindo "partial". Esta validação exige succeeded, literal."""
+    report = {
+        "status": "partial",
+        "summary": {
+            "fetch_errors": [],
+            "results": [{"external_identifier": cid, "preferred_name": "X"} for cid in EXPECTED_CIDS],
+        },
+    }
+    result = validate_network_reachability(report, EXPECTED_CIDS)
+    assert result.ok is False
+    assert result.reason_code == "invalid_status"
+
+
+def test_validate_network_reachability_rejects_fetch_errors_present():
+    report = {
+        "status": "succeeded",
+        "summary": {
+            "fetch_errors": [{"external_identifier": "2244", "error": {"error_type": "network_error"}}],
+            "results": [{"external_identifier": cid, "preferred_name": "X"} for cid in EXPECTED_CIDS],
+        },
+    }
+    result = validate_network_reachability(report, EXPECTED_CIDS)
+    assert result.ok is False
+    assert result.reason_code == "fetch_errors_present"
+
+
+def test_validate_network_reachability_rejects_response_without_name_or_formula():
+    report = {
+        "status": "succeeded",
+        "summary": {
+            "fetch_errors": [],
+            "results": [
+                {"external_identifier": "2244", "preferred_name": None, "formula": None},
+                {"external_identifier": "702", "preferred_name": "Ethanol", "formula": "C2H6O"},
+                {"external_identifier": "5090", "preferred_name": "Rofecoxib", "formula": "C17H14O4S"},
+            ],
+        },
+    }
+    result = validate_network_reachability(report, EXPECTED_CIDS)
+    assert result.ok is False
+    assert result.reason_code == "invalid_response"
+    assert "2244" in result.reason
+
+
+# --- rejeição de status não-terminal-de-sucesso (cancelled/queued/running) ---------------------
+
+
+import pytest as _pytest
+
+
+@_pytest.mark.parametrize("status", ["cancelled", "queued", "running", "partial", "failed"])
+def test_validate_real_report_rejects_every_non_succeeded_status(status):
+    report = _successful_real_report({"2244": "a" * 64})
+    report["status"] = status
+    result = validate_real_report(report, ["2244"])
+    assert result.ok is False
+    assert result.reason_code == "invalid_status"
+
+
+@_pytest.mark.parametrize("status", ["cancelled", "queued", "running", "partial", "failed"])
+def test_validate_dry_run_report_rejects_every_non_succeeded_status(status):
+    report = {
+        "status": status,
+        "started_at": "2026-08-09T00:00:01+00:00",
+        "finished_at": "2026-08-09T00:00:02+00:00",
+        "summary": {"dry_run": True, "results": [{"external_identifier": cid} for cid in EXPECTED_CIDS]},
+        "error": None,
+        "raw_source_records": _empty_raw_records(EXPECTED_CIDS),
+    }
+    result = validate_dry_run_report(report, EXPECTED_CIDS, baseline_record_ids={})
+    assert result.ok is False
+    assert result.reason_code == "invalid_status"
 
 
 # --- validate_real_report ----------------------------------------------------------------------
