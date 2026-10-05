@@ -58,7 +58,11 @@ export interface FetchArtifactResult {
 }
 
 export async function sha256Hex(buffer: ArrayBuffer): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", buffer);
+  // Copia os bytes para uma TypedArray criada no realm atual. Em ambientes de teste
+  // com jsdom, um ArrayBuffer originado em outro realm pode falhar na conversão WebIDL
+  // de BufferSource feita por WebCrypto, mesmo contendo bytes válidos.
+  const bytes = new Uint8Array(new Uint8Array(buffer));
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
   return Array.from(new Uint8Array(digest))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
