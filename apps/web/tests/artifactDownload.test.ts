@@ -12,6 +12,29 @@ function bufferFromText(text: string): ArrayBuffer {
   return new TextEncoder().encode(text).buffer;
 }
 
+describe("sha256Hex", () => {
+  it("calcula um SHA-256 determinístico conhecido", async () => {
+    await expect(sha256Hex(bufferFromText("BioMatCAD Nexus"))).resolves.toBe(
+      "fdfe0fb700e7f940b1e2c81d6f0c25a3bae447e797649d3fde455ee540440c05",
+    );
+  });
+
+  it("normaliza o BufferSource para Uint8Array antes de chamar WebCrypto", async () => {
+    const digestMock = vi.fn().mockImplementation(async (_algorithm: AlgorithmIdentifier, data: BufferSource) => {
+      expect(data).toBeInstanceOf(Uint8Array);
+      return new ArrayBuffer(32);
+    });
+    vi.stubGlobal("crypto", { subtle: { digest: digestMock } });
+
+    try {
+      await expect(sha256Hex(bufferFromText("realm-safe"))).resolves.toBe("00".repeat(32));
+      expect(digestMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
 describe("fetchArtifactBuffer", () => {
   it("envia o token via header Authorization, nunca na URL", async () => {
     const buffer = bufferFromText("conteudo-stl-de-teste");
